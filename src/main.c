@@ -13,27 +13,46 @@
         }                                                                    \
     }
 
-static const CommandStringPair commandTable[] =
+static const char* BASE_URL = "https://node.testnet.alephium.org";
+
+static int check_httpcode
+    (
+    uint32_t			 httpCode
+    )
+{
+int					 success;
+
+success = 0;
+
+switch( httpCode )
     {
-        { CMD_BLOCKFLOW_CHAIN_INFO,	"/blockflow/chain-info",	writeCallbackBlockflowChainInfo	},
-        { CMD_INFOS_SELF_CLIQUE,	"/infos/self-clique",		writeCallbackInfosSelfClique	},
-        { CMD_INFOS_CHAIN,		    "/infos/chain",			    writeCallbackInfosChain		    },
-        { CMD_INFOS_CHAIN_PARAMS,	"/infos/chain-params",		writeCallbackInfosChainParams	},
-        { CMD_TRANSACTIONS,		    "/transactions",		    writeCallbackTransactions	    },
-        { CMD_BLOCKS,			    "/blocks",			        writeCallbackBlocks		        }
-    };
-static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
+    case 404:
+        printf( "HTTP 404 - Not Found\n" );
+        break;
+
+    case 200: /* OK */
+        success = 1;
+        break;
+
+    default:
+        printf( "HTTP error: %u\n", httpCode );
+        break;
+    }
+
+return( success );
+
+}	/* check_httpcode() */
 
 int main
     (
     void
     )
 {
-char                    url[128];
-CURL                   *curl;
-int                     i;
-
-const char* base_url = "https://node.testnet.alephium.org";
+CURL					*curl;
+int					 fromGroup;
+int					 toGroup;
+char				 url[128];
+uint32_t		     httpCode;
 
 curl = curl_easy_init();
 if( !curl )
@@ -42,42 +61,51 @@ if( !curl )
     return( -1 );
     }
 
-for( i = 0; i < CMD_COUNT; ++i )
+/* Loop all shards for CMD_BLOCKFLOW_CHAIN_INFO */
+for( fromGroup = 0; fromGroup < 4; fromGroup++ )
     {
-    uint32_t        httpCode;
-
-    memset( url, 0, sizeof(url) );
-
-    if (commandTable[i].command == CMD_BLOCKFLOW_CHAIN_INFO)
+    for( toGroup = 0; toGroup < 4; toGroup++ )
         {
-        snprintf(url, sizeof(url), "%s%s%s", base_url, commandTable[i].path, "/?fromGroup=0&toGroup=0" );
-        }
-    else
-        {
-        snprintf( url, sizeof(url), "%s%s", base_url, commandTable[i].path );
-        }
+        int				 shardPair[2];
 
-    curl_easy_setopt( curl, CURLOPT_URL, url );
-    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, commandTable[i].callback );
-    
-    CHECK_CURL( curl_easy_perform( curl ) );
-    curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
-        
-    switch( httpCode )
-        {
-        case 404:
-            printf( "HTTP 404 - Not Found\n" );
-            break;
+        shardPair[0] = fromGroup;
+        shardPair[1] = toGroup;
 
-        case 200: /* OK */
-            break;
+        snprintf
+            ( 
+            url, sizeof(url),
+            "%s%s/?fromGroup=%d&toGroup=%d",
+            BASE_URL,
+            commandTable[CMD_BLOCKFLOW_CHAIN_INFO].path,
+            fromGroup,
+            toGroup
+            );
+        curl_easy_setopt( curl, CURLOPT_URL, url );
+        curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, commandTable[CMD_BLOCKFLOW_CHAIN_INFO].callback );
+        curl_easy_setopt( curl, CURLOPT_WRITEDATA, shardPair );
 
-        default:
-            printf( "HTTP error: %ld\n", httpCode );
-            break;
+        CHECK_CURL( curl_easy_perform( curl ) );
+        curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
+
+        check_httpcode( httpCode );
         }
     }
 
+/* Other commands */
+for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
+    {
+    snprintf( url, sizeof(url), "%s%s", BASE_URL, commandTable[i].path );
+    curl_easy_setopt( curl, CURLOPT_URL, url );
+    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, commandTable[i].callback );
+    curl_easy_setopt( curl, CURLOPT_WRITEDATA, NULL );
+
+    CHECK_CURL( curl_easy_perform( curl ) );
+    curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
+
+    check_httpcode( httpCode );
+    }
+
+curl_easy_cleanup( curl );
 return( 0 );
 
-}   /* main() */
+}	/* main() */
