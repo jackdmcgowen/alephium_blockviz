@@ -1,99 +1,83 @@
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 #include <stdio.h>
+#include "commands.h"
 
-size_t write_callback
-	(
-	void 				*contents,
-	size_t 				 size,
-	size_t 				 nmemb,
-	void 				*userp
-	) 
-{
-char                   *payload;
-cJSON                  *json;
-//cJSON                  *shards;
-cJSON                  *height;
-
-printf( "%.*s\n", (int)(size * nmemb), (char*)contents );
-
-json = cJSON_ParseWithLength( contents, size * nmemb );
-if( !json ) 
-    {
-    printf( "JSON parse failed\n" );
-    return( size * nmemb );
+#define CHECK_CURL( x )                                                      \
+    {                                                                        \
+    CURLcode        res;                                                     \
+    res = x;                                                                 \
+    if( res != CURLE_OK )                                                    \
+        {                                                                    \
+        fprintf( stderr, "curl failed: %s\n", curl_easy_strerror(res) );     \
+        }                                                                    \
     }
-    
-//shards = cJSON_GetObjectItem( json, "currentShards" );
-height = cJSON_GetObjectItem( json, "currentHeight" );
 
-if( /* shards  && */ height)
+static const CommandStringPair commandTable[] =
     {
-    printf( /*"Shards: %d, */"Chain Height : % d\n", /* shards->valueint, */ height->valueint);
-    }
-else
-    {
-    printf( "Data missing\n" );
-    }
-    
-cJSON_Delete( json );
-
-return( size * nmemb );
-
-}   /* write_callback() */
+        { CMD_BLOCKFLOW_CHAIN_INFO,	"/blockflow/chain-info",	writeCallbackBlockflowChainInfo	},
+        { CMD_INFOS_SELF_CLIQUE,	"/infos/self-clique",		writeCallbackInfosSelfClique	},
+        { CMD_INFOS_CHAIN,		    "/infos/chain",			    writeCallbackInfosChain		    },
+        { CMD_INFOS_CHAIN_PARAMS,	"/infos/chain-params",		writeCallbackInfosChainParams	},
+        { CMD_TRANSACTIONS,		    "/transactions",		    writeCallbackTransactions	    },
+        { CMD_BLOCKS,			    "/blocks",			        writeCallbackBlocks		        }
+    };
+static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
 
 int main
     (
     void
     )
 {
+char                    url[128];
 CURL                   *curl;
+int                     i;
 
-const char* testnet_url = "https://node.testnet.alephium.org/blockflow/chain-info/?fromGroup=0&toGroup=3";
+const char* base_url = "https://node.testnet.alephium.org";
 
 curl = curl_easy_init();
-
-if( curl )
+if( !curl )
     {
-    CURLcode        res;
+    printf( "curl init failed\n" );
+    return( -1 );
+    }
+
+for( i = 0; i < CMD_COUNT; ++i )
+    {
     uint32_t        httpCode;
-    
-    curl_easy_setopt( curl, CURLOPT_URL, testnet_url );
-    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, write_callback );
-    
-    res = curl_easy_perform( curl );
-    
-    if( res != CURLE_OK )
+
+    memset( url, 0, sizeof(url) );
+
+    if (commandTable[i].command == CMD_BLOCKFLOW_CHAIN_INFO)
         {
-        fprintf( stderr, "curl failed: %s\n", curl_easy_strerror( res ) );
+        snprintf(url, sizeof(url), "%s%s%s", base_url, commandTable[i].path, "/?fromGroup=0&toGroup=0" );
         }
     else
-    {
+        {
+        snprintf( url, sizeof(url), "%s%s", base_url, commandTable[i].path );
+        }
+
+    curl_easy_setopt( curl, CURLOPT_URL, url );
+    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, commandTable[i].callback );
+    
+    CHECK_CURL( curl_easy_perform( curl ) );
     curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
+        
     switch( httpCode )
         {
         case 404:
             printf( "HTTP 404 - Not Found\n" );
             break;
 
-        case 200:
-            printf( "HTTP 200 - OK\n" );
+        case 200: /* OK */
             break;
 
         default:
             printf( "HTTP error: %ld\n", httpCode );
             break;
-
         }
     }
-        
-    curl_easy_cleanup( curl );
-    }
-else
-    {
-    printf( "curl init failed\n" );
-    }
-        
+
 return( 0 );
 
 }   /* main() */
