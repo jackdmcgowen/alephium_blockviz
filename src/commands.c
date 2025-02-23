@@ -8,15 +8,18 @@ static const char *BASE_URL = "https://node.testnet.alephium.org";
 
 const CommandStringPair commandTable[] =
     {
-        { CMD_BLOCKFLOW_CHAIN_INFO,         "/blockflow/chain-info"         },
-        { CMD_INFOS_SELF_CLIQUE,            "/infos/self-clique"            },
-        { CMD_INFOS_CHAIN_PARAMS,           "/infos/chain-params"           },
-        { CMD_TRANSACTIONS,                 "/transactions"                 },
-        { CMD_BLOCKS,                       "/blocks"                       },
-        { CMD_BLOCKFLOW_BLOCKS,             "/blockflow/blocks"             },
-        { CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS, "/blockflow/blocks-with-events" }
+        { CMD_BLOCKFLOW_CHAIN_INFO,         "/blockflow/chain-info/?fromGroup=%d&toGroup=%d" },
+        { CMD_INFOS_SELF_CLIQUE,            "/infos/self-clique"                             },
+        { CMD_INFOS_CHAIN_PARAMS,           "/infos/chain-params"                            },
+        { CMD_INFOS_NODE,                   "/infos/node"                                    },
+        { CMD_INFOS_VERSION,                "/infos/version"                                 },
+        { CMD_TRANSACTIONS,                 "/transactions"                                  },
+        { CMD_BLOCKS,                       "/blocks"                                        },
+        { CMD_BLOCKFLOW_BLOCKS,             "/blockflow/blocks/?fromTs=%lld&toTs=%lld"       },
+        { CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS, "/blockflow/blocks-with-events"                  }
     };
 static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
+
 
 size_t writeCallback
     (
@@ -33,14 +36,41 @@ char					*newBuffer;
 len = size * nmemb;
 response = (ResponseData*)userp;
 
-newBuffer = realloc( response->buffer, response->length + len + 1 );
-if( !newBuffer )
+/* Initial allocation if empty */
+if( !response->buffer )
     {
-    printf( "Memory allocation failed\n" );
-    return( 0 );
+    response->capacity = len > 16384 ? len : 16384; /* Start at 16KB or larger */
+    response->buffer = malloc( response->capacity );
+    if( !response->buffer )
+        {
+        printf( "Initial memory allocation failed\n" );
+        return( 0 );
+        }
+    response->length = 0;
     }
 
-response->buffer = newBuffer;
+/* Grow if needed - double capacity */
+if( response->length + len >= response->capacity )
+    {
+    size_t				newCapacity;
+    newCapacity = response->capacity * 2;
+    if( newCapacity < response->length + len )
+        {
+        newCapacity = response->length + len + 16384; /* Ensure enough space */
+        }
+
+    newBuffer = realloc( response->buffer, newCapacity );
+    if( !newBuffer )
+        {
+        printf( "Memory reallocation failed\n" );
+        return( 0 );
+        }
+
+    response->buffer = newBuffer;
+    response->capacity = newCapacity;
+    }
+
+/* Append data */
 memcpy( response->buffer + response->length, contents, len );
 response->length += len;
 response->buffer[response->length] = '\0';

@@ -11,6 +11,8 @@ typedef enum AlephiumCommand
     CMD_TRANSACTIONS,
     CMD_BLOCKS,
     CMD_INFOS_CHAIN_PARAMS,
+    CMD_INFOS_NODE,
+    CMD_INFOS_VERSION,
     CMD_BLOCKFLOW_BLOCKS,
     CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS,
     CMD_COUNT /* Sentinel */
@@ -20,6 +22,8 @@ typedef struct ResponseData
     {
     char				*buffer;
     size_t				 length;
+    size_t				 capacity;
+    uint32_t             httpCode;
     } ResponseData;
 
 typedef struct CommandStringPair

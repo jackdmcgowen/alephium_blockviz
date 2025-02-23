@@ -44,7 +44,7 @@ return( success );
 }	/* check_httpcode() */
 
 
-static void format_json_output
+static void format_output
     (
     cJSON				*json
     )
@@ -60,18 +60,96 @@ if( formatted )
 
 }	/* format_json_output() */
 
+
+void write_url
+    (
+    const char * const url,
+    CURL            * curl,
+    ResponseData *response
+    )
+{
+response->httpCode = 0;
+curl_easy_setopt( curl, CURLOPT_URL, url );
+curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, writeCallback );
+curl_easy_setopt( curl, CURLOPT_WRITEDATA, response );
+
+CHECK_CURL( curl_easy_perform( curl ) );
+curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &response->httpCode );
+
+}   /* write_url() */
+
+
+void get_shard_heights
+    (
+    char *              baseUrl,
+    CURL               *curl
+    )
+{
+char				    url[128];
+int					    fromGroup;
+int					    toGroup;
+ResponseData	       response[16];
+
+memset( response, 0, 16 * sizeof(ResponseData) );
+
+/* Loop all shards for CMD_BLOCKFLOW_CHAIN_INFO */
+for( fromGroup = 0; fromGroup < 4; fromGroup++ )
+    {
+    for( toGroup = 0; toGroup < 4; toGroup++ )
+        {
+        char path[128] = { 0 };
+
+        snprintf( path, sizeof(path),
+            commandTable[CMD_BLOCKFLOW_CHAIN_INFO].path, fromGroup, toGroup );
+
+        snprintf( url, sizeof(url), "%s%s", baseUrl, path );
+
+        write_url( url, curl, &response[ fromGroup * 4 + toGroup] );
+        }
+    }
+
+for (fromGroup = 0; fromGroup < 4; fromGroup++)
+    {
+    for (toGroup = 0; toGroup < 4; toGroup++)
+        {
+        int i = fromGroup * 4 + toGroup;
+
+        if( check_httpcode( response[i].httpCode ) )
+            {
+            cJSON* json;
+            cJSON* height;
+            ResponseData* prev;
+
+            json = cJSON_ParseWithLength( response[i].buffer, response[i].length );
+            if (json)
+                {
+                height = cJSON_GetObjectItem( json, "currentHeight" );
+
+                printf( "Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, height->valueint );
+
+                cJSON_Delete( json );
+                }
+
+            }
+
+        if( response[i].buffer )
+            {
+            free( response[i].buffer );
+            }
+        }
+    }
+}
+
+
 int main
     (
     void
     )
 {
 CURL					*curl;
-int					 fromGroup;
-int					 toGroup;
-char				 url[128];
-const char			*baseUrl;
-
-baseUrl = "https://node.testnet.alephium.org";
+char				    url[128];
+char                    path[128];
+const char *            baseUrl = "https://node.testnet.alephium.org";
 
 curl = curl_easy_init();
 if( !curl )
@@ -80,93 +158,47 @@ if( !curl )
     return( -1 );
     }
 
-/* Loop all shards for CMD_BLOCKFLOW_CHAIN_INFO */
-for( fromGroup = 0; fromGroup < 4; fromGroup++ )
-    {
-    for( toGroup = 0; toGroup < 4; toGroup++ )
-        {
-        uint32_t		 httpCode;
-        ResponseData		 response = { NULL, 0 };
-        int				 shardPair[2];
-        cJSON				*json;
-        cJSON				*height;
-
-        shardPair[0] = fromGroup;
-        shardPair[1] = toGroup;
-
-        snprintf( url, sizeof(url), "%s%s?fromGroup=%d&toGroup=%d", baseUrl, commandTable[CMD_BLOCKFLOW_CHAIN_INFO].path, fromGroup, toGroup );
-        curl_easy_setopt( curl, CURLOPT_URL, url );
-        curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, writeCallback );
-        curl_easy_setopt( curl, CURLOPT_WRITEDATA, &response );
-
-        CHECK_CURL( curl_easy_perform( curl ) );
-        curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
-
-        if( check_httpcode( httpCode ) )
-            {
-            json = cJSON_ParseWithLength( response.buffer, response.length );
-            if( json )
-                {
-                //format_json_output( json );
-                height = cJSON_GetObjectItem( json, "currentHeight" );
-                if( height )
-                    {
-                    printf( "Chain Height for shard [%d,%d]: %d\n", shardPair[0], shardPair[1], height->valueint );
-                    }
-                else
-                    {
-                    printf( "Height data missing\n" );
-                    }
-                cJSON_Delete( json );
-                }
-            else
-                {
-                printf( "JSON parse failed\n" );
-                }
-            }
-
-        free( response.buffer );
-        }
-    }
+get_shard_heights( baseUrl, curl );
 
 /* Other commands */
 for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     {
-    uint32_t		 httpCode;
-    ResponseData		 response = { NULL, 0 };
+    ResponseData		 response;
     cJSON				*json;
 
-    if (i == CMD_TRANSACTIONS || i == CMD_BLOCKS)
+    if( commandTable[i].command == CMD_TRANSACTIONS 
+     || commandTable[i].command == CMD_BLOCKS )
         continue;
 
-    if( i == CMD_BLOCKFLOW_BLOCKS )
+    memset( &response, 0, sizeof(response) );
+    memset( path, 0, sizeof(path) );
+
+    if(commandTable[i].command == CMD_BLOCKFLOW_BLOCKS )
         {
-        /* Poll last 1 minutes (60,000 ms) */
+        /* Poll last 5 minutes (300,000 ms) */
         long long		 now = (long long)time(NULL) * 1000;
-        snprintf( url, sizeof(url), "%s%s?fromTs=%lld&toTs=%lld", baseUrl, commandTable[i].path, now - 60000, now );
+
+        snprintf( path, sizeof(path), commandTable[i].path, now - 300000, now );
         }
     else
         {
-        snprintf( url, sizeof(url), "%s%s", baseUrl, commandTable[i].path );
+        snprintf( path, sizeof(path), commandTable[i].path );
         }
 
-    curl_easy_setopt( curl, CURLOPT_URL, url );
-    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, writeCallback );
-    curl_easy_setopt( curl, CURLOPT_WRITEDATA, &response );
+    snprintf( url, sizeof(url), "%s%s", baseUrl, path );
 
-    CHECK_CURL( curl_easy_perform( curl ) );
-    curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &httpCode );
-
-    if( check_httpcode( httpCode ) )
+    write_url( url, curl, &response );
+    if( check_httpcode( response.httpCode ) )
         {
         json = cJSON_ParseWithLength( response.buffer, response.length );
         if( json )
             {
-            //format_json_output( json );
+            format_output( json );
 
-            switch( i )
+            switch( commandTable[i].command )
                 {
                 case CMD_INFOS_SELF_CLIQUE:
+                    printf("Self-clique fetched\n");
                     break;
 
                 case CMD_TRANSACTIONS:
@@ -180,6 +212,13 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
                 case CMD_INFOS_CHAIN_PARAMS:
                     printf( "Chain params fetched\n" );
                     break;
+
+                case CMD_INFOS_NODE:
+                    printf( "Node info fetched\n" );
+                    break;
+
+                case CMD_INFOS_VERSION:
+                    printf( "Version info fetched\n" );
 
                 case CMD_BLOCKFLOW_BLOCKS:
                     {
