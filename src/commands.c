@@ -8,15 +8,15 @@ static const char *BASE_URL = "https://node.testnet.alephium.org";
 
 const CommandStringPair commandTable[] =
     {
-        { CMD_BLOCKFLOW_CHAIN_INFO,         "/blockflow/chain-info/?fromGroup=%d&toGroup=%d" },
-        { CMD_INFOS_SELF_CLIQUE,            "/infos/self-clique"                             },
-        { CMD_INFOS_CHAIN_PARAMS,           "/infos/chain-params"                            },
-        { CMD_INFOS_NODE,                   "/infos/node"                                    },
-        { CMD_INFOS_VERSION,                "/infos/version"                                 },
-        { CMD_TRANSACTIONS,                 "/transactions"                                  },
-        { CMD_BLOCKS,                       "/blocks"                                        },
-        { CMD_BLOCKFLOW_BLOCKS,             "/blockflow/blocks/?fromTs=%lld&toTs=%lld"       },
-        { CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS, "/blockflow/blocks-with-events"                  }
+        { CMD_BLOCKFLOW_CHAIN_INFO,         "/blockflow/chain-info/?fromGroup=%d&toGroup=%d"        },
+        { CMD_INFOS_SELF_CLIQUE,            "/infos/self-clique"                                    },
+        { CMD_INFOS_CHAIN_PARAMS,           "/infos/chain-params"                                   },
+        { CMD_INFOS_NODE,                   "/infos/node"                                           },
+        { CMD_INFOS_VERSION,                "/infos/version"                                        },
+        { CMD_TRANSACTIONS,                 "/transactions"                                         },
+        { CMD_BLOCKS,                       "/blocks"                                               },
+        { CMD_BLOCKFLOW_BLOCKS,             "/blockflow/blocks/?fromTs=%lld&toTs=%lld"              },
+        { CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS, "/blockflow/blocks-with-events/?fromTs=%lld&toTs=%lld" }
     };
 static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
 

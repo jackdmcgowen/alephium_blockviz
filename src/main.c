@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "commands.h"
+#include "config.h"
 
 #define CHECK_CURL( x )                                                      \
     {                                                                        \
@@ -118,7 +119,6 @@ for (fromGroup = 0; fromGroup < 4; fromGroup++)
             {
             cJSON* json;
             cJSON* height;
-            ResponseData* prev;
 
             json = cJSON_ParseWithLength( response[i].buffer, response[i].length );
             if (json)
@@ -149,7 +149,14 @@ int main
 CURL					*curl;
 char				    url[128];
 char                    path[128];
-const char *            baseUrl = "https://node.testnet.alephium.org";
+const char *            baseUrl;
+
+// Load the configs from the JSON file
+const char* filename = "config.json";
+ConfigArray config_array = load_configs( filename );
+
+//Get the base URL address
+baseUrl = config_array.configs[0].url;
 
 curl = curl_easy_init();
 if( !curl )
@@ -173,10 +180,11 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     memset( &response, 0, sizeof(response) );
     memset( path, 0, sizeof(path) );
 
-    if(commandTable[i].command == CMD_BLOCKFLOW_BLOCKS )
+    if( commandTable[i].command == CMD_BLOCKFLOW_BLOCKS 
+     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS )
         {
         /* Poll last 5 minutes (300,000 ms) */
-        long long		 now = (long long)time(NULL) * 1000;
+        int64_t		 now = (long long)time(NULL) * 1000;
 
         snprintf( path, sizeof(path), commandTable[i].path, now - 300000, now );
         }
@@ -230,25 +238,17 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
                         blockCount = cJSON_GetArraySize( blocks );
                         printf( "Polled %d blocks\n", blockCount );
                         }
-                    else
-                        {
-                        printf( "Blocks data missing\n" );
-                        }
                     break;
                     }
                 case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS:
                     {
                     cJSON			*blocks;
-                    blocks = cJSON_GetObjectItem( json, "blocks" );
+                    blocks = cJSON_GetObjectItem( json, "blocksAndEvents" );
                     if( blocks && cJSON_IsArray( blocks ) )
                         {
                         int		 blockCount;
                         blockCount = cJSON_GetArraySize( blocks );
                         printf( "Polled %d blocks with events\n", blockCount );
-                        }
-                    else
-                        {
-                        printf( "Blocks data missing\n" );
                         }
                     break;
                     }
@@ -265,6 +265,8 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     }
 
 curl_easy_cleanup( curl );
+
+free_configs( &config_array );
 
 return( 0 );
 
