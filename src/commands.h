@@ -1,76 +1,39 @@
-
 #ifndef COMMANDS_H
 #define COMMANDS_H
 
 #include <stdint.h>
 #include <stddef.h>
 
-typedef int AlephiumCommand;
-enum
+typedef enum AlephiumCommand
     {
     CMD_BLOCKFLOW_CHAIN_INFO,
     CMD_INFOS_SELF_CLIQUE,
-    CMD_INFOS_CHAIN,
-    CMD_INFOS_CHAIN_PARAMS,
     CMD_TRANSACTIONS,
     CMD_BLOCKS,
+    CMD_INFOS_CHAIN_PARAMS,
+    CMD_BLOCKFLOW_BLOCKS,
+    CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS,
+    CMD_COUNT /* Sentinel */
+    } AlephiumCommand;
 
-    CMD_COUNT
-    };
+typedef struct ResponseData
+    {
+    char				*buffer;
+    size_t				 length;
+    } ResponseData;
 
-typedef struct
+typedef struct CommandStringPair
     {
     AlephiumCommand		 command;
-    const char          *path;
-    size_t             (*callback)(void*, size_t, size_t, void*);
+    const char			*path;
     } CommandStringPair;
 
-size_t writeCallbackBlockflowChainInfo
+extern size_t writeCallback
     (
-    void                *contents,
+    void				*contents,
     size_t				 size,
     size_t				 nmemb,
-    void                *userp
-    );
-
-size_t writeCallbackInfosSelfClique
-    (
-    void                *contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void                *userp
-    );
-
-size_t writeCallbackInfosChain
-    (
-    void                *contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void                *userp
-    );
-
-size_t writeCallbackTransactions
-    (
-    void* contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void* userp
-    );
-
-size_t writeCallbackBlocks
-    (
-    void* contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void* userp
-    );
-
-size_t writeCallbackInfosChainParams
-    (
-    void* contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void* userp
+    void				*userp
     );
 
 extern const CommandStringPair commandTable[];

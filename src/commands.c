@@ -1,20 +1,24 @@
 #include <cjson/cJSON.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "commands.h"
+
+static const char *BASE_URL = "https://node.testnet.alephium.org";
 
 const CommandStringPair commandTable[] =
     {
-        { CMD_BLOCKFLOW_CHAIN_INFO, "/blockflow/chain-info",    writeCallbackBlockflowChainInfo    },
-        { CMD_INFOS_SELF_CLIQUE,    "/infos/self-clique",       writeCallbackInfosSelfClique       },
-        { CMD_INFOS_CHAIN,          "/infos/chain",             writeCallbackInfosChain            },
-        { CMD_INFOS_CHAIN_PARAMS,   "/infos/chain-params",      writeCallbackInfosChainParams      },
-        { CMD_TRANSACTIONS,         "/transactions",            writeCallbackTransactions          },
-        { CMD_BLOCKS,               "/blocks",                  writeCallbackBlocks                }
+        { CMD_BLOCKFLOW_CHAIN_INFO,         "/blockflow/chain-info"         },
+        { CMD_INFOS_SELF_CLIQUE,            "/infos/self-clique"            },
+        { CMD_INFOS_CHAIN_PARAMS,           "/infos/chain-params"           },
+        { CMD_TRANSACTIONS,                 "/transactions"                 },
+        { CMD_BLOCKS,                       "/blocks"                       },
+        { CMD_BLOCKFLOW_BLOCKS,             "/blockflow/blocks"             },
+        { CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS, "/blockflow/blocks-with-events" }
     };
 static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
 
-
-size_t writeCallbackBlockflowChainInfo
+size_t writeCallback
     (
     void				*contents,
     size_t				 size,
@@ -22,204 +26,25 @@ size_t writeCallbackBlockflowChainInfo
     void				*userp
     )
 {
-cJSON					*json;
-cJSON					*height;
-int					*shardPair;
+ResponseData			*response;
 size_t					 len;
+char					*newBuffer;
 
 len = size * nmemb;
+response = (ResponseData*)userp;
 
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
+newBuffer = realloc( response->buffer, response->length + len + 1 );
+if( !newBuffer )
     {
-    printf( "JSON parse failed\n" );
-    return( len );
+    printf( "Memory allocation failed\n" );
+    return( 0 );
     }
 
-height = cJSON_GetObjectItem( json, "currentHeight" );
-shardPair = (int*)userp;
+response->buffer = newBuffer;
+memcpy( response->buffer + response->length, contents, len );
+response->length += len;
+response->buffer[response->length] = '\0';
 
-if( height )
-    {
-    printf( "Chain Height for shard [%d,%d]: %d\n", shardPair[0], shardPair[1], height->valueint );
-    }
-else
-    {
-    printf( "Height data missing\n" );
-    }
-
-cJSON_Delete( json );
 return( len );
 
-}	/* writeCallbackBlockflowChainInfo() */
-
-
-size_t writeCallbackInfosSelfClique
-    (
-    void				*contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void				*userp
-    )
-{
-cJSON					*json;
-cJSON					*numNodes;
-size_t					 len;
-
-len = size * nmemb;
-
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
-    {
-    printf( "JSON parse failed\n" );
-    return( len );
-    }
-
-numNodes = cJSON_GetObjectItem( json, "numNodes" );
-
-if( numNodes )
-    {
-    int				 totalShards;
-    totalShards = numNodes->valueint * numNodes->valueint;
-    printf( "Nodes: %d, Total Shards (G*G): %d\n", numNodes->valueint, totalShards );
-    }
-else
-    {
-    printf( "Nodes data missing\n" );
-    }
-
-cJSON_Delete( json );
-return( len );
-
-}	/* writeCallbackInfosSelfClique() */
-
-
-size_t writeCallbackInfosChain
-    (
-    void				*contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void				*userp
-    )
-{
-cJSON					*json;
-cJSON					*shards;
-size_t					 len;
-
-len = size * nmemb;
-
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
-    {
-    printf( "JSON parse failed\n" );
-    return( len );
-    }
-
-shards = cJSON_GetObjectItem( json, "currentShards" );
-
-if( shards )
-    {
-    printf( "Current Shards: %d\n", shards->valueint );
-    }
-else
-    {
-    printf( "Shards data missing\n" );
-    }
-
-cJSON_Delete( json );
-return( len );
-
-}	/* writeCallbackInfosChain() */
-
-
-size_t writeCallbackTransactions
-    (
-    void				*contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void				*userp
-    )
-{
-cJSON					*json;
-size_t					 len;
-
-len = size * nmemb;
-
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
-    {
-    printf( "JSON parse failed\n" );
-    return( len );
-    }
-
-printf( "Transactions fetched\n" );
-cJSON_Delete( json );
-return( len );
-
-}	/* writeCallbackTransactions() */
-
-
-size_t writeCallbackBlocks
-    (
-    void				*contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void				*userp
-    )
-{
-cJSON					*json;
-size_t					 len;
-
-len = size * nmemb;
-
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
-    {
-    printf( "JSON parse failed\n" );
-    return( len );
-    }
-
-printf( "Blocks fetched\n" );
-cJSON_Delete( json );
-return( len );
-
-}	/* writeCallbackBlocks() */
-
-
-size_t writeCallbackInfosChainParams
-    (
-    void				*contents,
-    size_t				 size,
-    size_t				 nmemb,
-    void				*userp
-    )
-{
-cJSON					*json;
-size_t					 len;
-
-len = size * nmemb;
-
-printf( "Raw response: %.*s\n", (int)len, (char*)contents );
-
-json = cJSON_ParseWithLength( contents, len );
-if( !json )
-    {
-    printf( "JSON parse failed\n" );
-    return( len );
-    }
-
-printf( "Chain params fetched\n" );
-cJSON_Delete( json );
-return( len );
-
-}	/* writeCallbackInfosChainParams() */
+}	/* writeCallback() */
