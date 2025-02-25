@@ -16,6 +16,8 @@
         }                                                                    \
     }
 
+#define GET_OBJECT_ITEM( obj, x ) cJSON *x = cJSON_GetObjectItem( obj, #x )
+
 static int check_httpcode
     (
     uint32_t			 httpCode
@@ -60,6 +62,25 @@ if( formatted )
     }
 
 }	/* format_json_output() */
+
+
+static cJSON *read_response
+    (
+    ResponseData       *response
+    )
+{
+cJSON                  *obj;
+
+obj = cJSON_ParseWithLength( response->buffer, response->length );
+
+if( !obj )
+    {
+    printf( "JSON parse failed\n" );
+    }
+
+return( obj );
+
+}   /* read_response() */
 
 
 void write_url
@@ -118,18 +139,17 @@ for (fromGroup = 0; fromGroup < 4; fromGroup++)
 
         if( check_httpcode( response[i].httpCode ) )
             {
-            cJSON* json;
-            cJSON* height;
+            cJSON* obj;
 
-            json = cJSON_ParseWithLength( response[i].buffer, response[i].length );
-            if (json)
+            obj = read_response( &response[i] );
+            if( obj )
                 {
-                height = cJSON_GetObjectItem( json, "currentHeight" );
+                GET_OBJECT_ITEM( obj, currentHeight );
 
-                heights[i] = height->valueint;
-                printf( "Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, height->valueint );
+                heights[i] = currentHeight->valueint;
+                printf( "Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, currentHeight->valueint );
 
-                cJSON_Delete( json );
+                cJSON_Delete( obj );
                 }
 
             }
@@ -154,11 +174,11 @@ char                    path[128];
 const char *            baseUrl;
 int                     heights[16];
 
-// Load the configs from the JSON file
+  /* Load the configs from the JSON file */
 const char* filename = "config.json";
 ConfigArray config_array = load_configs( filename );
 
-//Get the base URL address
+  /* Get the base URL address */
 baseUrl = config_array.configs[0].url;
 
 curl = curl_easy_init();
@@ -173,10 +193,10 @@ memset( heights, 0, sizeof(heights) );
 get_shard_heights( baseUrl, curl, heights );
 
 /* Other commands */
-for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
+for( int i = 0; i < CMD_COUNT; i++ )
     {
     ResponseData		 response;
-    cJSON				*json;
+    cJSON				*obj;
 
     if( commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
      || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_INTERVAL
@@ -185,7 +205,6 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
 
     memset( &response, 0, sizeof(response) );
     memset( path, 0, sizeof(path) );
-
 
     switch( commandTable[i].command )
         {
@@ -215,92 +234,88 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     snprintf( url, sizeof(url), "%s%s", baseUrl, path );
 
     write_url( url, curl, &response );
-    if( check_httpcode( response.httpCode ) )
+    if( !check_httpcode( response.httpCode ) )
         {
-        json = cJSON_ParseWithLength( response.buffer, response.length );
-        if( json )
-            {
-            format_output( json );
-
-            switch( commandTable[i].command )
-                {
-                case CMD_INFOS_SELF_CLIQUE:
-                    printf("Self-clique fetched\n");
-                    break;
-
-                case CMD_INFOS_CHAIN_PARAMS:
-                    printf( "Chain params fetched\n" );
-                    break;
-
-                case CMD_INFOS_NODE:
-                    printf( "Node info fetched\n" );
-                    break;
-
-                case CMD_INFOS_VERSION:
-                    printf( "Version info fetched\n" );
-                    break;
-
-                case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
-                case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
-                    {
-                    cJSON			*blocks;
-                    blocks = cJSON_GetObjectItem( json, "blocks" );
-                    if( blocks && cJSON_IsArray( blocks ) )
-                        {
-                        int		 blockCount;
-                        blockCount = cJSON_GetArraySize( blocks );
-                        printf( "Polled %d blocks\n", blockCount );
-                        }
-                    break;
-                    }
-                case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_BLOCKHASH:
-                case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL:
-                    {
-                    cJSON			*blocks;
-                    blocks = cJSON_GetObjectItem( json, "blocksAndEvents" );
-                    if( blocks && cJSON_IsArray( blocks ) )
-                        {
-                        int		 blockCount;
-                        blockCount = cJSON_GetArraySize( blocks );
-                        printf( "Polled %d blocks with events\n", blockCount );
-                        }
-                    break;
-                    }
-                case CMD_BLOCKFLOW_HASHES:
-                    {
-                    cJSON           *headers;
-                    headers = cJSON_GetObjectItem( json, "headers" );
-                    if ( headers && cJSON_IsArray( headers ) )
-                        {
-                        int		 headerCount;
-                        headerCount = cJSON_GetArraySize( headers );
-                        printf( "Polled %d hashes\n", headerCount );
-                        }
-                    break;
-                    }
-                case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
-                    {
-                    cJSON           *headers;
-                    headers = cJSON_GetObjectItem( json, "headers" );
-                    if (headers && cJSON_IsArray( headers ) )
-                        {
-                        int		 headerCount;
-                        headerCount = cJSON_GetArraySize( headers );
-                        printf( "Polled %d hashes\n", headerCount );
-                        }
-                    break;
-                    }
-                }
-            
-            cJSON_Delete( json );
-            }
-        else
-            {
-            printf( "JSON parse failed\n" );
-            }
+        continue;
         }
 
+    obj = read_response( &response );
+    if( !obj )
+        {
+        continue;
+        } 
+    
+    switch( commandTable[i].command )
+        {
+        case CMD_INFOS_SELF_CLIQUE:
+            printf("Self-clique fetched\n");
+            format_output( obj );
+            break;
+
+        case CMD_INFOS_CHAIN_PARAMS:
+            printf( "Chain params fetched\n" );
+            format_output( obj );
+            break;
+
+        case CMD_INFOS_NODE:
+            printf( "Node info fetched\n" );
+            format_output( obj );
+            break;
+
+        case CMD_INFOS_VERSION:
+            printf( "Version info fetched\n" );
+            format_output( obj );
+            break;
+
+        case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
+        case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
+            {
+            GET_OBJECT_ITEM( obj, blocks );
+
+            if( blocks && cJSON_IsArray( blocks ) )
+                {
+                int		 blockCount;
+                blockCount = cJSON_GetArraySize( blocks );
+                printf( "Polled %d blocks\n", blockCount );
+                format_output( blocks );
+                }
+            break;
+            }
+        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_BLOCKHASH:
+        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL:
+            {
+            GET_OBJECT_ITEM( obj, blocksAndEvents );
+            if(blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
+                {
+                int		 blockCount;
+                blockCount = cJSON_GetArraySize( blocksAndEvents );
+                printf( "Polled %d blocks with events\n", blockCount );
+                format_output( blocksAndEvents );
+                }
+            break;
+            }
+        case CMD_BLOCKFLOW_HASHES:
+            {
+            GET_OBJECT_ITEM( obj, headers );
+            if ( headers && cJSON_IsArray( headers ) )
+                {
+                int		 headerCount;
+                headerCount = cJSON_GetArraySize( headers );
+                printf( "Polled %d hashes\n", headerCount );
+                format_output( headers );
+                }
+            break;
+            }
+        case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
+            {
+            format_output( obj );
+            break;
+            }
+        }
+            
+    cJSON_Delete( obj );
     free( response.buffer );
+
     }
 
 curl_easy_cleanup( curl );
