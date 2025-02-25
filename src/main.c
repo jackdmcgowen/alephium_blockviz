@@ -6,6 +6,7 @@
 #include <time.h>
 #include "commands.h"
 #include "config.h"
+#include "dag.h"
 
 CURL            *curl;
 const char     *baseUrl;
@@ -56,6 +57,10 @@ int main
     )
 {
 int                     heights[4][4];
+int64_t                 lastPollTs; /* Last timestamp per shard */
+Dag                     dag;
+int                     i;
+int                     j;
 
   /* Load the configs from the JSON file */
 ConfigArray config_array = load_configs( "config.json" );
@@ -70,138 +75,80 @@ if( !curl )
     return( -1 );
     }
 
+dag_init( &dag );
 get_heights( heights );
 
-/* Other commands */
-for( int i = 0; i < CMD_COUNT; i++ )
+lastPollTs = (int64_t)time(NULL) * 1000 - 300000; /* Start 5 min back */
+
+/* Poll every 16 seconds */
+while( 1 )
     {
-    ResponseData		 response = { 0 };
-    cJSON				*obj = NULL;
-    int64_t		         now = (int64_t)time(NULL) * 1000;
-    const char* blockhash = "00000000000005f9fee8769b1948f5272635b5079059e31dd6e0ab3031424b50";
+    ResponseData    response = { NULL, 0, 0 };
+    cJSON          *obj;
+    int64_t         now = (int64_t)time(NULL) * 1000;
 
-    switch( i )
-        {
-        case CMD_BLOCKFLOW_CHAIN_INFO:
-            obj = get_blockflow_chain_info( 0, 0 );
-            printf( "Chain params fetched\n" );
-            format_output( obj );
-            break;
-
-        case CMD_INFOS_CHAIN_PARAMS:
-            obj = get_infos_chain_params();
-            printf( "Chain params fetched\n" );
-            format_output( obj );
-            break;
-
-        case CMD_INFOS_NODE:
-            obj = get_infos_node();
-            printf( "Node info fetched\n" );
-            format_output( obj );
-            break;
-
-        case CMD_INFOS_SELF_CLIQUE:
-            obj = get_infos_self_clique();
-            printf( "Self-clique fetched\n" );
-            format_output( obj );
-            break;
-
-        case CMD_INFOS_VERSION:
-            obj = get_infos_version();
-            printf( "Version info fetched\n" );
-            format_output( obj );
-            break;
-
-        case CMD_BLOCKFLOW_HASHES:
-            obj = get_blockflow_hashes( 0, 0, heights[0][0] );
-            {
-            GET_OBJECT_ITEM( obj, headers );
-            if( headers && cJSON_IsArray( headers ) )
-                {
-                int		 headerCount;
-                headerCount = cJSON_GetArraySize( headers );
-                printf( "Polled %d hashes\n", headerCount );
-                format_output( headers );
-                }
-            }
-            break;
-
-        case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
-            obj = get_blockflow_blocks( now - (300 * 1000), now );
-            {
-            GET_OBJECT_ITEM( obj, blocks );
-            if( blocks && cJSON_IsArray( blocks ) )
-                {
-                int		 blockCount;
-                blockCount = cJSON_GetArraySize( blocks );
-                printf( "Polled %d blocks\n", blockCount );
-                format_output( blocks );
-                }
-            }
-            break;
-
-        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL:
-            /* Poll last 5 minutes (300,000 ms) */
-            obj = get_blockflow_blocks_with_events( now - (300 * 1000), now );
-            {
-            GET_OBJECT_ITEM( obj, blocksAndEvents );
-            if( blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
-                {
-                int		 blockCount;
-                blockCount = cJSON_GetArraySize( blocksAndEvents );
-                printf( "Polled %d blocks with events\n", blockCount );
-                format_output( blocksAndEvents );
-                }
-            }
-            break;
-
-        case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
-            obj = get_blockflow_blocks_blockhash( blockhash );
-            {
-            GET_OBJECT_ITEM(obj, blocks);
-            if( blocks && cJSON_IsArray( blocks ) )
-                {
-                int		 blockCount;
-                blockCount = cJSON_GetArraySize( blocks );
-                printf( "Polled %d blocks\n", blockCount );
-                format_output( blocks );
-                }
-            }
-            break;
-
-        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_BLOCKHASH:
-            obj = get_blockflow_blocks_with_events_blockhash( blockhash );
-            {
-            GET_OBJECT_ITEM( obj, blocksAndEvents );
-            if( blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
-                {
-                int		 blockCount;
-                blockCount = cJSON_GetArraySize( blocksAndEvents );
-                printf( "Polled %d blocks with events\n", blockCount );
-                format_output( blocksAndEvents );
-                }
-            }
-            break;
-
-        case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
-            obj = get_blockflow_headers_blockhash( blockhash );
-            format_output( obj );
-            break;
-
-        default:
-            printf( "Unknown Command %d \n", i );
-            break;
-        }
-    
+    printf( "\nPolling blockflow at %lld\n", now );
+    /* Poll blocks since last timestamp */
+    obj = get_blockflow_blocks_with_events( lastPollTs, now );
     if( obj )
         {
+        GET_OBJECT_ITEM( obj, blocksAndEvents );
+        if( blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
+            {
+            int         count;
+            cJSON      *iter;
+            cJSON      *shard;
+
+            count = cJSON_GetArraySize( blocksAndEvents );
+            printf( "Polled %d blocks and events\n", count );
+
+            for( i = 0; i < count; i++ )
+                {
+                int blocksEventsCount;
+                
+                shard = cJSON_GetArrayItem( blocksAndEvents, i );
+                //format_output( shard );
+
+                if( shard && cJSON_IsArray( shard ) )
+                    {
+                    blocksEventsCount = cJSON_GetArraySize( shard );
+                    for( j = 0; j < blocksEventsCount; ++j )
+                        {
+                        iter = cJSON_GetArrayItem( shard, j );
+
+                        GET_OBJECT_ITEM( iter, block );
+
+                        if( block )
+                            {
+                            GET_OBJECT_ITEM( block, chainFrom );
+                            GET_OBJECT_ITEM( block, chainTo );
+                            GET_OBJECT_ITEM( block, height );
+
+                            if( chainFrom && chainTo && height )
+                                {
+                                dag_add_block( &dag, chainFrom->valueint, chainTo->valueint, height->valueint );
+
+                                if( heights[chainFrom->valueint][chainTo->valueint] < height->valueint )
+                                    {
+                                    heights[chainFrom->valueint][chainTo->valueint] = height->valueint;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+        lastPollTs = now; /* Update last poll time */
         cJSON_Delete( obj );
         }
 
+    dag_print( &dag );
+    Sleep( 16000 ); /* 16 seconds */
     }
 
+dag_free( &dag );
 curl_easy_cleanup( curl );
-
 free_configs( &config_array );
 
 return( 0 );
