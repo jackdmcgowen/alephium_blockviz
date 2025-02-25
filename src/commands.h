@@ -29,12 +29,6 @@ typedef struct ResponseData
     uint32_t             httpCode;
     } ResponseData;
 
-typedef struct CommandStringPair
-    {
-    AlephiumCommand		 command;
-    const char			*path;
-    } CommandStringPair;
-
 extern size_t writeCallback
     (
     void				*contents,
@@ -43,6 +37,6 @@ extern size_t writeCallback
     void				*userp
     );
 
-extern const CommandStringPair commandTable[];
+extern const char * const commandTable[];
 
 #endif /* COMMANDS_H */

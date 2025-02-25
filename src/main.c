@@ -123,7 +123,7 @@ for( fromGroup = 0; fromGroup < 4; fromGroup++ )
         char path[128] = { 0 };
 
         snprintf( path, sizeof(path),
-            commandTable[CMD_BLOCKFLOW_CHAIN_INFO].path, fromGroup, toGroup );
+            commandTable[CMD_BLOCKFLOW_CHAIN_INFO], fromGroup, toGroup );
 
         snprintf( url, sizeof(url), "%s%s", baseUrl, path );
 
@@ -198,24 +198,25 @@ for( int i = 0; i < CMD_COUNT; i++ )
     ResponseData		 response;
     cJSON				*obj;
 
-    if( commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
-     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_INTERVAL
-     || commandTable[i].command == CMD_BLOCKFLOW_CHAIN_INFO )
+
+    if( i == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
+     || i == CMD_BLOCKFLOW_BLOCKS_INTERVAL
+     || i == CMD_BLOCKFLOW_CHAIN_INFO )
         continue;
 
     memset( &response, 0, sizeof(response) );
     memset( path, 0, sizeof(path) );
 
-    switch( commandTable[i].command )
+    switch( i )
         {
         case CMD_BLOCKFLOW_HASHES:
-            snprintf( path, sizeof(path), commandTable[i].path, 0, 0, heights[0] );
+            snprintf( path, sizeof(path), commandTable[i], 0, 0, heights[0] );
             break;
 
         case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
             /* Poll last 5 minutes (300,000 ms) */
-            int64_t		 now = (long long)time(NULL) * 1000;
-            snprintf( path, sizeof(path), commandTable[i].path, now - 300000, now );
+            int64_t		 now = (int64_t)time( NULL ) * 1000;
+            snprintf( path, sizeof(path), commandTable[i], now - (300 * 1000), now );
             break;
 
         case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
@@ -223,11 +224,11 @@ for( int i = 0; i < CMD_COUNT; i++ )
 
         case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
             const char* blockhash = "00000000000005f9fee8769b1948f5272635b5079059e31dd6e0ab3031424b50";
-            snprintf( path, sizeof(path), commandTable[i].path, blockhash );
+            snprintf( path, sizeof(path), commandTable[i], blockhash );
             break;
 
         default:
-            snprintf( path, sizeof(path), commandTable[i].path );
+            snprintf( path, sizeof(path), commandTable[i] );
             break;
         }
 
@@ -245,7 +246,7 @@ for( int i = 0; i < CMD_COUNT; i++ )
         continue;
         } 
     
-    switch( commandTable[i].command )
+    switch( i )
         {
         case CMD_INFOS_SELF_CLIQUE:
             printf("Self-clique fetched\n");
