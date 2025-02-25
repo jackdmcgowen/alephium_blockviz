@@ -178,10 +178,9 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     ResponseData		 response;
     cJSON				*json;
 
-    if( commandTable[i].command == CMD_TRANSACTIONS 
-     || commandTable[i].command == CMD_BLOCKS 
-     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
-     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_INTERVAL )
+    if( commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
+     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_INTERVAL
+     || commandTable[i].command == CMD_BLOCKFLOW_CHAIN_INFO )
         continue;
 
     memset( &response, 0, sizeof(response) );
@@ -227,14 +226,6 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
                 {
                 case CMD_INFOS_SELF_CLIQUE:
                     printf("Self-clique fetched\n");
-                    break;
-
-                case CMD_TRANSACTIONS:
-                    printf( "Transactions fetched\n" );
-                    break;
-
-                case CMD_BLOCKS:
-                    printf( "Blocks fetched\n" );
                     break;
 
                 case CMD_INFOS_CHAIN_PARAMS:
