@@ -6,7 +6,7 @@
 
 #define MAX_TOKEN_NAME_SZ ( 128 )
 
-// Macro to map a JSON field to a struct member
+  /* Macro to map a JSON field to a struct member */
 #define MAP_JSON_FIELD(json_obj, struct_ptr, field) \
     do \
     { \
@@ -30,7 +30,7 @@
         } \
     } while (0)
 
-// Function to read file contents into a string
+
 static char* read_file
     (
     const char* filename
@@ -64,7 +64,7 @@ return buffer;
 
 }   /* read_file() */
 
-// Load configs from a JSON file
+
 ConfigArray load_configs
     (
     const char* filename
@@ -72,14 +72,14 @@ ConfigArray load_configs
 {
 ConfigArray config_array = { NULL, 0 };
 
-// Read the JSON file
+  /*  Read the JSON file */
 char* json_string = read_file(filename);
 if (!json_string)
     {
-    return config_array; // Return empty array on failure
+    return config_array;
     }
 
-// Parse JSON string with cJSON
+  /* Parse JSON string with cJSON */
 cJSON* root = cJSON_Parse(json_string);
 if (root == NULL)
     {
@@ -88,7 +88,7 @@ if (root == NULL)
     return config_array;
     }
 
-// Check if root is an array
+  /* Check if root is an array */
 if (!cJSON_IsArray(root))
     {
     printf("Error: JSON root is not an array\n");
@@ -97,7 +97,7 @@ if (!cJSON_IsArray(root))
     return config_array;
     }
 
-// Get the number of items in the array
+  /* Get the number of items in the array */
 int array_size = cJSON_GetArraySize(root);
 if (array_size == 0)
     {
@@ -106,7 +106,7 @@ if (array_size == 0)
     return config_array;
     }
 
-// Allocate memory for configs
+  /* Allocate memory for configs */
 config_array.configs = (Config*)calloc(array_size, sizeof(Config));
 if (!config_array.configs)
     {
@@ -117,10 +117,8 @@ if (!config_array.configs)
     }
 config_array.count = array_size;
 
-// Iterate over the array and map each object
-
+/* Iterate over the array and map each object */
 cJSON* item;
-
 int i = 0;
 cJSON_ArrayForEach(item, root)
     {
@@ -128,11 +126,11 @@ cJSON_ArrayForEach(item, root)
     i++;
     }
 
-// Cleanup JSON resources
+  /* Cleanup JSON resources */
 cJSON_Delete(root);
 free(json_string);
 
-// Print the results
+  /* Print the results */
 if( config_array.count > 0 && config_array.configs )
     {
     printf( "Found %d config entries\n", config_array.count );
@@ -157,7 +155,7 @@ return config_array;
 
 }   /* load_configs() */
 
-// Free the config array and its contents
+
 void free_configs
     (
     ConfigArray *config_array
@@ -167,10 +165,10 @@ if (config_array && config_array->configs)
     {
     for (int i = 0; i < config_array->count; i++)
         {
-        free(config_array->configs[i].url); // Free each URL string
+        free( config_array->configs[i].url ); 
         }
     
-    free(config_array->configs); // Free the array
+    free( config_array->configs );
     config_array->configs = NULL;
     config_array->count = 0;
     }

@@ -1,5 +1,6 @@
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -15,7 +16,6 @@
         fprintf( stderr, "curl failed: %s\n", curl_easy_strerror(res) );     \
         }                                                                    \
     }
-
 #define GET_OBJECT_ITEM( obj, x ) cJSON *x = cJSON_GetObjectItem( obj, #x )
 
 static int check_httpcode
@@ -83,6 +83,25 @@ return( obj );
 }   /* read_response() */
 
 
+static void build_request
+    (
+    char           *url,
+    const char     *format,
+    ...
+    )
+{
+va_list                 argv;
+va_start               ( argv, format );
+vsnprintf( url, 128, format, argv );
+va_end( argv );
+
+}   /* build_request() */
+
+#define build_request_0( x )          build_request( url, commandTable[x], baseUrl )
+#define build_request_1( x, a )       build_request( url, commandTable[x], baseUrl, a )
+#define build_request_2( x, a, b )    build_request( url, commandTable[x], baseUrl, a, b )
+#define build_request_3( x, a, b, c ) build_request( url, commandTable[x], baseUrl, a, b, c )
+
 void write_url
     (
     const char * const url,
@@ -108,24 +127,21 @@ void get_shard_heights
     int                *heights
     )
 {
-char				    url[128];
 int					    fromGroup;
 int					    toGroup;
-ResponseData	       response[16];
+char				    url[128];
+ResponseData	        response[16];
 
 memset( response, 0, 16 * sizeof(ResponseData) );
+memset(url, 0, sizeof(url));
 
 /* Loop all shards for CMD_BLOCKFLOW_CHAIN_INFO */
 for( fromGroup = 0; fromGroup < 4; fromGroup++ )
     {
     for( toGroup = 0; toGroup < 4; toGroup++ )
         {
-        char path[128] = { 0 };
 
-        snprintf( path, sizeof(path),
-            commandTable[CMD_BLOCKFLOW_CHAIN_INFO], fromGroup, toGroup );
-
-        snprintf( url, sizeof(url), "%s%s", baseUrl, path );
+        build_request_2( CMD_BLOCKFLOW_CHAIN_INFO, fromGroup, toGroup );
 
         write_url( url, curl, &response[ fromGroup * 4 + toGroup] );
         }
@@ -168,15 +184,13 @@ int main
     void
     )
 {
-CURL					*curl;
 char				    url[128];
-char                    path[128];
-const char *            baseUrl;
 int                     heights[16];
+const char             *baseUrl;
+CURL				   *curl;
 
   /* Load the configs from the JSON file */
-const char* filename = "config.json";
-ConfigArray config_array = load_configs( filename );
+ConfigArray config_array = load_configs( "config.json" );
 
   /* Get the base URL address */
 baseUrl = config_array.configs[0].url;
@@ -198,25 +212,22 @@ for( int i = 0; i < CMD_COUNT; i++ )
     ResponseData		 response;
     cJSON				*obj;
 
-
-    if( i == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
-     || i == CMD_BLOCKFLOW_BLOCKS_INTERVAL
-     || i == CMD_BLOCKFLOW_CHAIN_INFO )
+    if( i == CMD_BLOCKFLOW_CHAIN_INFO )
         continue;
 
     memset( &response, 0, sizeof(response) );
-    memset( path, 0, sizeof(path) );
 
     switch( i )
         {
         case CMD_BLOCKFLOW_HASHES:
-            snprintf( path, sizeof(path), commandTable[i], 0, 0, heights[0] );
+            build_request_3( i, 0, 0, heights[0] );
             break;
 
         case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
+        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL:
             /* Poll last 5 minutes (300,000 ms) */
             int64_t		 now = (int64_t)time( NULL ) * 1000;
-            snprintf( path, sizeof(path), commandTable[i], now - (300 * 1000), now );
+            build_request_2( i, now - (300 * 1000), now );
             break;
 
         case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
@@ -224,15 +235,13 @@ for( int i = 0; i < CMD_COUNT; i++ )
 
         case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
             const char* blockhash = "00000000000005f9fee8769b1948f5272635b5079059e31dd6e0ab3031424b50";
-            snprintf( path, sizeof(path), commandTable[i], blockhash );
+            build_request_1( i, blockhash );
             break;
 
         default:
-            snprintf( path, sizeof(path), commandTable[i] );
+            build_request_0( i );
             break;
         }
-
-    snprintf( url, sizeof(url), "%s%s", baseUrl, path );
 
     write_url( url, curl, &response );
     if( !check_httpcode( response.httpCode ) )
