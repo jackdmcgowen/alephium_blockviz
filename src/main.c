@@ -83,7 +83,8 @@ curl_easy_getinfo( curl, CURLINFO_RESPONSE_CODE, &response->httpCode );
 void get_shard_heights
     (
     char *              baseUrl,
-    CURL               *curl
+    CURL               *curl,
+    int                *heights
     )
 {
 char				    url[128];
@@ -125,6 +126,7 @@ for (fromGroup = 0; fromGroup < 4; fromGroup++)
                 {
                 height = cJSON_GetObjectItem( json, "currentHeight" );
 
+                heights[i] = height->valueint;
                 printf( "Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, height->valueint );
 
                 cJSON_Delete( json );
@@ -150,6 +152,7 @@ CURL					*curl;
 char				    url[128];
 char                    path[128];
 const char *            baseUrl;
+int                     heights[16];
 
 // Load the configs from the JSON file
 const char* filename = "config.json";
@@ -165,7 +168,9 @@ if( !curl )
     return( -1 );
     }
 
-get_shard_heights( baseUrl, curl );
+memset( heights, 0, sizeof(heights) );
+
+get_shard_heights( baseUrl, curl, heights );
 
 /* Other commands */
 for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
@@ -174,23 +179,38 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
     cJSON				*json;
 
     if( commandTable[i].command == CMD_TRANSACTIONS 
-     || commandTable[i].command == CMD_BLOCKS )
+     || commandTable[i].command == CMD_BLOCKS 
+     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL
+     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_INTERVAL )
         continue;
 
     memset( &response, 0, sizeof(response) );
     memset( path, 0, sizeof(path) );
 
-    if( commandTable[i].command == CMD_BLOCKFLOW_BLOCKS 
-     || commandTable[i].command == CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS )
-        {
-        /* Poll last 5 minutes (300,000 ms) */
-        int64_t		 now = (long long)time(NULL) * 1000;
 
-        snprintf( path, sizeof(path), commandTable[i].path, now - 300000, now );
-        }
-    else
+    switch( commandTable[i].command )
         {
-        snprintf( path, sizeof(path), commandTable[i].path );
+        case CMD_BLOCKFLOW_HASHES:
+            snprintf( path, sizeof(path), commandTable[i].path, 0, 0, heights[0] );
+            break;
+
+        case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
+            /* Poll last 5 minutes (300,000 ms) */
+            int64_t		 now = (long long)time(NULL) * 1000;
+            snprintf( path, sizeof(path), commandTable[i].path, now - 300000, now );
+            break;
+
+        case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
+        case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_BLOCKHASH:
+
+        case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
+            const char* blockhash = "00000000000005f9fee8769b1948f5272635b5079059e31dd6e0ab3031424b50";
+            snprintf( path, sizeof(path), commandTable[i].path, blockhash );
+            break;
+
+        default:
+            snprintf( path, sizeof(path), commandTable[i].path );
+            break;
         }
 
     snprintf( url, sizeof(url), "%s%s", baseUrl, path );
@@ -227,8 +247,10 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
 
                 case CMD_INFOS_VERSION:
                     printf( "Version info fetched\n" );
+                    break;
 
-                case CMD_BLOCKFLOW_BLOCKS:
+                case CMD_BLOCKFLOW_BLOCKS_BLOCKHASH:
+                case CMD_BLOCKFLOW_BLOCKS_INTERVAL:
                     {
                     cJSON			*blocks;
                     blocks = cJSON_GetObjectItem( json, "blocks" );
@@ -240,7 +262,8 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
                         }
                     break;
                     }
-                case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS:
+                case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_BLOCKHASH:
+                case CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL:
                     {
                     cJSON			*blocks;
                     blocks = cJSON_GetObjectItem( json, "blocksAndEvents" );
@@ -252,7 +275,32 @@ for( int i = CMD_INFOS_SELF_CLIQUE; i < CMD_COUNT; i++ )
                         }
                     break;
                     }
+                case CMD_BLOCKFLOW_HASHES:
+                    {
+                    cJSON           *headers;
+                    headers = cJSON_GetObjectItem( json, "headers" );
+                    if ( headers && cJSON_IsArray( headers ) )
+                        {
+                        int		 headerCount;
+                        headerCount = cJSON_GetArraySize( headers );
+                        printf( "Polled %d hashes\n", headerCount );
+                        }
+                    break;
+                    }
+                case CMD_BLOCKFLOW_HEADERS_BLOCKHASH:
+                    {
+                    cJSON           *headers;
+                    headers = cJSON_GetObjectItem( json, "headers" );
+                    if (headers && cJSON_IsArray( headers ) )
+                        {
+                        int		 headerCount;
+                        headerCount = cJSON_GetArraySize( headers );
+                        printf( "Polled %d hashes\n", headerCount );
+                        }
+                    break;
+                    }
                 }
+            
             cJSON_Delete( json );
             }
         else
