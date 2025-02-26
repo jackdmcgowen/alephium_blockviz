@@ -6,9 +6,9 @@
 #include <time.h>
 #include "commands.h"
 #include "config.h"
-#include "dag.h"
+#include "dag.hpp"
 
-CURL            *curl;
+extern "C" CURL * curl;
 const char     *baseUrl;
 
 static void format_output
@@ -75,10 +75,9 @@ if( !curl )
     return( -1 );
     }
 
-dag_init( &dag );
 get_heights( heights );
 
-lastPollTs = (int64_t)time(NULL) * 1000 - 300000; /* Start 5 min back */
+lastPollTs = (int64_t)time(NULL) * 1000 - 60000; /* Start 1 min back */
 
 /* Poll every 16 seconds */
 while( 1 )
@@ -96,11 +95,12 @@ while( 1 )
         if( blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
             {
             int         count;
+            int         totalBlocks;
             cJSON      *iter;
             cJSON      *shard;
 
             count = cJSON_GetArraySize( blocksAndEvents );
-            printf( "Polled %d blocks and events\n", count );
+            totalBlocks = 0;          
 
             for( i = 0; i < count; i++ )
                 {
@@ -120,34 +120,27 @@ while( 1 )
 
                         if( block )
                             {
-                            GET_OBJECT_ITEM( block, chainFrom );
-                            GET_OBJECT_ITEM( block, chainTo );
-                            GET_OBJECT_ITEM( block, height );
-
-                            if( chainFrom && chainTo && height )
-                                {
-                                dag_add_block( &dag, chainFrom->valueint, chainTo->valueint, height->valueint );
-
-                                if( heights[chainFrom->valueint][chainTo->valueint] < height->valueint )
-                                    {
-                                    heights[chainFrom->valueint][chainTo->valueint] = height->valueint;
-                                    }
-                                }
+                            
+                            dag.add_block( block );
+                            ++totalBlocks;
                             }
                         }
                     }
                 }
+
+            dag.print();
+            printf( "Polled %d blocks\n", totalBlocks );
             }
 
         lastPollTs = now; /* Update last poll time */
         cJSON_Delete( obj );
         }
-
-    dag_print( &dag );
+    
     Sleep( 16000 ); /* 16 seconds */
     }
 
-dag_free( &dag );
+dag.free();
+
 curl_easy_cleanup( curl );
 free_configs( &config_array );
 

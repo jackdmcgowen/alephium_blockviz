@@ -6,7 +6,7 @@
 #include <curl/curl.h>
 #include "commands.h"
 
-extern CURL            *curl;
+CURL            *curl;
 
 #define CHECK_CURL( x )                                                      \
     {                                                                        \

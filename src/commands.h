@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct cJSON;
 
 typedef enum AlephiumCommand
@@ -131,5 +135,9 @@ int get_height
 
 extern const char * const commandTable[];
 extern const char * baseUrl;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* COMMANDS_H */
