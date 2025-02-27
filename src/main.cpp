@@ -54,6 +54,8 @@ int main()
     int heights[4][4];
     int64_t lastPollTs;
     Dag dag;
+    std::vector<cJSON*> blockQueue;
+    int64_t lastAddTime = 0;
 
     // Window setup
     HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -85,6 +87,7 @@ int main()
     // Vulkan init
     VulkanRenderer renderer;
     renderer.init(hInstance, hwnd);
+    renderer.start();
 
     ConfigArray config_array = load_configs("config.json");
     if (config_array.count == 0 || !config_array.configs[0].url)
@@ -145,7 +148,7 @@ int main()
                                 GET_OBJECT_ITEM( iter, block );
                                 if (block)
                                 {
-                                    dag.add_block( block );
+                                    blockQueue.push_back(cJSON_Duplicate(block, 1));
                                     totalBlocks++;
                                 }
                             }
@@ -156,15 +159,28 @@ int main()
                 lastPollTs = now;
                 cJSON_Delete(obj);
             }
-
-            renderer.update(dag);
         }
 
-        renderer.render();
+        // Rate limit block addition: 1 every 200ms
+        if (!blockQueue.empty() && now - lastAddTime >= 200)
+        {
+            cJSON* block = blockQueue.front();
+            blockQueue.erase(blockQueue.begin());
+            renderer.add_block(block);
+            lastAddTime = now;
+        }
+
+        Sleep(10); // Avoid tight loop
+
     }
 
     // Cleanup
+    renderer.stop();
     curl_easy_cleanup(curl);
     free_configs(&config_array);
+    for (auto block : blockQueue)
+    {
+        cJSON_Delete(block);
+    }
     return 0;
 }
