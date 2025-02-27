@@ -8,7 +8,6 @@
 #include <vector>
 #include "commands.h"
 #include "config.h"
-#include "dag.hpp"
 #include "vulkan_renderer.hpp"
 
 extern "C" CURL* curl;
@@ -53,7 +52,6 @@ int main()
 {
     int heights[4][4];
     int64_t lastPollTs;
-    Dag dag;
     std::vector<cJSON*> blockQueue;
     int64_t lastAddTime = 0;
 

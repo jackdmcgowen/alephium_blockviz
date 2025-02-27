@@ -114,10 +114,21 @@ void VulkanRenderer::render_loop()
                 float radius = 10.0f;
                 float x = radius * cosf(angle);
                 float y = radius * sinf(angle);
-                float z = static_cast<float>(timestamp->valueint) * 0.0001f - timeOffset; // Z by timestamp
+                float z = static_cast<float>(timestamp->valueint) * 0.00000001f - timeOffset; // Z by timestamp
 
-                vertices.push_back({ x, y, z, 1.0f, 0.0f, 0.0f });        // Start red
-                vertices.push_back({ x, y, z + 0.5f, 0.0f, 1.0f, 0.0f }); // End green
+                Vertex start = { x, y, z, 1.0f, 0.0f, 0.0f };        // Red
+                Vertex end = { x, y, z + 0.5f, 0.0f, 1.0f, 0.0f };   // Green
+
+                if (vertexCount + 2 <= MAX_VERTICES)
+                {
+                    memcpy(static_cast<char*>(mappedVertexMemory) + vertexCount * sizeof(Vertex), &start, sizeof(Vertex));
+                    memcpy(static_cast<char*>(mappedVertexMemory) + (vertexCount + 1) * sizeof(Vertex), &end, sizeof(Vertex));
+                    vertexCount += 2;
+                }
+                else
+                {
+                    printf("Vertex buffer full\n");
+                }
             }
             cJSON_Delete(block);
 
@@ -125,7 +136,6 @@ void VulkanRenderer::render_loop()
         }
 
         update_uniform_buffer();
-        
         render();
     }
 }
@@ -447,7 +457,7 @@ void VulkanRenderer::create_graphics_pipeline()
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
-    scissor.offset = {0, 0};
+    scissor.offset = { 0, 0 };
     scissor.extent = swapchainExtent;
 
     VkPipelineViewportStateCreateInfo viewportState{};
@@ -483,8 +493,8 @@ void VulkanRenderer::create_graphics_pipeline()
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
     {
@@ -538,15 +548,13 @@ void VulkanRenderer::create_framebuffers()
 
 void VulkanRenderer::create_vertex_buffer()
 {
-    VkDeviceSize bufferSize = sizeof(Vertex) * vertices.size();
+    VkDeviceSize bufferSize = sizeof(Vertex) * MAX_VERTICES;
     create_buffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
         vertexBuffer, vertexBufferMemory);
 
-    void* data;
-    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, vertices.data(), (size_t)bufferSize);
-    vkUnmapMemory(device, vertexBufferMemory);
+    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &mappedVertexMemory);
+    vertexCount = 0;
 }
 
 
@@ -637,7 +645,6 @@ void VulkanRenderer::create_command_buffers()
 }
 
 
-
 void VulkanRenderer::create_sync_objects()
 {
     VkSemaphoreCreateInfo semaphoreInfo{};
@@ -688,7 +695,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     renderPassInfo.framebuffer = swapchainFramebuffers[imageIndex];
     renderPassInfo.renderArea.offset = { 0, 0 };
     renderPassInfo.renderArea.extent = swapchainExtent;
-    VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+    VkClearValue clearColor = { {{0.7f, 0.7f, 0.7f, 1.0f}} };
     renderPassInfo.clearValueCount = 1;
     renderPassInfo.pClearValues = &clearColor;
 
@@ -698,7 +705,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(buffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdDraw(buffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+    vkCmdDraw(buffer, static_cast<uint32_t>(vertexCount), 1, 0, 0);
     vkCmdEndRenderPass(buffer);
 
     if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
@@ -754,6 +761,10 @@ void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, 
 void VulkanRenderer::cleanup()
 {
     vkDeviceWaitIdle(device);
+    if (mappedVertexMemory)
+    {
+        vkUnmapMemory(device, vertexBufferMemory);
+    }
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyBuffer(device, uniformBuffer, nullptr);

@@ -12,9 +12,7 @@
 #include <queue>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "dag.hpp"
 
-#define MAX_LINES 10000 // Arbitrary cap for now
 #define WDW_WIDTH 800
 #define WDW_HEIGHT 600
 
@@ -44,6 +42,8 @@ public:
     void stop();
 
 private:
+    static const int MAX_VERTICES = 1000000; // Arbitrary large size (1M vertices ~ 6MB)
+
     HINSTANCE hInstance;
     HWND hwnd;
     VkInstance instance;
@@ -68,6 +68,8 @@ private:
     VkFence inFlightFence;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
+    void* mappedVertexMemory; // Persistent mapping
+    size_t vertexCount;
     VkBuffer uniformBuffer;
     VkDeviceMemory uniformBufferMemory;
     VkDescriptorPool descriptorPool;
@@ -78,7 +80,6 @@ private:
     std::condition_variable dataCond;
     std::queue<cJSON*> blockQueue;
     bool running;
-    std::vector<Vertex> vertices;
     float timeOffset;
 
     void render_loop();
