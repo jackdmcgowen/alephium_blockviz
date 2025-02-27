@@ -2,10 +2,11 @@
 #define DAG_HPP
 
 #include <map>
-#include <vector>
 #include <string>
 
 struct cJSON;
+
+#define MAX_GROUPS 4
 
 class Dag
 {
@@ -16,10 +17,10 @@ public:
     void print();
     void free();
 
+    const std::map< std::string, cJSON*> &get_blocks() const { return blocks; }
+
 private:
-    static const int MAX_GROUPS = 4;
     std::map< std::string, cJSON* > blocks;
 };
-
 
 #endif /* DAG_HPP */

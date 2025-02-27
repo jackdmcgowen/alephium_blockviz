@@ -4,146 +4,167 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <windows.h>
+#include <vector>
 #include "commands.h"
 #include "config.h"
 #include "dag.hpp"
+#include "vulkan_renderer.hpp"
 
-extern "C" CURL * curl;
-const char     *baseUrl;
+extern "C" CURL* curl;
+const char * baseUrl;
 
-static void format_output
-    (
-    cJSON				*json
-    )
+static void format_output(cJSON* json)
 {
-char				*formatted;
-
-formatted = cJSON_Print( json );
-if( formatted )
+    char* formatted = cJSON_Print(json);
+    if (formatted)
     {
-    printf( "%s\n", formatted );
-    free( formatted );
+        printf("%s\n", formatted);
+        free(formatted);
     }
+}
 
-}	/* format_json_output() */
-
-
-void get_heights
-    (
-    int                 heights[4][4]
-    )
+void get_heights(int heights[4][4])
 {
-int					    fromGroup;
-int					    toGroup;
-int                     h;
-
-for( fromGroup = 0; fromGroup < 4; fromGroup++ )
+    for (int fromGroup = 0; fromGroup < 4; fromGroup++)
     {
-    for( toGroup = 0; toGroup < 4; toGroup++ )
+        for (int toGroup = 0; toGroup < 4; toGroup++)
         {
-        heights[fromGroup][toGroup] = 0;
-        h = get_height( fromGroup, toGroup );
-        printf( "Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, h );
-        heights[fromGroup][toGroup] = h;
+            heights[fromGroup][toGroup] = 0;
+            int h = get_height(fromGroup, toGroup);
+            printf("Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, h);
+            heights[fromGroup][toGroup] = h;
         }
     }
+}
 
-}   /* get_heights() */
-
-
-int main
-    (
-    void
-    )
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-int                     heights[4][4];
-int64_t                 lastPollTs; /* Last timestamp per shard */
-Dag                     dag;
-int                     i;
-int                     j;
-
-  /* Load the configs from the JSON file */
-ConfigArray config_array = load_configs( "config.json" );
-
-  /* Get the base URL address */
-baseUrl = config_array.configs[0].url;
-
-curl = curl_easy_init();
-if( !curl )
+    switch (msg)
     {
-    printf( "curl init failed\n" );
-    return( -1 );
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+int main()
+{
+    int heights[4][4];
+    int64_t lastPollTs;
+    Dag dag;
+
+    // Window setup
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"Alephium_BlockFlow";
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindow
+        (
+        L"Alephium_BlockFlow",
+        L"Alephium BlockFlow",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        WDW_WIDTH, WDW_HEIGHT,
+        NULL, NULL, hInstance, NULL
+        );
+
+    if (!hwnd)
+    {
+        printf("Failed to create window\n");
+        return -1;
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    // Vulkan init
+    VulkanRenderer renderer;
+    renderer.init(hInstance, hwnd);
+
+    ConfigArray config_array = load_configs("config.json");
+    if (config_array.count == 0 || !config_array.configs[0].url)
+    {
+        printf("Failed to load config\n");
+        return -1;
+    }
+    baseUrl = config_array.configs[0].url;
+
+    curl = curl_easy_init();
+    if (!curl)
+    {
+        printf("curl init failed\n");
+        free_configs(&config_array);
+        return -1;
     }
 
-get_heights( heights );
+    lastPollTs = (int64_t)time(NULL) * 1000 - 60000; // 1 min back
 
-lastPollTs = (int64_t)time(NULL) * 1000 - 60000; /* Start 1 min back */
-
-/* Poll every 16 seconds */
-while( 1 )
+    // Main loop with polling and rendering
+    MSG msg = { 0 };
+    while (true)
     {
-    ResponseData    response = { NULL, 0, 0 };
-    cJSON          *obj;
-    int64_t         now = (int64_t)time(NULL) * 1000;
-
-    printf( "\nPolling blockflow at %lld\n", now );
-    /* Poll blocks since last timestamp */
-    obj = get_blockflow_blocks_with_events( lastPollTs, now );
-    if( obj )
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
-        GET_OBJECT_ITEM( obj, blocksAndEvents );
-        if( blocksAndEvents && cJSON_IsArray(blocksAndEvents) )
+            if (msg.message == WM_QUIT)
             {
-            int         count;
-            int         totalBlocks;
-            cJSON      *iter;
-            cJSON      *shard;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
 
-            count = cJSON_GetArraySize( blocksAndEvents );
-            totalBlocks = 0;          
+        int64_t now = (int64_t)time(NULL) * 1000;
+        if (now - lastPollTs >= 16000) // 16 seconds
+        {
+            printf("\nPolling blockflow at %lld\n", now);
+            ResponseData response = { NULL, 0, 0, 0 };
+            cJSON* obj = get_blockflow_blocks_with_events(lastPollTs, now);
 
-            for( i = 0; i < count; i++ )
+            if (obj)
+            {
+                GET_OBJECT_ITEM(obj, blocksAndEvents);
+                if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
                 {
-                int blocksEventsCount;
-                
-                shard = cJSON_GetArrayItem( blocksAndEvents, i );
-                //format_output( shard );
+                    int count = cJSON_GetArraySize(blocksAndEvents);
+                    int totalBlocks = 0;
 
-                if( shard && cJSON_IsArray( shard ) )
+                    for (int i = 0; i < count; i++)
                     {
-                    blocksEventsCount = cJSON_GetArraySize( shard );
-                    for( j = 0; j < blocksEventsCount; ++j )
+                        cJSON* shard = cJSON_GetArrayItem(blocksAndEvents, i);
+                        if (shard && cJSON_IsArray(shard))
                         {
-                        iter = cJSON_GetArrayItem( shard, j );
-
-                        GET_OBJECT_ITEM( iter, block );
-
-                        if( block )
+                            int blocksEventsCount = cJSON_GetArraySize(shard);
+                            for (int j = 0; j < blocksEventsCount; ++j)
                             {
-                            
-                            dag.add_block( block );
-                            ++totalBlocks;
+                                cJSON* iter = cJSON_GetArrayItem(shard, j);
+                                GET_OBJECT_ITEM( iter, block );
+                                if (block)
+                                {
+                                    dag.add_block( block );
+                                    totalBlocks++;
+                                }
                             }
                         }
                     }
+                    printf("Polled %d blocks\n", totalBlocks);
                 }
-
-            dag.print();
-            printf( "Polled %d blocks\n", totalBlocks );
+                lastPollTs = now;
+                cJSON_Delete(obj);
             }
 
-        lastPollTs = now; /* Update last poll time */
-        cJSON_Delete( obj );
+            renderer.update(dag);
         }
-    
-    Sleep( 16000 ); /* 16 seconds */
+
+        renderer.render();
     }
 
-dag.free();
-
-curl_easy_cleanup( curl );
-free_configs( &config_array );
-
-return( 0 );
-
-}	/* main() */
+    // Cleanup
+    curl_easy_cleanup(curl);
+    free_configs(&config_array);
+    return 0;
+}
