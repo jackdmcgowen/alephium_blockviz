@@ -13,6 +13,8 @@
 extern "C" CURL* curl;
 const char * baseUrl;
 
+static volatile bool keepRunning = true; // Global exit flag
+
 static void format_output(cJSON* json)
 {
     char* formatted = cJSON_Print(json);
@@ -107,16 +109,22 @@ int main()
 
     // Main loop with polling and rendering
     MSG msg = { 0 };
-    while (true)
+    while (keepRunning)
     {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
             if (msg.message == WM_QUIT)
             {
-                break;
+                keepRunning = false;
             }
             TranslateMessage(&msg);
             DispatchMessage(&msg);
+        }
+
+        // Check for Esc key
+        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+        {
+            keepRunning = false;
         }
 
         int64_t now = (int64_t)time(NULL) * 1000;
@@ -181,4 +189,5 @@ int main()
         cJSON_Delete(block);
     }
     return 0;
-}
+
+}   /* main() */
