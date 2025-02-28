@@ -28,6 +28,11 @@ public:
         float r, g, b; // Color
     };
 
+    struct InstanceData
+    {
+        glm::vec3 pos; // Block position
+    };
+
     struct UniformBufferObject
     {
         glm::mat4 view;
@@ -42,7 +47,9 @@ public:
     void stop();
 
 private:
-    static const int MAX_VERTICES = 1000000; // Arbitrary large size (1M vertices ~ 6MB)
+    static const int MAX_INSTANCES = 1024*1024; // Arbitrary large size
+    static const Vertex CUBE_VERTICES[8]; // 8 corners
+    static const uint16_t CUBE_INDICES[36]; // 12 triangles
 
     HINSTANCE hInstance;
     HWND hwnd;
@@ -68,8 +75,12 @@ private:
     VkFence inFlightFence;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
-    void* mappedVertexMemory; // Persistent mapping
-    size_t vertexCount;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
+    VkBuffer instanceBuffer;
+    VkDeviceMemory instanceBufferMemory;
+    void* mappedInstanceMemory; // Persistent mapping
+    size_t instanceCount;
     VkBuffer uniformBuffer;
     VkDeviceMemory uniformBufferMemory;
     VkDescriptorPool descriptorPool;
@@ -96,6 +107,8 @@ private:
     void create_graphics_pipeline();
     void create_framebuffers();
     void create_vertex_buffer();
+    void create_index_buffer();
+    void create_instance_buffer();
     void create_uniform_buffer();
     void create_descriptor_pool();
     void create_descriptor_sets();

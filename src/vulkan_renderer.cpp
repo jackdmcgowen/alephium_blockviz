@@ -9,6 +9,32 @@
 
 static const float FOV = glm::radians(45.0f);
 
+const VulkanRenderer::Vertex VulkanRenderer::CUBE_VERTICES[8] = {
+    {-0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f}, // 0: Bottom-left-back
+    { 0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f}, // 1: Bottom-right-back
+    { 0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 0.0f}, // 2: Bottom-right-front
+    {-0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 0.0f}, // 3: Bottom-left-front
+    {-0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f}, // 4: Top-left-back
+    { 0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f}, // 5: Top-right-back
+    { 0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f}, // 6: Top-right-front
+    {-0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f}  // 7: Top-left-front
+};
+
+const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
+    // Front
+    3, 2, 6,  3, 6, 7,
+    // Back
+    0, 5, 4,  0, 1, 5,
+    // Left
+    0, 4, 7,  0, 7, 3,
+    // Right
+    1, 2, 6,  1, 6, 5,
+    // Top
+    7, 6, 5,  7, 5, 4,
+    // Bottom
+    0, 3, 2,  0, 2, 1
+};
+
 VulkanRenderer::VulkanRenderer()
     : hInstance(nullptr)
     , hwnd(nullptr)
@@ -19,6 +45,7 @@ VulkanRenderer::VulkanRenderer()
     , surface(VK_NULL_HANDLE)
     , swapchain(VK_NULL_HANDLE)
     , renderPass(VK_NULL_HANDLE)
+    , descriptorSetLayout(VK_NULL_HANDLE)
     , pipelineLayout(VK_NULL_HANDLE)
     , graphicsPipeline(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
@@ -28,6 +55,18 @@ VulkanRenderer::VulkanRenderer()
     , inFlightFence(VK_NULL_HANDLE)
     , vertexBuffer(VK_NULL_HANDLE)
     , vertexBufferMemory(VK_NULL_HANDLE)
+    , indexBuffer(VK_NULL_HANDLE)
+    , indexBufferMemory(VK_NULL_HANDLE)
+    , instanceBuffer(VK_NULL_HANDLE)
+    , instanceBufferMemory(VK_NULL_HANDLE)
+    , mappedInstanceMemory(nullptr)
+    , instanceCount(0)
+    , uniformBuffer(VK_NULL_HANDLE)
+    , uniformBufferMemory(VK_NULL_HANDLE)
+    , descriptorPool(VK_NULL_HANDLE)
+    , descriptorSet(VK_NULL_HANDLE)
+    , running(false)
+    , timeOffset(0.0f)
 {
 }
 
@@ -53,6 +92,8 @@ void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
     create_framebuffers();
     create_command_pool();
     create_vertex_buffer();
+    create_index_buffer();
+    create_instance_buffer();
     create_uniform_buffer();
     create_descriptor_pool();
     create_descriptor_sets();
@@ -114,20 +155,18 @@ void VulkanRenderer::render_loop()
                 float radius = 10.0f;
                 float x = radius * cosf(angle);
                 float y = radius * sinf(angle);
-                float z = static_cast<float>(timestamp->valueint) * 0.00000001f - timeOffset; // Z by timestamp
+                float z = static_cast<float>(timestamp->valueint) * 0.00000002f - timeOffset; // Z by timestamp
 
-                Vertex start = { x, y, z, 1.0f, 0.0f, 0.0f };        // Red
-                Vertex end = { x, y, z + 0.5f, 0.0f, 1.0f, 0.0f };   // Green
+                InstanceData inst = { glm::vec3(x, y, z) };
 
-                if (vertexCount + 2 <= MAX_VERTICES)
+                if (instanceCount < MAX_INSTANCES)
                 {
-                    memcpy(static_cast<char*>(mappedVertexMemory) + vertexCount * sizeof(Vertex), &start, sizeof(Vertex));
-                    memcpy(static_cast<char*>(mappedVertexMemory) + (vertexCount + 1) * sizeof(Vertex), &end, sizeof(Vertex));
-                    vertexCount += 2;
+                    memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
+                    instanceCount++;
                 }
                 else
                 {
-                    printf("Vertex buffer full\n");
+                    printf("Instance buffer full\n");
                 }
             }
             cJSON_Delete(block);
@@ -421,10 +460,13 @@ void VulkanRenderer::create_graphics_pipeline()
 
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
 
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    VkVertexInputBindingDescription bindingDescriptions[2];
+    bindingDescriptions[0].binding = 0;
+    bindingDescriptions[0].stride = sizeof(Vertex);
+    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    bindingDescriptions[1].binding = 1;
+    bindingDescriptions[1].stride = sizeof(InstanceData);
+    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
     VkVertexInputAttributeDescription attributeDescriptions[2];
     attributeDescriptions[0].binding = 0;
@@ -435,17 +477,24 @@ void VulkanRenderer::create_graphics_pipeline()
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[1].offset = offsetof(Vertex, r);
+    VkVertexInputAttributeDescription instanceAttribute{};
+    instanceAttribute.binding = 1;
+    instanceAttribute.location = 2;
+    instanceAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
+    instanceAttribute.offset = offsetof(InstanceData, pos);
+
+    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], attributeDescriptions[1], instanceAttribute };
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = 2;
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
+    vertexInputInfo.vertexBindingDescriptionCount = 2;
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
+    vertexInputInfo.vertexAttributeDescriptionCount = 3;
+    vertexInputInfo.pVertexAttributeDescriptions = attributes;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
     VkViewport viewport{};
@@ -471,7 +520,7 @@ void VulkanRenderer::create_graphics_pipeline()
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
@@ -548,15 +597,40 @@ void VulkanRenderer::create_framebuffers()
 
 void VulkanRenderer::create_vertex_buffer()
 {
-    VkDeviceSize bufferSize = sizeof(Vertex) * MAX_VERTICES;
+    VkDeviceSize bufferSize = sizeof(CUBE_VERTICES);
     create_buffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         vertexBuffer, vertexBufferMemory);
 
-    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &mappedVertexMemory);
-    vertexCount = 0;
+    void* data;
+    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, CUBE_VERTICES, bufferSize);
+    vkUnmapMemory(device, vertexBufferMemory);
 }
 
+void VulkanRenderer::create_index_buffer()
+{
+    VkDeviceSize bufferSize = sizeof(CUBE_INDICES);
+    create_buffer(bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        indexBuffer, indexBufferMemory);
+
+    void* data;
+    vkMapMemory(device, indexBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, CUBE_INDICES, bufferSize);
+    vkUnmapMemory(device, indexBufferMemory);
+}
+
+void VulkanRenderer::create_instance_buffer()
+{
+    VkDeviceSize bufferSize = sizeof(InstanceData) * MAX_INSTANCES;
+    create_buffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        instanceBuffer, instanceBufferMemory);
+
+    vkMapMemory(device, instanceBufferMemory, 0, bufferSize, 0, &mappedInstanceMemory);
+    instanceCount = 0;
+}
 
 void VulkanRenderer::create_uniform_buffer()
 {
@@ -667,9 +741,9 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    ubo.view = glm::lookAt(glm::vec3(0.0f, 50.0f, 50.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    ubo.view = glm::lookAt(glm::vec3(0.0f, 50.0f, -50.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)WDW_WIDTH / WDW_HEIGHT, NEAR_PLANE, FAR_PLANE );
-    ubo.proj[1][1] *= -1; // Flip Y for Vulkan
+    //ubo.proj[1][1] *= -1; // Flip Y for Vulkan
 
     void* data;
     vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
@@ -701,11 +775,12 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 
     vkCmdBeginRenderPass(buffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-    VkBuffer vertexBuffers[] = { vertexBuffer };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(buffer, 0, 1, vertexBuffers, offsets);
+    VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
+    VkDeviceSize offsets[] = { 0, 0 };
+    vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdDraw(buffer, static_cast<uint32_t>(vertexCount), 1, 0, 0);
+    vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
     vkCmdEndRenderPass(buffer);
 
     if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
@@ -761,12 +836,16 @@ void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, 
 void VulkanRenderer::cleanup()
 {
     vkDeviceWaitIdle(device);
-    if (mappedVertexMemory)
+    if (mappedInstanceMemory)
     {
-        vkUnmapMemory(device, vertexBufferMemory);
+        vkUnmapMemory(device, instanceBufferMemory);
     }
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
+    vkDestroyBuffer(device, indexBuffer, nullptr);
+    vkFreeMemory(device, indexBufferMemory, nullptr);
+    vkDestroyBuffer(device, instanceBuffer, nullptr);
+    vkFreeMemory(device, instanceBufferMemory, nullptr);
     vkDestroyBuffer(device, uniformBuffer, nullptr);
     vkFreeMemory(device, uniformBufferMemory, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
