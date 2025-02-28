@@ -154,7 +154,8 @@ int main()
                                 GET_OBJECT_ITEM( iter, block );
                                 if (block)
                                 {
-                                    blockQueue.push_back(cJSON_Duplicate(block, 1));
+                                    renderer.add_block(block);
+                                    //blockQueue.push_back(cJSON_Duplicate(block, 1));
                                     totalBlocks++;
                                 }
                             }
@@ -168,13 +169,13 @@ int main()
         }
 
         // Rate limit block addition: 1 every 200ms
-        if (!blockQueue.empty() && now - lastAddTime >= 200)
-        {
-            cJSON* block = blockQueue.front();
-            blockQueue.erase(blockQueue.begin());
-            renderer.add_block(block);
-            lastAddTime = now;
-        }
+        //if (!blockQueue.empty() && now - lastAddTime >= 200)
+        //{
+        //    cJSON* block = blockQueue.front();
+        //    blockQueue.erase(blockQueue.begin());
+        //    renderer.add_block(block);
+        //    lastAddTime = now;
+        //}
 
         Sleep(10); // Avoid tight loop
 

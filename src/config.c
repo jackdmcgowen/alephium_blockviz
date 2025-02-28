@@ -37,7 +37,6 @@ static char* read_file
     )
 {
 FILE* file = fopen(filename, "r");
-
 if (!file)
     {
     perror("Failed to open file");

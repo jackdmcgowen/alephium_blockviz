@@ -24,13 +24,14 @@ class VulkanRenderer
 public:
     struct Vertex
     {
-        float x, y, z; // Position
-        float r, g, b; // Color
+        glm::vec3 pos;
     };
 
     struct InstanceData
     {
         glm::vec3 pos; // Block position
+        glm::vec3 color; //Block colors
+        int pad[2];
     };
 
     struct UniformBufferObject
@@ -63,6 +64,9 @@ private:
     VkFormat swapchainImageFormat;
     VkExtent2D swapchainExtent;
     std::vector<VkImageView> swapchainImageViews;
+    VkImage depthImage;
+    VkDeviceMemory depthImageMemory;
+    VkImageView depthImageView;
     VkRenderPass renderPass;
     VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
@@ -101,6 +105,7 @@ private:
     void pick_physical_device();
     void create_logical_device();
     void create_swapchain();
+    void create_depth_resources();
     void create_image_views();
     void create_render_pass();
     void create_descriptor_set_layout();
@@ -119,6 +124,9 @@ private:
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex );
     uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
+    void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+    VkImageView create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+    VkFormat find_depth_format();
     void cleanup();
 };
 
