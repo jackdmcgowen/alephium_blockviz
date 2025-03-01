@@ -164,9 +164,8 @@ void VulkanRenderer::render_loop()
         //start frame
         QueryPerformanceCounter(&t1);
 
-        //delay 32 seconds
-        int64_t delaytime = static_cast<int64_t>(time(NULL)) * 1000 - 32000;
-        //int64_t currtime  = static_cast<int64_t>(time(NULL)) * 1000;
+        //delay 16 seconds
+        int64_t delaytime = static_cast<int64_t>(time(NULL) - 16) * 1000;
 
         std::unique_lock<std::mutex> lock(dataMutex);
         if (!blockSet.empty())
@@ -451,10 +450,12 @@ void VulkanRenderer::create_render_pass()
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
 
+    VkAttachmentDescription  attachments[2] = { colorAttachment, depthAttachment };
+
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.attachmentCount = 2;
+    renderPassInfo.pAttachments = attachments;
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
 
@@ -841,7 +842,7 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -50.0f - timeOffset);
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -30.0f - timeOffset);
     glm::vec3 center = glm::vec3(0.0f, 0.0f, -timeOffset);
 
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));

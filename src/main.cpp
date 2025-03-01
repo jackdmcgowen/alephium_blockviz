@@ -105,7 +105,7 @@ int main()
         return -1;
     }
 
-    lastPollTs = (int64_t)time(NULL) * 1000 - 60000; // 1 min back
+    lastPollTs = static_cast<int64_t>(time(NULL) - 32) * 1000; // 32 seconds ago
 
     // Main loop with polling and rendering
     MSG msg = { 0 };
