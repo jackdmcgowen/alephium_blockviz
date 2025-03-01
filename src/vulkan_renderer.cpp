@@ -1,3 +1,5 @@
+#include <iomanip>
+#include <iostream>
 #include <stdexcept>
 #include <cstring>
 #include <cmath>
@@ -8,6 +10,12 @@
 #include "commands.h"
 
 static const float FOV = glm::radians(45.0f);
+
+#ifndef NDEBUG
+static const bool enableValidationLayers = TRUE;
+#else
+static const bool enableValidationLayers = FALSE;
+#endif
 
 const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
@@ -29,14 +37,14 @@ const glm::vec3 SHARD_COLORS[16] = {
 };
 
 const VulkanRenderer::Vertex VulkanRenderer::CUBE_VERTICES[8] = {
-    { glm::vec3( -1, -1,  1) }, // 0
-    { glm::vec3(  1, -1,  1) }, // 1
-    { glm::vec3( -1, -1, -1) }, // 2
-    { glm::vec3( -1,  1, -1) }, // 3
-    { glm::vec3( -1,  1,  1) }, // 4
-    { glm::vec3(  1,  1, -1) }, // 5
-    { glm::vec3(  1, -1, -1) }, // 6
-    { glm::vec3(  1,  1,  1) }  // 7
+    { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
+    { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
+    { glm::vec3(-1, -1, -1), glm::normalize(glm::vec3(-1, -1, -1)) }, // 2
+    { glm::vec3(-1,  1, -1), glm::normalize(glm::vec3(-1,  1, -1)) }, // 3
+    { glm::vec3(-1,  1,  1), glm::normalize(glm::vec3(-1,  1,  1)) }, // 4
+    { glm::vec3(1,  1, -1),  glm::normalize(glm::vec3(1,  1, -1)) }, // 5
+    { glm::vec3(1, -1, -1),  glm::normalize(glm::vec3(1, -1, -1)) }, // 6
+    { glm::vec3(1,  1,  1),  glm::normalize(glm::vec3(1,  1,  1)) }  // 7
 };
 
 const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
@@ -94,6 +102,7 @@ void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
     this->hInstance = hInstance;
     this->hwnd = hwnd;
     create_instance();
+    setup_debug_messenger();
     create_surface();
     pick_physical_device();
     create_logical_device();
@@ -118,7 +127,7 @@ void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
 void VulkanRenderer::add_block(cJSON* block)
 {
     std::lock_guard<std::mutex> lock(dataMutex);
-    blockQueue.push(cJSON_Duplicate(block, 1));
+    blockQueue.emplace(block);
     dataCond.notify_one();
 }
 
@@ -158,35 +167,28 @@ void VulkanRenderer::render_loop()
         std::unique_lock<std::mutex> lock(dataMutex);
         if (!blockQueue.empty())
         {
-            cJSON* block = blockQueue.front();
+            Block block = blockQueue.front();
             blockQueue.pop();
             lock.unlock();
 
-            GET_OBJECT_ITEM(block, chainFrom);
-            GET_OBJECT_ITEM(block, chainTo);
-            GET_OBJECT_ITEM(block, timestamp);
-            if (chainFrom && chainTo && timestamp)
+            int shardId = block.from_group() * 4 + block.to_group();
+            float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>(); 
+            float radius = 10.0f;
+            float x = radius * cosf(angle);
+            float y = radius * sinf(angle);
+            float z = static_cast<float>(block.get_timestamp()) * 0.00000002f - timeOffset;
+
+            InstanceData inst = { glm::vec3(x, y, z), SHARD_COLORS[shardId] };
+
+            if (instanceCount < MAX_INSTANCES)
             {
-                int shardId = chainFrom->valueint * 4 + chainTo->valueint;
-                float angle = (shardId / 16.0f) * 2.0f * 3.14159f;
-                float radius = 10.0f;
-                float x = radius * cosf(angle);
-                float y = radius * sinf(angle);
-                float z = static_cast<float>(timestamp->valueint) * 0.00000002f - timeOffset;
-
-                InstanceData inst = { glm::vec3(x, y, z), SHARD_COLORS[shardId] };
-
-                if (instanceCount < MAX_INSTANCES)
-                {
-                    memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
-                    instanceCount++;
-                }
-                else
-                {
-                    printf("Instance buffer full\n");
-                }
+                memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
+                instanceCount++;
             }
-            cJSON_Delete(block);
+            else
+            {
+                printf("Instance buffer full\n");
+            }
         }
         else
         {
@@ -218,7 +220,7 @@ void VulkanRenderer::render()
     vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 
     vkResetCommandBuffer(commandBuffer, 0);
-    record_command_buffer(commandBuffer, imageIndex );
+    record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -256,15 +258,30 @@ void VulkanRenderer::create_instance()
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
-    const char* extensions[] = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
+    const char* extensions[] = 
+    { 
+#ifndef NDEBUG
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+    };
+    const char* enbl_layers[] = { "VK_LAYER_KHRONOS_validation" };
+#ifndef NDEBUG
+    createInfo.enabledExtensionCount = 3;
+#else
     createInfo.enabledExtensionCount = 2;
+#endif
     createInfo.ppEnabledExtensionNames = extensions;
-    createInfo.enabledLayerCount = 0;
+#ifndef NDEBUG
+    createInfo.enabledLayerCount = 1;
+    createInfo.ppEnabledLayerNames = enbl_layers;
+#endif
 
     if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
     {
@@ -446,7 +463,7 @@ void VulkanRenderer::create_descriptor_set_layout()
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -519,29 +536,33 @@ void VulkanRenderer::create_graphics_pipeline()
     bindingDescriptions[1].stride = sizeof(InstanceData);
     bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    VkVertexInputAttributeDescription attributeDescriptions[1];
+    VkVertexInputAttributeDescription attributeDescriptions[2];
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[0].offset = offsetof(Vertex, pos.x);
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, normal.x);
 
     VkVertexInputAttributeDescription instanceAttributes[2];
     instanceAttributes[0].binding = 1;
-    instanceAttributes[0].location = 1;
+    instanceAttributes[0].location = 2;
     instanceAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     instanceAttributes[0].offset = offsetof(InstanceData, pos);
     instanceAttributes[1].binding = 1;
-    instanceAttributes[1].location = 2;
+    instanceAttributes[1].location = 3;
     instanceAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     instanceAttributes[1].offset = offsetof(InstanceData, color);
 
-    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], instanceAttributes[0], instanceAttributes[1] };
+    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], attributeDescriptions[1], instanceAttributes[0], instanceAttributes[1] };
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 2;
     vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
-    vertexInputInfo.vertexAttributeDescriptionCount = 3;
+    vertexInputInfo.vertexAttributeDescriptionCount = 4;
     vertexInputInfo.pVertexAttributeDescriptions = attributes;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -610,6 +631,15 @@ void VulkanRenderer::create_graphics_pipeline()
         throw std::runtime_error("Failed to create pipeline layout");
     }
 
+    VkDynamicState dynamicStates[] = {
+    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = 1;
+    dynamicState.pDynamicStates = dynamicStates;
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
@@ -621,6 +651,7 @@ void VulkanRenderer::create_graphics_pipeline()
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = pipelineLayout;
     pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = 0;
@@ -803,10 +834,16 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    ubo.view = glm::lookAt(glm::vec3(0.0f, 40.0f, -40.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::vec3 eye = glm::vec3(0.0f, 40.0f, -40.0f);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, 0.0f);
+
+    ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)WDW_WIDTH / WDW_HEIGHT, NEAR_PLANE, FAR_PLANE );
     //ubo.proj = glm::frustum(-NEAR_PLANE, (float)NEAR_PLANE, -(float)NEAR_PLANE, (float)NEAR_PLANE, NEAR_PLANE, FAR_PLANE);
     //ubo.proj[1][1] *= -1; // Flip Y for Vulkan
+
+    ubo.viewPos = eye;
+    ubo.lightPos = center;
 
     void* data;
     vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
@@ -814,7 +851,7 @@ void VulkanRenderer::update_uniform_buffer()
     vkUnmapMemory(device, uniformBufferMemory);
 }
 
-void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex)
+void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -838,6 +875,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 
     vkCmdBeginRenderPass(buffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdSetPrimitiveTopology(buffer, topology);
     VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
@@ -1010,3 +1048,37 @@ void VulkanRenderer::cleanup()
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
 }
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
+    (
+    VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT messageType,
+    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void* pUserData
+    )
+{
+    std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
+    return VK_FALSE; // Return VK_FALSE to not abort the call
+}
+
+void VulkanRenderer::setup_debug_messenger()
+{
+    if (!enableValidationLayers) return;
+
+    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    createInfo.pfnUserCallback = debug_callback;
+    createInfo.pUserData = nullptr; // Optional
+
+    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+    if (func == nullptr || func(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to set up debug messenger!");
+    }
+}
+

@@ -12,9 +12,10 @@
 #include <queue>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "block.hpp"
 
-#define WDW_WIDTH 800
-#define WDW_HEIGHT 600
+#define WDW_WIDTH 1200
+#define WDW_HEIGHT 800
 
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 200.0f )
@@ -24,20 +25,22 @@ class VulkanRenderer
 public:
     struct Vertex
     {
-        glm::vec3 pos;
+        glm::vec3 pos;    // Vertex position
+        glm::vec3 normal; // Vertex normal
     };
 
     struct InstanceData
     {
         glm::vec3 pos; // Block position
         glm::vec3 color; //Block colors
-        int pad[2];
     };
 
     struct UniformBufferObject
     {
         glm::mat4 view;
         glm::mat4 proj;
+        glm::vec3 lightPos;
+        glm::vec3 viewPos;
     };
 
     VulkanRenderer();
@@ -89,11 +92,12 @@ private:
     VkDeviceMemory uniformBufferMemory;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
+    VkDebugUtilsMessengerEXT debugMessenger;
 
     std::thread renderThread;
     std::mutex  dataMutex;
     std::condition_variable dataCond;
-    std::queue<cJSON*> blockQueue;
+    std::queue<Block> blockQueue;
     bool running;
     float timeOffset;
 
@@ -121,13 +125,14 @@ private:
     void create_command_buffers();
     void create_sync_objects();
     void update_uniform_buffer();
-    void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex );
+    void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
     uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
     void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
     VkImageView create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
     VkFormat find_depth_format();
     void cleanup();
+    void setup_debug_messenger();
 };
 
 #endif /* VULKAN_RENDERER_HPP */
