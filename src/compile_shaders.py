@@ -38,11 +38,27 @@ def compile_shader(input_file, output_file):
     print(f"Compiled {input_file} to {output_file} as {stage} shader")
     return True
 
+def delete_spv_files(directory):
+    """Delete all .spv files in the specified directory."""
+    spv_files = glob.glob(os.path.join(directory, "*.spv"))
+    if not spv_files:
+        print("No .spv files found to delete")
+    else:
+        for spv_file in spv_files:
+            try:
+                os.remove(spv_file)
+                print(f"Deleted {spv_file}")
+            except OSError as e:
+                print(f"Error deleting {spv_file}: {e}")
+
 if __name__ == "__main__":
     # Change to script's directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     print(f"Working directory set to: {script_dir}")
+
+    # Delete all existing .spv files
+    delete_spv_files(script_dir)
 
     # Find all .glsl files
     glsl_files = glob.glob("*.glsl")

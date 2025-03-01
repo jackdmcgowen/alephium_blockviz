@@ -52,7 +52,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int main()
 {
-    int heights[4][4];
+    //int heights[4][4];
     int64_t lastPollTs;
     std::vector<cJSON*> blockQueue;
     int64_t lastAddTime = 0;

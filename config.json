@@ -1,4 +1,4 @@
 [
-    {"url": "https://node.testnet.alephium.org"},
-    {"url": "https://node.mainnet.alephium.org"}
+    {"url": "https://node.mainnet.alephium.org"},
+    {"url": "https://node.testnet.alephium.org"}
 ]

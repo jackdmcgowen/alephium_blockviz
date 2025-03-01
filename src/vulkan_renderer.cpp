@@ -127,7 +127,7 @@ void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
 void VulkanRenderer::add_block(cJSON* block)
 {
     std::lock_guard<std::mutex> lock(dataMutex);
-    blockQueue.emplace(block);
+    blockSet.insert(AlphBlock(block));
     dataCond.notify_one();
 }
 
@@ -164,41 +164,48 @@ void VulkanRenderer::render_loop()
         //start frame
         QueryPerformanceCounter(&t1);
 
+        //delay 32 seconds
+        int64_t delaytime = static_cast<int64_t>(time(NULL)) * 1000 - 32000;
+        //int64_t currtime  = static_cast<int64_t>(time(NULL)) * 1000;
+
         std::unique_lock<std::mutex> lock(dataMutex);
-        if (!blockQueue.empty())
+        if (!blockSet.empty())
         {
-            Block block = blockQueue.front();
-            blockQueue.pop();
-            lock.unlock();
+            auto it = blockSet.begin();
+            AlphBlock block = *it;
 
-            int shardId = block.from_group() * 4 + block.to_group();
-            float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>(); 
-            float radius = 10.0f;
-            float x = radius * cosf(angle);
-            float y = radius * sinf(angle);
-            float z = static_cast<float>(block.get_timestamp()) * 0.00000002f - timeOffset;
-
-            InstanceData inst = { glm::vec3(x, y, z), SHARD_COLORS[shardId] };
-
-            if (instanceCount < MAX_INSTANCES)
+            if (delaytime > block.timestamp)
             {
-                memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
-                instanceCount++;
-            }
-            else
-            {
-                printf("Instance buffer full\n");
+                int shardId = block.chainFrom * 4 + block.chainTo;
+                float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
+                float radius = 20.0f;
+                float x = radius * cosf(angle);
+                float y = radius * sinf(angle);
+                float z = static_cast<float>(block.timestamp) * 0.00000000001f - timeOffset;
+
+                InstanceData inst = { glm::vec3(x, y, z), SHARD_COLORS[shardId] };
+
+                if (instanceCount < MAX_INSTANCES)
+                {
+                    memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
+                    instanceCount++;
+                }
+                else
+                {
+                    printf("Instance buffer full\n");
+                }
+
+                blockSet.erase(it);
             }
         }
-        else
-        {
-            lock.unlock();
-        }
+
+        lock.unlock();
+
 
         update_uniform_buffer();
         render();
         
-        timeOffset += 0.01f; // Scroll speed
+        timeOffset += dt * 0.001; // Scroll speed
 
         //end frame
         do
@@ -834,8 +841,8 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    glm::vec3 eye = glm::vec3(0.0f, 40.0f, -40.0f);
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -50.0f - timeOffset);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, -timeOffset);
 
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)WDW_WIDTH / WDW_HEIGHT, NEAR_PLANE, FAR_PLANE );

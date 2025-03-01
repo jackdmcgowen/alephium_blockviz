@@ -9,16 +9,16 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <queue>
+#include <set>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "block.hpp"
+#include "alph_block.hpp"
 
-#define WDW_WIDTH 1200
-#define WDW_HEIGHT 800
+#define WDW_WIDTH  1920
+#define WDW_HEIGHT 1080
 
 #define NEAR_PLANE  ( 1.0f )
-#define FAR_PLANE ( 200.0f )
+#define FAR_PLANE ( 1000.0f )
 
 class VulkanRenderer
 {
@@ -97,7 +97,7 @@ private:
     std::thread renderThread;
     std::mutex  dataMutex;
     std::condition_variable dataCond;
-    std::queue<Block> blockQueue;
+    std::set<AlphBlock> blockSet;
     bool running;
     float timeOffset;
 

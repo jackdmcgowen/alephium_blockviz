@@ -18,7 +18,7 @@ void main() {
     vec3 lightColor = vec3(1.0, 1.0, 1.0);
     
     // Ambient
-    float ambientStrength = 0.2;
+    float ambientStrength = 0.7;
     vec3 ambient = ambientStrength * lightColor;
     
     // Diffuse
@@ -28,13 +28,13 @@ void main() {
     vec3 diffuse = diff * lightColor;
     
     // Specular
-    float specularStrength = 0.5;
+    float specularStrength = 0.1;
     vec3 viewDir = normalize(ubo.viewPos - fragPos);
     vec3 reflectDir = reflect(-lightDir, norm);
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
     vec3 specular = specularStrength * spec * lightColor;
     
     // Combine Phong components and multiply by instance color
-    vec3 result = (ambient + diffuse + specular) * baseColor * fragColor;
+    vec3 result = (ambient + diffuse) * baseColor * fragColor;
     outColor = vec4(result, 1.0);
 }
