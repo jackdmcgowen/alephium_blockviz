@@ -1,8 +1,6 @@
 #ifndef VULKAN_RENDERER_HPP
 #define VULKAN_RENDERER_HPP
 
-#include <windows.h>
-#define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>
@@ -14,8 +12,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
 
-#define WDW_WIDTH  1920
-#define WDW_HEIGHT 1080
+#define WDW_WIDTH  800
+#define WDW_HEIGHT 600
 
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 1000.0f )
@@ -45,7 +43,7 @@ public:
 
     VulkanRenderer();
     ~VulkanRenderer();
-    void init(HINSTANCE hInstance, HWND hwnd);
+    void init(void *hInstance, void *hwnd);
     void add_block(cJSON* block);
     void start();
     void stop();
@@ -55,8 +53,8 @@ private:
     static const Vertex CUBE_VERTICES[8]; // 8 corners
     static const uint16_t CUBE_INDICES[36]; // 12 triangles
 
-    HINSTANCE hInstance;
-    HWND hwnd;
+    void *hInstance;
+    void *hwnd;
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;

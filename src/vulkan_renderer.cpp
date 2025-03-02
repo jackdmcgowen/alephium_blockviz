@@ -5,9 +5,29 @@
 #include <cmath>
 #include <cjson/cJSON.h>
 #include "vulkan_renderer.hpp"
-#include <vulkan/vulkan_win32.h>
-
 #include "commands.h"
+
+
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+#define VK_USE_PLATFORM_WIN32_KHR
+#include "imgui_impl_vulkan.h"
+#include <windows.h>
+
+
+#include <vulkan/vulkan_win32.h>
+#include <vulkan/vk_enum_string_helper.h>
+
+
+static void check_vk_result(VkResult err)
+{
+    if (err == VK_SUCCESS)
+        return;
+
+    fprintf(stderr, "[vulkan] Error: VkResult = %s\n", string_VkResult(err) );
+    if (err < 0)
+        abort();
+}
 
 static const float FOV = glm::radians(45.0f);
 
@@ -97,7 +117,7 @@ VulkanRenderer::~VulkanRenderer()
     cleanup();
 }
 
-void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
+void VulkanRenderer::init(void *hInstance, void *hwnd)
 {
     this->hInstance = hInstance;
     this->hwnd = hwnd;
@@ -122,6 +142,34 @@ void VulkanRenderer::init(HINSTANCE hInstance, HWND hwnd)
     create_descriptor_sets();
     create_command_buffers();
     create_sync_objects();
+
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplVulkan_InitInfo info = {};
+
+    info.ApiVersion = VK_API_VERSION_1_3;
+    info.Instance = instance;
+    info.PhysicalDevice = physicalDevice;
+    info.Device = device;
+    info.QueueFamily = 0; // Assume graphics queue at index 0
+    info.Queue = graphicsQueue;
+    info.DescriptorPool = descriptorPool;
+    info.PipelineCache = VK_NULL_HANDLE;
+    info.RenderPass = renderPass;
+    info.UseDynamicRendering = false;
+    info.Subpass = 0;
+    info.MinImageCount = 2;
+    info.ImageCount = 2;
+    info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    info.Allocator = NULL;
+    info.CheckVkResultFn = check_vk_result;
+    ImGui_ImplVulkan_Init( &info );
+    
 }
 
 void VulkanRenderer::add_block(cJSON* block)
@@ -161,6 +209,11 @@ void VulkanRenderer::render_loop()
 
     while (running)
     {
+        // Start the Dear ImGui frame
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
         //start frame
         QueryPerformanceCounter(&t1);
 
@@ -200,11 +253,15 @@ void VulkanRenderer::render_loop()
 
         lock.unlock();
 
+        ImGui::Begin("Hello World");
+        ImGui::Text("Hello World!");
+        ImGui::End();
 
         update_uniform_buffer();
+        ImGui::Render();
         render();
-        
-        timeOffset += dt * 0.001; // Scroll speed
+
+        timeOffset += static_cast<float>(dt) * 0.001f; // Scroll speed
 
         //end frame
         do
@@ -213,6 +270,8 @@ void VulkanRenderer::render_loop()
             dt = static_cast<double>((t2.QuadPart - t1.QuadPart) * 1000LL / freq.QuadPart);
             t += dt;
         } while (dt <= frameTimeMin);
+
+
         
     }
 }
@@ -224,7 +283,7 @@ void VulkanRenderer::render()
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-
+    
     vkResetCommandBuffer(commandBuffer, 0);
     record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
 
@@ -299,8 +358,8 @@ void VulkanRenderer::create_surface()
 {
     VkWin32SurfaceCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    createInfo.hwnd = hwnd;
-    createInfo.hinstance = hInstance;
+    createInfo.hwnd = (HWND)hwnd;
+    createInfo.hinstance = (HINSTANCE)hInstance;
 
     if (vkCreateWin32SurfaceKHR( instance, &createInfo, nullptr, &surface) != VK_SUCCESS)
     {
@@ -706,7 +765,6 @@ void VulkanRenderer::create_vertex_buffer()
     vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
     memcpy(data, CUBE_VERTICES, bufferSize);
     vkUnmapMemory(device, vertexBufferMemory);
-    vkUnmapMemory(device, vertexBufferMemory);
 }
 
 void VulkanRenderer::create_index_buffer()
@@ -744,15 +802,17 @@ void VulkanRenderer::create_uniform_buffer()
 
 void VulkanRenderer::create_descriptor_pool()
 {
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = 1;
+    VkDescriptorPoolSize pool_sizes[] = 
+    {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+    };
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
-    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = pool_sizes;
+    poolInfo.maxSets = 2;
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
     {
@@ -890,12 +950,20 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
     vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
+    
+    ImDrawData* data = ImGui::GetDrawData();
+    if (data)
+    {
+        ImGui_ImplVulkan_RenderDrawData(data, buffer);
+    }
     vkCmdEndRenderPass(buffer);
 
     if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to record command buffer");
     }
+
+    
 }
 
 uint32_t VulkanRenderer::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties)
@@ -1019,6 +1087,11 @@ VkFormat VulkanRenderer::find_depth_format()
 void VulkanRenderer::cleanup()
 {
     vkDeviceWaitIdle(device);
+
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
     if (mappedInstanceMemory)
     {
         vkUnmapMemory(device, instanceBufferMemory);

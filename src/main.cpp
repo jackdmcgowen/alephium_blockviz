@@ -4,11 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <windows.h>
 #include <vector>
 #include "commands.h"
 #include "config.h"
 #include "vulkan_renderer.hpp"
+#include <windows.h>
 
 extern "C" CURL* curl;
 const char * baseUrl;
@@ -39,8 +39,11 @@ void get_heights(int heights[4][4])
     }
 }
 
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+
     switch (msg)
     {
     case WM_DESTROY:
@@ -155,7 +158,6 @@ int main()
                                 if (block)
                                 {
                                     renderer.add_block(block);
-                                    //blockQueue.push_back(cJSON_Duplicate(block, 1));
                                     totalBlocks++;
                                 }
                             }
@@ -167,15 +169,6 @@ int main()
                 cJSON_Delete(obj);
             }
         }
-
-        // Rate limit block addition: 1 every 200ms
-        //if (!blockQueue.empty() && now - lastAddTime >= 200)
-        //{
-        //    cJSON* block = blockQueue.front();
-        //    blockQueue.erase(blockQueue.begin());
-        //    renderer.add_block(block);
-        //    lastAddTime = now;
-        //}
 
         Sleep(10); // Avoid tight loop
 
