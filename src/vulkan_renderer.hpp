@@ -100,6 +100,8 @@ private:
     std::deque<AlphBlock> blockQueue;
     bool running;
     float timeOffset;
+    uint32_t width;
+    uint32_t height;
 
     void render_loop();
 

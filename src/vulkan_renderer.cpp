@@ -119,6 +119,11 @@ VulkanRenderer::~VulkanRenderer()
 
 void VulkanRenderer::init(void *hInstance, void *hwnd)
 {
+    RECT rect;
+    GetClientRect((HWND)hwnd, &rect);
+    width = static_cast<uint32_t>(rect.right - rect.left);
+    height = static_cast<uint32_t>(rect.bottom - rect.top);
+
     this->hInstance = hInstance;
     this->hwnd = hwnd;
     create_instance();
@@ -454,7 +459,7 @@ void VulkanRenderer::create_swapchain()
     createInfo.minImageCount = 2;
     createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    createInfo.imageExtent = { WDW_WIDTH, WDW_HEIGHT };
+    createInfo.imageExtent = { width, height };
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     createInfo.preTransform = capabilities.currentTransform;
@@ -472,13 +477,13 @@ void VulkanRenderer::create_swapchain()
     swapchainImages.resize(imageCount);
     vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data());
     swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-    swapchainExtent = { WDW_WIDTH, WDW_HEIGHT };
+    swapchainExtent = { width, height };
 }
 
 void VulkanRenderer::create_depth_resources()
 {
     VkFormat depthFormat = find_depth_format();
-    create_image(WDW_WIDTH, WDW_HEIGHT, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+    create_image(width, height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
     depthImageView = create_image_view(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
@@ -675,8 +680,8 @@ void VulkanRenderer::create_graphics_pipeline()
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float)WDW_WIDTH;
-    viewport.height = (float)WDW_HEIGHT;
+    viewport.width = (float)width;
+    viewport.height = (float)height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
@@ -941,7 +946,7 @@ void VulkanRenderer::update_uniform_buffer()
     glm::vec3 center = glm::vec3(0.0f, 0.0f, -timeOffset);
 
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
-    ubo.proj = glm::perspective( FOV, (float)WDW_WIDTH / WDW_HEIGHT, NEAR_PLANE, FAR_PLANE );
+    ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );
     //ubo.proj = glm::frustum(-NEAR_PLANE, (float)NEAR_PLANE, -(float)NEAR_PLANE, (float)NEAR_PLANE, NEAR_PLANE, FAR_PLANE);
     //ubo.proj[1][1] *= -1; // Flip Y for Vulkan
 

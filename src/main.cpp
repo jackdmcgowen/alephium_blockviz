@@ -74,8 +74,8 @@ int main()
 
     HWND hwnd = CreateWindow
         (
-        L"Alephium_BlockFlow",
-        L"Alephium BlockFlow",
+        wc.lpszClassName,
+        wc.lpszClassName,
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
