@@ -7,13 +7,14 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <deque>
 #include <set>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
 
-#define WDW_WIDTH  800
-#define WDW_HEIGHT 600
+#define WDW_WIDTH  1024
+#define WDW_HEIGHT 1024
 
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 1000.0f )
@@ -96,6 +97,7 @@ private:
     std::mutex  dataMutex;
     std::condition_variable dataCond;
     std::set<AlphBlock> blockSet;
+    std::deque<AlphBlock> blockQueue;
     bool running;
     float timeOffset;
 

@@ -149,6 +149,21 @@ void VulkanRenderer::init(void *hInstance, void *hwnd)
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 
+    ImGuiStyle& style = ImGui::GetStyle();
+
+
+    // Set background color to dark grey
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
+
+    // Set text color to light grey
+    style.Colors[ImGuiCol_Text] = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+
+    // Set button color
+    style.Colors[ImGuiCol_Button] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f); // Dark button color
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f); // Slightly lighter on hover
+
+    
+
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplVulkan_InitInfo info = {};
 
@@ -247,14 +262,34 @@ void VulkanRenderer::render_loop()
                     printf("Instance buffer full\n");
                 }
 
+                blockQueue.push_front(block);
                 blockSet.erase(it);
             }
         }
 
         lock.unlock();
 
-        ImGui::Begin("Hello World");
-        ImGui::Text("Hello World!");
+        if( blockQueue.size() > 50)
+        {
+            blockQueue.pop_back();
+        }
+
+        ImGui::Begin("Blockflow");
+        for (auto it2 : blockQueue)
+        {
+            ImGui::PushID(it2.hash.c_str());
+
+            int shardId = it2.chainFrom * 4 + it2.chainTo;
+            ImGui::TextColored( ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", it2.chainFrom, it2.chainTo );
+            ImGui::SameLine();
+           
+      
+            if (ImGui::Button(it2.hash.c_str()))
+            {
+                ImGui::SetClipboardText(it2.hash.c_str());
+            }
+            ImGui::PopID();
+        }
         ImGui::End();
 
         update_uniform_buffer();
