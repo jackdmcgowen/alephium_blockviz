@@ -297,8 +297,8 @@ void VulkanRenderer::render_loop()
         }
         ImGui::End();
 
-        update_uniform_buffer();
         ImGui::Render();
+        update_uniform_buffer();
         render();
 
         timeOffset += static_cast<float>(dt) * 0.001f; // Scroll speed
@@ -418,7 +418,24 @@ void VulkanRenderer::pick_physical_device()
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
+    std::vector<VkPhysicalDeviceProperties> deviceProps(deviceCount);
+
     physicalDevice = devices[0]; // Pick first device (simplified)
+    for (uint32_t i = 0; i < deviceCount; ++i)
+    {
+        vkGetPhysicalDeviceProperties(devices[i], &deviceProps[i] );
+        if (deviceProps[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) //Pick discrete GPU (specific)
+        {
+            physicalDevice = devices[i];
+            printf("%s\n", deviceProps[i].deviceName);
+            break;
+        }
+    }
+
+    
+
+
 }
 
 void VulkanRenderer::create_logical_device()
