@@ -47,6 +47,7 @@ public:
     ~VulkanRenderer();
     void init(void *hInstance, void *hwnd);
     void add_block(cJSON* block);
+    void resize();
     void start();
     void stop();
 
@@ -101,6 +102,7 @@ private:
     VkDebugUtilsMessengerEXT debugMessenger;
 
     std::thread renderThread;
+    std::mutex  renderMutex;
     std::mutex  dataMutex;
     std::condition_variable dataCond;
     std::set<AlphBlock> blockSet;

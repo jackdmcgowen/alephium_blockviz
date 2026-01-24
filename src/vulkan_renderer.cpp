@@ -327,6 +327,8 @@ void VulkanRenderer::render()
     VkSemaphore     imageAvailableSemaphore;
     VkSemaphore     renderFinishedSemaphore;
 
+    std::lock_guard<std::mutex> lk(renderMutex);
+
     currentFrame = s_frameCounter % MAX_FRAMES_IN_FLIGHT;
 
     fence = inFlightFrames[currentFrame].fence;
@@ -480,6 +482,48 @@ void VulkanRenderer::create_logical_device()
     vkGetDeviceQueue(device, 0, 0, &graphicsQueue);
 }
 
+void VulkanRenderer::resize()
+{
+    RECT rect;
+    int new_width;
+    int new_height;
+
+    GetClientRect((HWND)hwnd, &rect);
+
+    new_width = rect.right - rect.left;
+    new_height = rect.bottom - rect.top;
+
+    if (new_width == width && new_height == height)
+        return;
+
+    std::lock_guard<std::mutex> lk(renderMutex);
+
+    width = new_width;
+    height = new_height;
+
+    vkDeviceWaitIdle(device);
+    
+    for (auto framebuffer : swapchainFramebuffers)
+    {
+        vkDestroyFramebuffer(device, framebuffer, nullptr);
+
+    }
+
+
+    for (auto imageView : swapchainImageViews)
+    {
+        vkDestroyImageView(device, imageView, nullptr);
+    }
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthImageMemory, nullptr);
+
+    create_swapchain();
+    create_depth_resources();
+    create_image_views();
+    create_framebuffers();
+}
+
 void VulkanRenderer::create_swapchain()
 {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -489,7 +533,7 @@ void VulkanRenderer::create_swapchain()
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
     createInfo.minImageCount = 3;
-    createInfo.oldSwapchain = VK_NULL_HANDLE;
+    createInfo.oldSwapchain = swapchain;
     createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent = { width, height };
@@ -525,25 +569,7 @@ void VulkanRenderer::create_image_views()
     swapchainImageViews.resize(swapchainImages.size());
     for (size_t i = 0; i < swapchainImages.size(); i++)
     {
-        VkImageViewCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        createInfo.image = swapchainImages[i];
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = swapchainImageFormat;
-        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(device, &createInfo, nullptr, &swapchainImageViews[i]) != VK_SUCCESS)
-        {
-            throw std::runtime_error("Failed to create image views");
-        }
+        swapchainImageViews[i] = create_image_view(swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 }
 
@@ -710,25 +736,6 @@ void VulkanRenderer::create_graphics_pipeline()
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)width;
-    viewport.height = (float)height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = swapchainExtent;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -772,12 +779,13 @@ void VulkanRenderer::create_graphics_pipeline()
     }
 
     VkDynamicState dynamicStates[] = {
-    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY
+    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+    VK_DYNAMIC_STATE_VIEWPORT
     };
 
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = 1;
+    dynamicState.dynamicStateCount = _countof( dynamicStates );
     dynamicState.pDynamicStates = dynamicStates;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -786,7 +794,6 @@ void VulkanRenderer::create_graphics_pipeline()
     pipelineInfo.pStages = shaderStages;
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
@@ -807,6 +814,7 @@ void VulkanRenderer::create_graphics_pipeline()
 
 void VulkanRenderer::create_framebuffers()
 {
+    swapchainFramebuffers.clear();
     swapchainFramebuffers.resize(swapchainImageViews.size());
     for (size_t i = 0; i < swapchainImageViews.size(); i++)
     {
@@ -985,6 +993,8 @@ void VulkanRenderer::update_uniform_buffer()
     glm::vec3 eye = glm::vec3(0.0f, 0.0f, -30.0f - timeOffset);
     glm::vec3 center = glm::vec3(0.0f, 0.0f, -timeOffset);
 
+    std::lock_guard<std::mutex> lk(renderMutex);
+
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );
     //ubo.proj = glm::frustum(-NEAR_PLANE, (float)NEAR_PLANE, -(float)NEAR_PLANE, (float)NEAR_PLANE, NEAR_PLANE, FAR_PLANE);
@@ -1024,6 +1034,16 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     vkCmdBeginRenderPass(buffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdSetPrimitiveTopology(buffer, topology);
+
+    VkViewport viewport;
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)width;
+    viewport.height = (float)height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(buffer, 0, 1, &viewport);
+
     VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);

@@ -15,6 +15,8 @@ const char * baseUrl;
 
 static volatile bool keepRunning = true; // Global exit flag
 
+static VulkanRenderer renderer;
+
 static void format_output(cJSON* json)
 {
     char* formatted = cJSON_Print(json);
@@ -46,6 +48,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     switch (msg)
     {
+    case WM_SIZE:
+        renderer.resize();
+        break;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -88,13 +94,14 @@ int main()
         printf("Failed to create window\n");
         return -1;
     }
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
 
     // Vulkan init
-    VulkanRenderer renderer;
     renderer.init(hInstance, hwnd);
     renderer.start();
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    
 
     ConfigArray config_array = load_configs("config.json");
     if (config_array.count == 0 || !config_array.configs[0].url)
