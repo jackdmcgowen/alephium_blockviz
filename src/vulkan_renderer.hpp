@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
 
+#define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
 
@@ -75,10 +76,16 @@ private:
     VkPipeline graphicsPipeline;
     std::vector<VkFramebuffer> swapchainFramebuffers;
     VkCommandPool commandPool;
-    VkCommandBuffer commandBuffer;
-    VkSemaphore imageAvailableSemaphore;
-    VkSemaphore renderFinishedSemaphore;
-    VkFence inFlightFence;
+
+    struct FramesInFlight
+    {
+        VkSemaphore     renderFinishedSemaphore;
+        VkSemaphore     imageAvailableSemaphore;
+        VkCommandBuffer commandBuffer;
+        VkFence         fence;
+    } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
+
+    int currentFrame;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;

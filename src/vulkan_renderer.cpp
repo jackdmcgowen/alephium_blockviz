@@ -33,9 +33,12 @@ static const float FOV = glm::radians(45.0f);
 
 #ifndef NDEBUG
 static const bool enableValidationLayers = TRUE;
+static const bool enableValidationLogging = TRUE;
 #else
 static const bool enableValidationLayers = FALSE;
+static const bool enableValidationLogging = FALSE;
 #endif
+FILE             *validationFile;
 
 const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
@@ -90,10 +93,8 @@ VulkanRenderer::VulkanRenderer()
     , pipelineLayout(VK_NULL_HANDLE)
     , graphicsPipeline(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
-    , commandBuffer(VK_NULL_HANDLE)
-    , imageAvailableSemaphore(VK_NULL_HANDLE)
-    , renderFinishedSemaphore(VK_NULL_HANDLE)
-    , inFlightFence(VK_NULL_HANDLE)
+    , inFlightFrames{}
+    , currentFrame(0)
     , vertexBuffer(VK_NULL_HANDLE)
     , vertexBufferMemory(VK_NULL_HANDLE)
     , indexBuffer(VK_NULL_HANDLE)
@@ -318,10 +319,24 @@ void VulkanRenderer::render_loop()
 
 void VulkanRenderer::render()
 {
-    vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-    vkResetFences(device, 1, &inFlightFence);
+    static uint64_t s_frameCounter;
+    static uint32_t imageIndex;
 
-    uint32_t imageIndex;
+    VkFence         fence;
+    VkCommandBuffer commandBuffer;
+    VkSemaphore     imageAvailableSemaphore;
+    VkSemaphore     renderFinishedSemaphore;
+
+    currentFrame = s_frameCounter % MAX_FRAMES_IN_FLIGHT;
+
+    fence = inFlightFrames[currentFrame].fence;
+    commandBuffer = inFlightFrames[currentFrame].commandBuffer;
+    imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
+    renderFinishedSemaphore = inFlightFrames[currentFrame].renderFinishedSemaphore;
+
+    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &fence );
+
     vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     
     vkResetCommandBuffer(commandBuffer, 0);
@@ -329,18 +344,16 @@ void VulkanRenderer::render()
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = waitSemaphores;
+    submitInfo.pWaitSemaphores = &imageAvailableSemaphore;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
-    VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = signalSemaphores;
+    submitInfo.pSignalSemaphores = &renderFinishedSemaphore;
 
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS)
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to submit draw command buffer");
     }
@@ -348,11 +361,13 @@ void VulkanRenderer::render()
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = signalSemaphores;
+    presentInfo.pWaitSemaphores = &renderFinishedSemaphore;
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
+
+    s_frameCounter++;
 }
 
 void VulkanRenderer::create_instance()
@@ -473,7 +488,8 @@ void VulkanRenderer::create_swapchain()
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
-    createInfo.minImageCount = 2;
+    createInfo.minImageCount = 3;
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
     createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent = { width, height };
@@ -483,7 +499,7 @@ void VulkanRenderer::create_swapchain()
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
     createInfo.clipped = VK_TRUE;
-
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to create swapchain");
@@ -870,6 +886,7 @@ void VulkanRenderer::create_descriptor_pool()
     poolInfo.poolSizeCount = 2;
     poolInfo.pPoolSizes = pool_sizes;
     poolInfo.maxSets = 2;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
     {
@@ -925,9 +942,12 @@ void VulkanRenderer::create_command_pool()
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
-    if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS)
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        throw std::runtime_error("Failed to allocate command buffers");
+        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].commandBuffer) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to allocate command buffers");
+        }
     }
 }
 
@@ -946,11 +966,14 @@ void VulkanRenderer::create_sync_objects()
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
-        vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS)
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        throw std::runtime_error("Failed to create synchronization objects");
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].imageAvailableSemaphore) != VK_SUCCESS
+         || vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].renderFinishedSemaphore) != VK_SUCCESS
+         || vkCreateFence(device, &fenceInfo, nullptr, &inFlightFrames[i].fence) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create synchronization objects");
+        }
     }
 }
 
@@ -1166,9 +1189,13 @@ void VulkanRenderer::cleanup()
     vkFreeMemory(device, uniformBufferMemory, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-    vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
-    vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-    vkDestroyFence(device, inFlightFence, nullptr);
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        vkDestroySemaphore(device, inFlightFrames[i].imageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(device, inFlightFrames[i].renderFinishedSemaphore, nullptr);
+        vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
+    }
     vkDestroyCommandPool(device, commandPool, nullptr);
     for (auto framebuffer : swapchainFramebuffers)
     {
@@ -1184,6 +1211,18 @@ void VulkanRenderer::cleanup()
     vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
+
+    if (enableValidationLayers)
+    {
+        if (enableValidationLogging)
+        {
+            fclose(validationFile);
+            validationFile = NULL;
+
+            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+            func(instance, debugMessenger, nullptr);
+        }
+    }
     vkDestroyInstance(instance, nullptr);
 }
 
@@ -1195,13 +1234,24 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
     void* pUserData
     )
 {
-    std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
+    if (enableValidationLogging) {
+        fprintf(validationFile, "%s", pCallbackData->pMessage);
+    }
+    OutputDebugStringA( pCallbackData->pMessage );
+
     return VK_FALSE; // Return VK_FALSE to not abort the call
 }
 
 void VulkanRenderer::setup_debug_messenger()
 {
     if (!enableValidationLayers) return;
+
+    if (enableValidationLogging) {
+        validationFile = fopen( "debug.log", "a+");
+
+        if (!validationFile)
+            throw std::runtime_error("Failed to setup debug log");
+    }
 
     VkDebugUtilsMessengerCreateInfoEXT createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
