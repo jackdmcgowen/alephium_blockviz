@@ -45,19 +45,21 @@ public:
 
     VulkanRenderer();
     ~VulkanRenderer();
-    void init(void *hInstance, void *hwnd);
-    void add_block(cJSON* block);
-    void resize();
-    void start();
-    void stop();
+    void Init(void *hInstance, void *hwnd);
+    void Add_Block(cJSON* block);
+    void Resize();
+    void Start();
+    void Stop();
 
 private:
+    void resize();
     static const int MAX_INSTANCES = 1024*1024; // Arbitrary large size
     static const Vertex CUBE_VERTICES[8]; // 8 corners
     static const uint16_t CUBE_INDICES[36]; // 12 triangles
 
     void *hInstance;
     void *hwnd;
+
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
     VkDevice device;

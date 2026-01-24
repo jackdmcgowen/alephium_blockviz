@@ -114,11 +114,11 @@ VulkanRenderer::VulkanRenderer()
 
 VulkanRenderer::~VulkanRenderer()
 {
-    stop();
+    Stop();
     cleanup();
 }
 
-void VulkanRenderer::init(void *hInstance, void *hwnd)
+void VulkanRenderer::Init(void *hInstance, void *hwnd)
 {
     RECT rect;
     GetClientRect((HWND)hwnd, &rect);
@@ -185,7 +185,7 @@ void VulkanRenderer::init(void *hInstance, void *hwnd)
     info.UseDynamicRendering = false;
     info.Subpass = 0;
     info.MinImageCount = 2;
-    info.ImageCount = 2;
+    info.ImageCount = MAX_FRAMES_IN_FLIGHT;
     info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     info.Allocator = NULL;
     info.CheckVkResultFn = check_vk_result;
@@ -200,13 +200,13 @@ void VulkanRenderer::add_block(cJSON* block)
     dataCond.notify_one();
 }
 
-void VulkanRenderer::start()
+void VulkanRenderer::Start()
 {
     running = true;
     renderThread = std::thread(&VulkanRenderer::render_loop, this);
 }
 
-void VulkanRenderer::stop()
+void VulkanRenderer::Stop()
 {
     {
         std::lock_guard<std::mutex> lock(dataMutex);
@@ -321,7 +321,9 @@ void VulkanRenderer::render()
 {
     static uint64_t s_frameCounter;
     static uint32_t imageIndex;
+    static bool     resizing = false;
 
+    VkResult 		result;
     VkFence         fence;
     VkCommandBuffer commandBuffer;
     VkSemaphore     imageAvailableSemaphore;
@@ -329,7 +331,7 @@ void VulkanRenderer::render()
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
-    currentFrame = s_frameCounter % MAX_FRAMES_IN_FLIGHT;
+    currentFrame = s_frameCounter++ % MAX_FRAMES_IN_FLIGHT;
 
     fence = inFlightFrames[currentFrame].fence;
     commandBuffer = inFlightFrames[currentFrame].commandBuffer;
@@ -338,10 +340,20 @@ void VulkanRenderer::render()
 
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkResetFences(device, 1, &fence );
-
-    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    
     vkResetCommandBuffer(commandBuffer, 0);
+
+    if (resizing)
+    {
+        resize();
+        resizing = false;
+    }
+
+    result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+    resizing = true;
+    }
+    
     record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
 
     VkSubmitInfo submitInfo{};
@@ -368,8 +380,6 @@ void VulkanRenderer::render()
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
-
-    s_frameCounter++;
 }
 
 void VulkanRenderer::create_instance()
@@ -482,7 +492,7 @@ void VulkanRenderer::create_logical_device()
     vkGetDeviceQueue(device, 0, 0, &graphicsQueue);
 }
 
-void VulkanRenderer::resize()
+void VulkanRenderer::Resize()
 {
     RECT rect;
     int new_width;
@@ -493,6 +503,9 @@ void VulkanRenderer::resize()
     new_width = rect.right - rect.left;
     new_height = rect.bottom - rect.top;
 
+    if (0 == new_width && 0 == new_height)
+        return;
+
     if (new_width == width && new_height == height)
         return;
 
@@ -500,6 +513,20 @@ void VulkanRenderer::resize()
 
     width = new_width;
     height = new_height;
+
+    resize();
+}
+
+void VulkanRenderer::resize()
+{
+    VkSurfaceCapabilitiesKHR capabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
+
+    if (capabilities.currentExtent.width == 0
+     || capabilities.currentExtent.height == 0)
+    {
+        return;
+    }
 
     vkDeviceWaitIdle(device);
     
@@ -526,20 +553,19 @@ void VulkanRenderer::resize()
 
 void VulkanRenderer::create_swapchain()
 {
-    VkSurfaceCapabilitiesKHR capabilities;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
+    swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
     createInfo.minImageCount = 3;
     createInfo.oldSwapchain = swapchain;
-    createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    createInfo.imageFormat = swapchainImageFormat;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent = { width, height };
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    createInfo.preTransform = capabilities.currentTransform;
+    createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
     createInfo.clipped = VK_TRUE;
@@ -553,7 +579,7 @@ void VulkanRenderer::create_swapchain()
     vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr);
     swapchainImages.resize(imageCount);
     vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data());
-    swapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    
     swapchainExtent = { width, height };
 }
 
@@ -736,6 +762,25 @@ void VulkanRenderer::create_graphics_pipeline()
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)width;
+    viewport.height = (float)height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -794,6 +839,7 @@ void VulkanRenderer::create_graphics_pipeline()
     pipelineInfo.pStages = shaderStages;
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;

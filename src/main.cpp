@@ -49,7 +49,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (msg)
     {
     case WM_SIZE:
-        renderer.resize();
+        renderer.Resize();
         break;
 
     case WM_DESTROY:
@@ -96,8 +96,8 @@ int main()
     }
 
     // Vulkan init
-    renderer.init(hInstance, hwnd);
-    renderer.start();
+    renderer.Init(hInstance, hwnd);
+    renderer.Start();
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
@@ -168,7 +168,7 @@ int main()
                                 GET_OBJECT_ITEM( iter, block );
                                 if (block)
                                 {
-                                    renderer.add_block(block);
+                                    renderer.Add_Block(block);
                                     totalBlocks++;
                                 }
                             }
@@ -186,7 +186,7 @@ int main()
     }
 
     // Cleanup
-    renderer.stop();
+    renderer.Stop();
     curl_easy_cleanup(curl);
     free_configs(&config_array);
     for (auto block : blockQueue)
