@@ -193,7 +193,7 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     
 }
 
-void VulkanRenderer::add_block(cJSON* block)
+void VulkanRenderer::Add_Block(cJSON* block)
 {
     std::lock_guard<std::mutex> lock(dataMutex);
     blockSet.insert(AlphBlock(block));
@@ -825,7 +825,8 @@ void VulkanRenderer::create_graphics_pipeline()
 
     VkDynamicState dynamicStates[] = {
     VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-    VK_DYNAMIC_STATE_VIEWPORT
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR
     };
 
     VkPipelineDynamicStateCreateInfo dynamicState{};
@@ -1089,6 +1090,11 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(buffer, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = swapchainExtent;
+    vkCmdSetScissor(buffer, 0, 1, &scissor);
 
     VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
