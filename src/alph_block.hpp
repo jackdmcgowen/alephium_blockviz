@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#define ALPH_LOOKBACK_WINDOW_SECONDS ( 2 * 60 )
 #define ALPH_TARGET_POLL_SECONDS ( 16 )
 #define ALPH_TARGET_BLOCK_SECONDS ( 8 )
 

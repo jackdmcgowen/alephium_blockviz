@@ -48,6 +48,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     switch (msg)
     {
+    case WM_SIZING:
     case WM_SIZE:
         renderer.Resize();
         break;
@@ -120,7 +121,7 @@ int main()
     }
 
 	  // make last poll twice as far back so that some blocks can be buffered immediately
-    lastPollTs = static_cast<int64_t>(time(NULL) - 2*ALPH_TARGET_POLL_SECONDS) * 1000; // 16 seconds ago
+    lastPollTs = static_cast<int64_t>(time(NULL) - ALPH_LOOKBACK_WINDOW_SECONDS ) * 1000; // 16 seconds ago
 
     // Main loop with polling and rendering
     MSG msg = { 0 };

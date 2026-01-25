@@ -295,8 +295,8 @@ return( obj );
 
 cJSON* get_blockflow_blocks_with_events
     (
-    int64_t             fromTs,
-    int64_t             toTs
+    int64_t             fromTs,     /* timestamp in milliseconds    */
+    int64_t             toTs        /* timestamp in milliseconds    */
     )
 {
 char				    url[128];

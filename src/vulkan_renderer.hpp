@@ -9,6 +9,9 @@
 #include <condition_variable>
 #include <deque>
 #include <set>
+
+#define GLM_FORCE_LEFT_HANDED
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
@@ -65,6 +68,8 @@ private:
 
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
+    VkPhysicalDeviceProperties deviceProps;
+    VkPhysicalDeviceMemoryProperties deviceMemProps;
     VkDevice device;
     VkQueue graphicsQueue;
     VkSurfaceKHR surface;
@@ -104,7 +109,6 @@ private:
     VkDeviceMemory uniformBufferMemory;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
-    VkDebugUtilsMessengerEXT debugMessenger;
 
     std::thread renderThread;
     std::mutex  renderMutex;
@@ -121,11 +125,6 @@ private:
     void render_loop();
 
     void render();
-    void create_instance();
-    void create_surface();
-    void pick_physical_device();
-    void create_logical_device();
-    void create_swapchain();
     void create_depth_resources();
     void create_image_views();
     void create_render_pass();
@@ -139,17 +138,12 @@ private:
     void create_descriptor_pool();
     void create_descriptor_sets();
     void create_command_pool();
-    void create_command_buffers();
     void create_sync_objects();
     void update_uniform_buffer();
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
-    uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
-    void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-    VkImageView create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
     VkFormat find_depth_format();
     void cleanup();
-    void setup_debug_messenger();
 };
 
 #endif /* VULKAN_RENDERER_HPP */
