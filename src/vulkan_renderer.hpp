@@ -18,7 +18,7 @@
 #define WDW_HEIGHT 1024
 
 #define NEAR_PLANE  ( 1.0f )
-#define FAR_PLANE ( 1000.0f )
+#define FAR_PLANE ( 5000.0f )
 
 class VulkanRenderer
 {

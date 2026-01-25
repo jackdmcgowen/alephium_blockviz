@@ -299,8 +299,8 @@ void VulkanRenderer::render_loop()
         ImGui::Begin("Blockflow", 0, flags);
         {
             ImGui::SliderFloat("meters/s", &meters_per_second, 1.0f, 50.0f);
-            ImGui::SliderFloat("pos", &eye_z, 30.0f, 1000.0f);
-            float bps = total_blocks / (elapsedSeconds - ALPH_TARGET_POLL_SECONDS);
+            ImGui::SliderFloat("pos", &eye_z, -1000.f, 1000.0f);
+            float bps = total_blocks / elapsedSeconds;
             ImGui::Text("total %d", total_blocks);
             ImGui::SameLine();
             ImGui::Text("bps %1.2f", bps);
@@ -1091,15 +1091,15 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -eye_z - elapsedSeconds);
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, -elapsedSeconds);
+    float meters =  meters_per_second * elapsedSeconds;
+
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, eye_z - meters);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, -meters);
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );
-    //ubo.proj = glm::frustum(-NEAR_PLANE, (float)NEAR_PLANE, -(float)NEAR_PLANE, (float)NEAR_PLANE, NEAR_PLANE, FAR_PLANE);
-    //ubo.proj[1][1] *= -1; // Flip Y for Vulkan
 
     ubo.viewPos = eye;
     ubo.lightPos = center;

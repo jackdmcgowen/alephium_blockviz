@@ -119,7 +119,8 @@ int main()
         return -1;
     }
 
-    lastPollTs = static_cast<int64_t>(time(NULL) - ALPH_TARGET_POLL_SECONDS) * 1000; // 8 seconds ago
+	  // make last poll twice as far back so that some blocks can be buffered immediately
+    lastPollTs = static_cast<int64_t>(time(NULL) - 2*ALPH_TARGET_POLL_SECONDS) * 1000; // 16 seconds ago
 
     // Main loop with polling and rendering
     MSG msg = { 0 };
