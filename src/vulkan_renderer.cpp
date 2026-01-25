@@ -79,6 +79,11 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
     3, 4, 7, 7, 5, 3
 };
 
+static float meters_per_second = ALPH_TARGET_BLOCK_SECONDS;
+static float eye_z = -30.f;
+
+static const uint32_t statusBarHeight = 200;
+
 VulkanRenderer::VulkanRenderer()
     : hInstance(nullptr)
     , hwnd(nullptr)
@@ -108,7 +113,7 @@ VulkanRenderer::VulkanRenderer()
     , descriptorPool(VK_NULL_HANDLE)
     , descriptorSet(VK_NULL_HANDLE)
     , running(false)
-    , timeOffset(0.0f)
+    , elapsedSeconds(0.0f)
 {
 }
 
@@ -228,6 +233,7 @@ void VulkanRenderer::render_loop()
     t = dt = 0.0;
     QueryPerformanceFrequency(&freq);
 
+    int64_t start = time(NULL);
     while (running)
     {
         // Start the Dear ImGui frame
@@ -238,8 +244,8 @@ void VulkanRenderer::render_loop()
         //start frame
         QueryPerformanceCounter(&t1);
 
-        //delay 16 seconds
-        int64_t delaytime = static_cast<int64_t>(time(NULL) - 16) * 1000;
+        //delay 8 seconds
+        int64_t delaytime = static_cast<int64_t>(time(NULL) - 2*ALPH_TARGET_POLL_SECONDS) * 1000;
 
         std::unique_lock<std::mutex> lock(dataMutex);
         if (!blockSet.empty())
@@ -252,11 +258,14 @@ void VulkanRenderer::render_loop()
                 int shardId = block.chainFrom * 4 + block.chainTo;
                 float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
                 float radius = 20.0f;
-                float x = radius * cosf(angle);
-                float y = radius * sinf(angle);
-                float z = static_cast<float>(block.timestamp) * 0.00000000001f - timeOffset;
 
-                InstanceData inst = { glm::vec3(x, y, z), SHARD_COLORS[shardId] };
+                glm::vec3 pos(
+                    radius * cosf(angle),
+                    radius * sinf(angle),
+                    -static_cast<float>(time(&block.timestamp) - start)
+                );
+                InstanceData inst = { pos, SHARD_COLORS[shardId] };
+
 
                 if (instanceCount < MAX_INSTANCES)
                 {
@@ -268,6 +277,7 @@ void VulkanRenderer::render_loop()
                     printf("Instance buffer full\n");
                 }
 
+                ++total_blocks;
                 blockQueue.push_front(block);
                 blockSet.erase(it);
             }
@@ -280,29 +290,73 @@ void VulkanRenderer::render_loop()
             blockQueue.pop_back();
         }
 
-        ImGui::Begin("Blockflow");
-        for (auto it2 : blockQueue)
-        {
-            ImGui::PushID(it2.hash.c_str());
+        static AlphBlock selected;
 
-            int shardId = it2.chainFrom * 4 + it2.chainTo;
-            ImGui::TextColored( ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", it2.chainFrom, it2.chainTo );
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
+        ImGui::SetNextWindowPos(ImVec2(0, height - statusBarHeight));
+        ImGui::SetNextWindowSize(ImVec2(width, statusBarHeight));
+        ImGui::SetNextWindowBgAlpha(0.7f);
+        ImGui::Begin("Blockflow", 0, flags);
+        {
+            ImGui::SliderFloat("meters/s", &meters_per_second, 1.0f, 50.0f);
+            ImGui::SliderFloat("pos", &eye_z, 30.0f, 1000.0f);
+            float bps = total_blocks / (elapsedSeconds - ALPH_TARGET_POLL_SECONDS);
+            ImGui::Text("total %d", total_blocks);
             ImGui::SameLine();
-           
-      
-            if (ImGui::Button(it2.hash.c_str()))
+            ImGui::Text("bps %1.2f", bps);
+            for (auto it2 : blockQueue)
             {
-                ImGui::SetClipboardText(it2.hash.c_str());
+
+                ImGui::PushID(it2.hash.c_str());
+
+                int shardId = it2.chainFrom * 4 + it2.chainTo;
+                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", it2.chainFrom, it2.chainTo);
+                ImGui::SameLine();
+                if (ImGui::Button(it2.hash.c_str()))
+                {
+                    selected.hash = it2.hash;
+                    selected.chainFrom = it2.chainFrom;
+                    selected.chainTo = it2.chainTo;
+                    selected.deps.resize(it2.deps.size());
+                    selected.txns.resize(it2.txns.size());
+                    std::copy(it2.deps.begin(), it2.deps.end(), selected.deps.begin());
+                    std::copy(it2.txns.begin(), it2.txns.end(), selected.txns.begin());
+
+                    ImGui::SetClipboardText(it2.hash.c_str());
+                }
+                ImGui::PopID();
             }
-            ImGui::PopID();
         }
         ImGui::End();
 
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
+        ImGui::SetNextWindowBgAlpha(0.0f);
+
+        flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
+
+        char url[512];
+        ImGui::Begin("Block", 0, flags);
+        {
+            if (selected.txns.size())
+                {
+                memset(url, 0, sizeof(url));
+                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected.hash.c_str());
+
+                ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
+                ImGui::SameLine();
+                ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
+
+                for( auto tx : selected.txns)
+                    ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
+                }
+        }
+        ImGui::End();
         ImGui::Render();
         update_uniform_buffer();
         render();
 
-        timeOffset += static_cast<float>(dt) * 0.001f; // Scroll speed
+        elapsedSeconds += static_cast<float>(dt) * 0.001f; // Scroll speed
 
         //end frame
         do
@@ -1037,8 +1091,8 @@ void VulkanRenderer::update_uniform_buffer()
 {
     UniformBufferObject ubo{};
 
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -30.0f - timeOffset);
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, -timeOffset);
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, -eye_z - elapsedSeconds);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, -elapsedSeconds);
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
@@ -1049,6 +1103,7 @@ void VulkanRenderer::update_uniform_buffer()
 
     ubo.viewPos = eye;
     ubo.lightPos = center;
+    ubo.meters = meters_per_second;
 
     void* data;
     vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
@@ -1114,8 +1169,6 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         throw std::runtime_error("Failed to record command buffer");
     }
-
-    
 }
 
 uint32_t VulkanRenderer::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties)

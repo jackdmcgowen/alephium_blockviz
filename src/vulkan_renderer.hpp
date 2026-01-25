@@ -40,7 +40,10 @@ public:
         glm::mat4 view;
         glm::mat4 proj;
         glm::vec3 lightPos;
+        glm::float32 pad1;
         glm::vec3 viewPos;
+        glm::float32 pad2;
+        glm::float32 meters;
     };
 
     VulkanRenderer();
@@ -109,8 +112,9 @@ private:
     std::condition_variable dataCond;
     std::set<AlphBlock> blockSet;
     std::deque<AlphBlock> blockQueue;
+    int total_blocks;
     bool running;
-    float timeOffset;
+    float elapsedSeconds;
     uint32_t width;
     uint32_t height;
 

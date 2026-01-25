@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#define ALPH_TARGET_POLL_SECONDS ( 16 )
+#define ALPH_TARGET_BLOCK_SECONDS ( 8 )
+
 class AlphBlock
 {
-
 
 public:
 	int		chainFrom;
@@ -16,6 +18,15 @@ public:
 	int64_t timestamp;
 	std::string hash;
 	std::vector<std::string > deps;
+	std::vector<std::string> txns;
+
+	AlphBlock()
+		: chainFrom(-1)
+		, chainTo(-1)
+		, timestamp(0)
+		, hash()
+		, deps()
+		, txns() {}
 
 	AlphBlock(cJSON* block)
 		: chainFrom(-1)
@@ -23,6 +34,7 @@ public:
 		, timestamp(0)
 		, hash()
 		, deps()
+		, txns()
 	{
 		GET_OBJECT_ITEM(block, chainFrom);
 		GET_OBJECT_ITEM(block, chainTo);
@@ -43,6 +55,16 @@ public:
 				cJSON_ArrayForEach(dep, deps)
 				{
 					this->deps.push_back(dep->valuestring);
+				}
+			}
+
+			GET_OBJECT_ITEM(block, transactions);
+			if (transactions)
+			{
+				cJSON* tx;
+				cJSON_ArrayForEach(tx, transactions)
+				{
+					this->txns.push_back(cJSON_Print(tx));
 				}
 			}
 

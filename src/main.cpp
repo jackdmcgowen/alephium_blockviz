@@ -119,7 +119,7 @@ int main()
         return -1;
     }
 
-    lastPollTs = static_cast<int64_t>(time(NULL) - 32) * 1000; // 32 seconds ago
+    lastPollTs = static_cast<int64_t>(time(NULL) - ALPH_TARGET_POLL_SECONDS) * 1000; // 8 seconds ago
 
     // Main loop with polling and rendering
     MSG msg = { 0 };
@@ -142,7 +142,7 @@ int main()
         }
 
         int64_t now = (int64_t)time(NULL) * 1000;
-        if (now - lastPollTs >= 16000) // 16 seconds
+        if (now - lastPollTs >= ( ALPH_TARGET_POLL_SECONDS * 1000 )) // 8 seconds
         {
             printf("\nPolling blockflow at %lld\n", now);
             ResponseData response = { NULL, 0, 0, 0 };
@@ -171,6 +171,7 @@ int main()
                                     renderer.Add_Block(block);
                                     totalBlocks++;
                                 }
+
                             }
                         }
                     }
