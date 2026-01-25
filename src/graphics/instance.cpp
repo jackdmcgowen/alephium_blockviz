@@ -3,10 +3,9 @@
 #include <windows.h>
 #include <vulkan/vulkan_win32.h>
 
-static VkInstance   instance;
-
 VkInstance create_instance()
 {
+    VkInstance   instance;
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Alephium DAG";
@@ -46,3 +45,11 @@ VkInstance create_instance()
     return(instance);
 
 }   /* create_instance() */
+
+
+void destroy_instance(VkInstance instance)
+{
+vkDestroyInstance(instance, nullptr);
+
+}   /* destroy_instance() */
+

@@ -104,7 +104,6 @@ private:
     VkDeviceMemory uniformBufferMemory;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
-    VkDebugUtilsMessengerEXT debugMessenger;
 
     std::thread renderThread;
     std::mutex  renderMutex;
@@ -148,7 +147,6 @@ private:
     VkImageView create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
     VkFormat find_depth_format();
     void cleanup();
-    void setup_debug_messenger();
 };
 
 #endif /* VULKAN_RENDERER_HPP */

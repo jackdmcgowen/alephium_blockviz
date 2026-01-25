@@ -33,15 +33,6 @@ static void check_vk_result(VkResult err)
 
 static const float FOV = glm::radians(45.0f);
 
-#ifndef NDEBUG
-static const bool enableValidationLayers = TRUE;
-static const bool enableValidationLogging = TRUE;
-#else
-static const bool enableValidationLayers = FALSE;
-static const bool enableValidationLogging = FALSE;
-#endif
-FILE             *validationFile;
-
 const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
     glm::vec3(0.20f, 1.00f, 0.34f),  // #33FF57 Green
@@ -135,7 +126,7 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     this->hInstance = hInstance;
     this->hwnd = hwnd;
     instance = create_instance();
-    setup_debug_messenger();
+    create_debug_messenger(instance);
     create_surface();
     pick_physical_device();
     create_logical_device();
@@ -1298,61 +1289,6 @@ void VulkanRenderer::cleanup()
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
 
-    if (enableValidationLayers)
-    {
-        if (enableValidationLogging)
-        {
-            fclose(validationFile);
-            validationFile = NULL;
-
-            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
-            func(instance, debugMessenger, nullptr);
-        }
-    }
-    vkDestroyInstance(instance, nullptr);
+    destroy_debug_messenger(instance);
+    destroy_instance(instance);
 }
-
-static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
-    (
-    VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-    VkDebugUtilsMessageTypeFlagsEXT messageType,
-    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-    void* pUserData
-    )
-{
-    if (enableValidationLogging) {
-        fprintf(validationFile, "%s", pCallbackData->pMessage);
-    }
-    OutputDebugStringA( pCallbackData->pMessage );
-
-    return VK_FALSE; // Return VK_FALSE to not abort the call
-}
-
-void VulkanRenderer::setup_debug_messenger()
-{
-    if (!enableValidationLayers) return;
-
-    if (enableValidationLogging) {
-        validationFile = fopen( "debug.log", "a+");
-
-        if (!validationFile)
-            throw std::runtime_error("Failed to setup debug log");
-    }
-
-    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    createInfo.pfnUserCallback = debug_callback;
-    createInfo.pUserData = nullptr; // Optional
-
-    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-    if (func == nullptr || func(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to set up debug messenger!");
-    }
-}
-
