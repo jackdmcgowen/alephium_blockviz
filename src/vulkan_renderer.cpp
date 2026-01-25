@@ -7,6 +7,8 @@
 #include "vulkan_renderer.hpp"
 #include "commands.h"
 
+#include "gpu_prv_lib.h"
+
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -132,7 +134,7 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
 
     this->hInstance = hInstance;
     this->hwnd = hwnd;
-    create_instance();
+    instance = create_instance();
     setup_debug_messenger();
     create_surface();
     pick_physical_device();
@@ -172,8 +174,6 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     // Set button color
     style.Colors[ImGuiCol_Button] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f); // Dark button color
     style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f); // Slightly lighter on hover
-
-    
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplVulkan_InitInfo info = {};
@@ -358,8 +358,7 @@ void VulkanRenderer::render_loop()
 
         elapsedSeconds += static_cast<float>(dt) * 0.001f; // Scroll speed
 
-        //end frame
-        do
+        do //end frame
         {
             QueryPerformanceCounter(&t2);
             dt = static_cast<double>((t2.QuadPart - t1.QuadPart) * 1000LL / freq.QuadPart);
@@ -436,44 +435,6 @@ void VulkanRenderer::render()
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 }
 
-void VulkanRenderer::create_instance()
-{
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Alephium DAG";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
-
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-    const char* extensions[] = 
-    { 
-#ifndef NDEBUG
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#endif
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
-    };
-    const char* enbl_layers[] = { "VK_LAYER_KHRONOS_validation" };
-#ifndef NDEBUG
-    createInfo.enabledExtensionCount = 3;
-#else
-    createInfo.enabledExtensionCount = 2;
-#endif
-    createInfo.ppEnabledExtensionNames = extensions;
-#ifndef NDEBUG
-    createInfo.enabledLayerCount = 1;
-    createInfo.ppEnabledLayerNames = enbl_layers;
-#endif
-
-    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create Vulkan instance");
-    }
-}
 
 void VulkanRenderer::create_surface()
 {
