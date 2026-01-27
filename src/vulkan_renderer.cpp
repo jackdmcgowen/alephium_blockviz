@@ -677,8 +677,8 @@ void VulkanRenderer::create_descriptor_set_layout()
 void VulkanRenderer::create_graphics_pipeline()
 {
     // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
-    FILE* vertFile = fopen("src/vert.spv", "rb");
-    FILE* fragFile = fopen("src/frag.spv", "rb");
+    FILE* vertFile = fopen("src/graphics/shaders/vert.spv", "rb");
+    FILE* fragFile = fopen("src/graphics/shaders/frag.spv", "rb");
     if (!vertFile || !fragFile)
     {
         throw std::runtime_error("Failed to load shaders");

@@ -118,6 +118,12 @@
     <Lib>
       <AdditionalDependencies>glm.lib;vulkan-1.lib;</AdditionalDependencies>
     </Lib>
+    <PostBuildEvent>
+      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Compile Vulkan Shaders</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -135,6 +141,12 @@
     <Lib>
       <AdditionalDependencies>glm.lib;vulkan-1.lib;</AdditionalDependencies>
     </Lib>
+    <PostBuildEvent>
+      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Compile Vulkan Shaders</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\graphics\device.cpp" />

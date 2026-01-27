@@ -17,7 +17,6 @@ layout(location = 0) out vec4 outColor;
 
 void main() {
     // Phong lighting parameters
-    vec3 baseColor = vec3(1.0, 1.0, 1.0); // White base color
     vec3 lightColor = vec3(1.0, 1.0, 1.0);
     
     // Ambient
@@ -28,7 +27,7 @@ void main() {
     vec3 norm = normalize(fragNormal);
     vec3 lightDir = normalize(ubo.lightPos - fragPos);
     float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = diff * lightColor;
+    vec3 diffuse = diff * lightColor * fragColor;
     
     // Specular
     float specularStrength = 0.1;
@@ -38,6 +37,6 @@ void main() {
     vec3 specular = specularStrength * spec * lightColor;
     
     // Combine Phong components and multiply by instance color
-    vec3 result = (ambient + diffuse) * baseColor * fragColor;
+    vec3 result = ambient * diffuse;
     outColor = vec4(result, 1.0);
 }
