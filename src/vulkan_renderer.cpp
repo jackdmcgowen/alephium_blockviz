@@ -127,7 +127,8 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     this->hwnd = hwnd;
     instance = create_instance();
     create_debug_messenger(instance);
-    create_surface();
+    surface = create_win32_surface(instance, hwnd, hInstance);
+
     pick_physical_device();
     create_logical_device();
     create_swapchain();
@@ -426,19 +427,6 @@ void VulkanRenderer::render()
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 }
 
-
-void VulkanRenderer::create_surface()
-{
-    VkWin32SurfaceCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    createInfo.hwnd = (HWND)hwnd;
-    createInfo.hinstance = (HINSTANCE)hInstance;
-
-    if (vkCreateWin32SurfaceKHR( instance, &createInfo, nullptr, &surface) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create window surface");
-    }
-}
 
 void VulkanRenderer::pick_physical_device()
 {
@@ -1287,8 +1275,9 @@ void VulkanRenderer::cleanup()
     }
     vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroyDevice(device, nullptr);
-    vkDestroySurfaceKHR(instance, surface, nullptr);
 
+    destroy_surface(instance, surface);
     destroy_debug_messenger(instance);
+
     destroy_instance(instance);
 }

@@ -151,6 +151,7 @@
   <ItemGroup>
     <ClCompile Include="..\src\graphics\device.cpp" />
     <ClCompile Include="..\src\graphics\instance.cpp" />
+    <ClCompile Include="..\src\graphics\surface.cpp" />
     <ClCompile Include="..\src\graphics\validation.cpp" />
   </ItemGroup>
   <ItemGroup>
