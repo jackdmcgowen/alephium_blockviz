@@ -120,8 +120,6 @@ private:
     void render_loop();
 
     void render();
-    void pick_physical_device();
-    void create_logical_device();
     void create_swapchain();
     void create_depth_resources();
     void create_image_views();

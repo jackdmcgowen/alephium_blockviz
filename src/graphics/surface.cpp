@@ -17,10 +17,12 @@ VkSurfaceKHR create_win32_surface(VkInstance instance, void *hwnd, void *hinstan
     }
 
     return(surface);
-}
+
+}   /* create_win32_surface() */
 
 
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface)
 {
     vkDestroySurfaceKHR(instance, surface, nullptr);
-}
+
+}   /* destroy_surface() */

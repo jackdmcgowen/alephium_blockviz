@@ -57,7 +57,8 @@ void create_debug_messenger(VkInstance instance)
     if (func == nullptr || func(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
         throw std::runtime_error("Failed to set up debug messenger!");
     }
-}
+
+}   /* create_debug_messenger() */
 
 
 void destroy_debug_messenger(VkInstance instance)
