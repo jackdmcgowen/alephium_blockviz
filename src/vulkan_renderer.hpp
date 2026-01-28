@@ -65,6 +65,8 @@ private:
 
     VkInstance instance;
     VkPhysicalDevice physicalDevice;
+    VkPhysicalDeviceProperties deviceProps;
+    VkPhysicalDeviceMemoryProperties deviceMemProps;
     VkDevice device;
     VkQueue graphicsQueue;
     VkSurfaceKHR surface;
@@ -137,10 +139,7 @@ private:
     void create_sync_objects();
     void update_uniform_buffer();
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
-    uint32_t find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
-    void create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-    VkImageView create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
     VkFormat find_depth_format();
     void cleanup();
 };

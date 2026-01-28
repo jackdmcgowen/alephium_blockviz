@@ -16,13 +16,22 @@ VkSurfaceKHR create_win32_surface(VkInstance instance, void* hwnd, void* hinstan
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface);
 
   //device.cpp
-VkPhysicalDevice pick_physical_device(VkInstance instance);
+VkPhysicalDevice pick_physical_device(
+    VkInstance instance,
+    VkPhysicalDeviceProperties* device_props,
+    VkPhysicalDeviceMemoryProperties* device_mem_props);
+
 void create_device(
     VkInstance          instance,
     VkPhysicalDevice    physicalDevice,
     VkDevice           *device,
     VkQueue            *queue);
 void destroy_device(VkDevice device);
+
+uint32_t find_device_memory_type(
+    VkPhysicalDeviceMemoryProperties* deviceMemProps,
+    uint32_t typeFilter,
+    VkMemoryPropertyFlags properties);
 
   //swapchain.cpp
 void create_swapchain(
@@ -32,4 +41,19 @@ void create_swapchain(
     std::vector<VkImage>& swapchainImages,
     VkFormat format,
     VkExtent2D extent);
+
+  //image.cpp
+void create_image(
+    VkDevice device,
+    uint32_t width,
+    uint32_t height,
+    VkFormat format,
+    VkImageTiling tiling,
+    VkImageUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkImage& image,
+    VkDeviceMemory& imageMemory,
+    VkPhysicalDeviceMemoryProperties* deviceMemProps);
+
+VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 

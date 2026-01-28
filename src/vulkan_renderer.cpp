@@ -82,6 +82,8 @@ VulkanRenderer::VulkanRenderer()
     , hwnd(nullptr)
     , instance(VK_NULL_HANDLE)
     , physicalDevice(VK_NULL_HANDLE)
+    , deviceProps()
+    , deviceMemProps()
     , device(VK_NULL_HANDLE)
     , graphicsQueue(VK_NULL_HANDLE)
     , surface(VK_NULL_HANDLE)
@@ -128,7 +130,7 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     instance = create_instance();
     create_debug_messenger(instance);
     surface = create_win32_surface(instance, hwnd, hInstance);
-    physicalDevice = pick_physical_device(instance);
+    physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     create_device(instance, physicalDevice, &device, &graphicsQueue);
 
     swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
@@ -494,8 +496,18 @@ void VulkanRenderer::resize()
 void VulkanRenderer::create_depth_resources()
 {
     VkFormat depthFormat = find_depth_format();
-    create_image(width, height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-    depthImageView = create_image_view(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    create_image(
+        device, 
+        width, height,
+        depthFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        depthImage,
+        depthImageMemory,
+        &deviceMemProps
+        );
+    depthImageView = create_image_view(device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void VulkanRenderer::create_image_views()
@@ -503,7 +515,7 @@ void VulkanRenderer::create_image_views()
     swapchainImageViews.resize(swapchainImages.size());
     for (size_t i = 0; i < swapchainImages.size(); i++)
     {
-        swapchainImageViews[i] = create_image_view(swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+        swapchainImageViews[i] = create_image_view(device, swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 }
 
@@ -1023,22 +1035,9 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         throw std::runtime_error("Failed to record command buffer");
     }
-}
 
-uint32_t VulkanRenderer::find_memory_type(uint32_t typeFilter, VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+}   /* record_command_buffer() */
 
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
-    {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-        {
-            return i;
-        }
-    }
-    throw std::runtime_error("Failed to find suitable memory type");
-}
 
 void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory)
 {
@@ -1059,7 +1058,7 @@ void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, 
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = find_memory_type(memRequirements.memoryTypeBits, properties);
+    allocInfo.memoryTypeIndex = find_device_memory_type(&deviceMemProps, memRequirements.memoryTypeBits, properties);
 
     if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS)
     {
@@ -1067,70 +1066,19 @@ void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, 
     }
 
     vkBindBufferMemory(device, buffer, memory, 0);
-}
 
-void VulkanRenderer::create_image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
-{
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = width;
-    imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = tiling;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = usage;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+}   /* create_buffer() */
 
-    if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create depth image");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(device, image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = find_memory_type(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to allocate depth image memory");
-    }
-
-    vkBindImageMemory(device, image, imageMemory, 0);
-}
-
-VkImageView VulkanRenderer::create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
-{
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = aspectFlags;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    VkImageView imageView;
-    if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create depth image view");
-    }
-    return imageView;
-}
 
 VkFormat VulkanRenderer::find_depth_format()
 {
-    VkFormat candidates[] = { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT };
+    VkFormat candidates[] = 
+        {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT
+        };
+
     for (VkFormat format : candidates)
     {
         VkFormatProperties props;
@@ -1141,7 +1089,8 @@ VkFormat VulkanRenderer::find_depth_format()
         }
     }
     throw std::runtime_error("Failed to find supported depth format");
-}
+
+}   /* find_depth_format() */
 
 void VulkanRenderer::cleanup()
 {

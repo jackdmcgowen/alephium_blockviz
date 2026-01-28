@@ -1,6 +1,9 @@
 #include "gpu_prv_lib.h"
 
-VkPhysicalDevice pick_physical_device(VkInstance instance)
+VkPhysicalDevice pick_physical_device(
+    VkInstance instance,
+    VkPhysicalDeviceProperties *device_props,
+    VkPhysicalDeviceMemoryProperties *device_mem_props)
 {
     VkPhysicalDevice physicalDevice;
     uint32_t deviceCount = 0;
@@ -14,16 +17,15 @@ VkPhysicalDevice pick_physical_device(VkInstance instance)
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-    std::vector<VkPhysicalDeviceProperties> deviceProps(deviceCount);
-
     physicalDevice = devices[0]; // Pick first device (simplified)
     for (uint32_t i = 0; i < deviceCount; ++i)
     {
-        vkGetPhysicalDeviceProperties(devices[i], &deviceProps[i]);
-        if (deviceProps[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) //Pick discrete GPU (specific)
+        vkGetPhysicalDeviceProperties(devices[i], device_props);
+        vkGetPhysicalDeviceMemoryProperties(devices[i], device_mem_props);
+        if (device_props->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) //Pick discrete GPU (specific)
         {
             physicalDevice = devices[i];
-            printf("%s\n", deviceProps[i].deviceName);
+            printf("%s\n", device_props->deviceName);
             break;
         }
     }
@@ -34,10 +36,10 @@ VkPhysicalDevice pick_physical_device(VkInstance instance)
 
 
 void create_device(
-            VkInstance          instance, 
-            VkPhysicalDevice    physicalDevice,
-            VkDevice           *device,
-            VkQueue            *queue )
+    VkInstance          instance, 
+    VkPhysicalDevice    physicalDevice,
+    VkDevice           *device,
+    VkQueue            *queue )
 {
     VkDeviceQueueCreateInfo queueCreateInfo{};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -71,3 +73,21 @@ void destroy_device(VkDevice device)
     vkDestroyDevice(device, nullptr);
 
 }   /* destroy_device() */
+
+
+uint32_t find_device_memory_type(
+    VkPhysicalDeviceMemoryProperties* deviceMemProps,
+    uint32_t typeFilter,
+    VkMemoryPropertyFlags properties)
+{
+
+    for (uint32_t i = 0; i < deviceMemProps->memoryTypeCount; i++)
+    {
+        if ((typeFilter & (1 << i)) && (deviceMemProps->memoryTypes[i].propertyFlags & properties) == properties)
+        {
+            return i;
+        }
+    }
+    throw std::runtime_error("Failed to find suitable memory type");
+
+}   /* find_device_memory_type() */
