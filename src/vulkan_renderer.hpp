@@ -120,7 +120,6 @@ private:
     void render_loop();
 
     void render();
-    void create_swapchain();
     void create_depth_resources();
     void create_image_views();
     void create_render_pass();

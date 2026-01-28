@@ -131,7 +131,10 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     physicalDevice = pick_physical_device(instance);
     create_device(instance, physicalDevice, &device, &graphicsQueue);
 
-    create_swapchain();
+    swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
+
+    swapchainExtent = { width, height };
+    create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
     create_depth_resources();
     create_image_views();
     create_render_pass();
@@ -480,42 +483,12 @@ void VulkanRenderer::resize()
     vkDestroyImage(device, depthImage, nullptr);
     vkFreeMemory(device, depthImageMemory, nullptr);
 
-    create_swapchain();
-    create_depth_resources();
-    create_image_views();
-    create_framebuffers();
-}
-
-void VulkanRenderer::create_swapchain()
-{
-    swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
-
-    VkSwapchainCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = surface;
-    createInfo.minImageCount = 3;
-    createInfo.oldSwapchain = swapchain;
-    createInfo.imageFormat = swapchainImageFormat;
-    createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    createInfo.imageExtent = { width, height };
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    createInfo.clipped = VK_TRUE;
-    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create swapchain");
-    }
-
-    uint32_t imageCount;
-    vkGetSwapchainImagesKHR(device, swapchain, &imageCount, nullptr);
-    swapchainImages.resize(imageCount);
-    vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data());
-    
     swapchainExtent = { width, height };
+    create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
+    create_image_views();
+
+    create_depth_resources();
+    create_framebuffers();
 }
 
 void VulkanRenderer::create_depth_resources()

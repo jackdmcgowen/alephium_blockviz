@@ -24,3 +24,12 @@ void create_device(
     VkQueue            *queue);
 void destroy_device(VkDevice device);
 
+  //swapchain.cpp
+void create_swapchain(
+    VkDevice device,
+    VkSurfaceKHR surface,
+    VkSwapchainKHR* swapchain,
+    std::vector<VkImage>& swapchainImages,
+    VkFormat format,
+    VkExtent2D extent);
+
