@@ -473,17 +473,16 @@ void VulkanRenderer::resize()
     for (auto framebuffer : swapchainFramebuffers)
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
-
     }
 
 
     for (auto imageView : swapchainImageViews)
     {
-        vkDestroyImageView(device, imageView, nullptr);
+        destroy_image_view(device, imageView);
     }
-    vkDestroyImageView(device, depthImageView, nullptr);
-    vkDestroyImage(device, depthImage, nullptr);
-    vkFreeMemory(device, depthImageMemory, nullptr);
+    destroy_image_view(device, depthImageView);
+
+    destroy_image(device, depthImage, depthImageMemory);
 
     swapchainExtent = { width, height };
     create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
@@ -1104,9 +1103,9 @@ void VulkanRenderer::cleanup()
     {
         vkUnmapMemory(device, instanceBufferMemory);
     }
-    vkDestroyImageView(device, depthImageView, nullptr);
-    vkDestroyImage(device, depthImage, nullptr);
-    vkFreeMemory(device, depthImageMemory, nullptr);
+    destroy_image_view(device, depthImageView);
+    destroy_image(device, depthImage, depthImageMemory);
+
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyBuffer(device, indexBuffer, nullptr);
@@ -1134,7 +1133,8 @@ void VulkanRenderer::cleanup()
     vkDestroyRenderPass(device, renderPass, nullptr);
     for (auto imageView : swapchainImageViews)
     {
-        vkDestroyImageView(device, imageView, nullptr);
+        destroy_image_view(device, imageView);
+        
     }
     vkDestroySwapchainKHR(device, swapchain, nullptr);
     destroy_device(device);

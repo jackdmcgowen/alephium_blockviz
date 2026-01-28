@@ -44,7 +44,6 @@ void create_image(
     {
         throw std::runtime_error("Failed to allocate depth image memory");
     }
-
     vkBindImageMemory(device, image, imageMemory, 0);
 
 }   /* create_image() */
@@ -70,3 +69,19 @@ VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, V
     return imageView;
 
 }	/* create_image_view() */
+
+
+void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory)
+{
+    vkDestroyImage(device, image, nullptr);
+
+    vkFreeMemory(device, imageMemory, nullptr);
+
+}   /* destroy_image() */
+
+
+void destroy_image_view(VkDevice device, VkImageView imageview)
+{
+    vkDestroyImageView(device, imageview, nullptr);
+
+}   /* destroy_image_view() */

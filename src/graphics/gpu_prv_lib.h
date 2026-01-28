@@ -55,5 +55,7 @@ void create_image(
     VkDeviceMemory& imageMemory,
     VkPhysicalDeviceMemoryProperties* deviceMemProps);
 
-VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory);
 
+VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+void destroy_image_view(VkDevice device, VkImageView imageview);
