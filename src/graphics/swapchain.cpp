@@ -35,3 +35,10 @@ void create_swapchain(
     vkGetSwapchainImagesKHR(device, *swapchain, &imageCount, swapchainImages.data());
 
 }   /* create_swapchain() */
+
+
+void destroy_swapchain(VkDevice device, VkSwapchainKHR swapchain)
+{
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
+
+}   /* destroy_swapchain() */

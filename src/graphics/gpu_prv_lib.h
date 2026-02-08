@@ -41,6 +41,7 @@ void create_swapchain(
     std::vector<VkImage>& swapchainImages,
     VkFormat format,
     VkExtent2D extent);
+void destroy_swapchain(VkDevice device, VkSwapchainKHR swapchain);
 
   //image.cpp
 void create_image(
