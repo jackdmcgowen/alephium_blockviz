@@ -16,7 +16,6 @@
 #include "imgui_impl_vulkan.h"
 #include <windows.h>
 
-
 #include <vulkan/vulkan_win32.h>
 #include <vulkan/vk_enum_string_helper.h>
 
@@ -29,7 +28,9 @@ static void check_vk_result(VkResult err)
     fprintf(stderr, "[vulkan] Error: VkResult = %s\n", string_VkResult(err) );
     if (err < 0)
         abort();
-}
+
+}   /* check_vk_result() */
+
 
 static const float FOV = glm::radians(45.0f);
 
@@ -72,8 +73,8 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
     3, 4, 7, 7, 5, 3
 };
 
-static float meters_per_second = ALPH_TARGET_BLOCK_SECONDS;
-static float eye_z = -30.f;
+static float meters_per_second = 1;
+static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
 
 static const uint32_t statusBarHeight = 200;
 
@@ -110,13 +111,15 @@ VulkanRenderer::VulkanRenderer()
     , running(false)
     , elapsedSeconds(0.0f)
 {
-}
+}   /* VulkanRenderer() */
 
 VulkanRenderer::~VulkanRenderer()
 {
     Stop();
     cleanup();
-}
+
+}   /* ~VulkanRenderer() */
+
 
 void VulkanRenderer::Init(void *hInstance, void *hwnd)
 {
@@ -150,7 +153,6 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     create_uniform_buffer();
     create_descriptor_pool();
     create_descriptor_sets();
-    create_command_buffers();
     create_sync_objects();
 
     // Setup Dear ImGui context
@@ -160,7 +162,6 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 
     ImGuiStyle& style = ImGui::GetStyle();
-
 
     // Set background color to dark grey
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
@@ -193,20 +194,25 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init( &info );
     
-}
+}   /* Init() */
+
 
 void VulkanRenderer::Add_Block(cJSON* block)
 {
     std::lock_guard<std::mutex> lock(dataMutex);
     blockSet.insert(AlphBlock(block));
     dataCond.notify_one();
-}
+
+}   /* Add_Block() */
+
 
 void VulkanRenderer::Start()
 {
     running = true;
     renderThread = std::thread(&VulkanRenderer::render_loop, this);
-}
+
+}   /* Start() */
+
 
 void VulkanRenderer::Stop()
 {
@@ -219,7 +225,9 @@ void VulkanRenderer::Stop()
     {
         renderThread.join();
     }
-}
+
+}   /* Stop() */
+
 
 void VulkanRenderer::render_loop()
 {
@@ -230,7 +238,7 @@ void VulkanRenderer::render_loop()
     t = dt = 0.0;
     QueryPerformanceFrequency(&freq);
 
-    int64_t start = time(NULL);
+    int64_t start = static_cast<int64_t>(time(NULL) - ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     while (running)
     {
         // Start the Dear ImGui frame
@@ -241,25 +249,25 @@ void VulkanRenderer::render_loop()
         //start frame
         QueryPerformanceCounter(&t1);
 
-        //delay 8 seconds
-        int64_t delaytime = static_cast<int64_t>(time(NULL) - 2*ALPH_TARGET_POLL_SECONDS) * 1000;
-
         std::unique_lock<std::mutex> lock(dataMutex);
         if (!blockSet.empty())
         {
             auto it = blockSet.begin();
             AlphBlock block = *it;
+            int64_t block_time = block.timestamp;
 
-            if (delaytime > block.timestamp)
             {
                 int shardId = block.chainFrom * 4 + block.chainTo;
                 float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
                 float radius = 20.0f;
 
+
+                float z = -static_cast<float>(block_time - start) / 1000.0f;
+
                 glm::vec3 pos(
                     radius * cosf(angle),
                     radius * sinf(angle),
-                    -static_cast<float>(time(&block.timestamp) - start)
+                    z
                 );
                 InstanceData inst = { pos, SHARD_COLORS[shardId] };
 
@@ -282,7 +290,7 @@ void VulkanRenderer::render_loop()
 
         lock.unlock();
 
-        if( blockQueue.size() > 50)
+        if( blockQueue.size() > 120)
         {
             blockQueue.pop_back();
         }
@@ -295,9 +303,10 @@ void VulkanRenderer::render_loop()
         ImGui::SetNextWindowBgAlpha(0.7f);
         ImGui::Begin("Blockflow", 0, flags);
         {
+            int64_t now = time(NULL) * 1000;
             ImGui::SliderFloat("meters/s", &meters_per_second, 1.0f, 50.0f);
             ImGui::SliderFloat("pos", &eye_z, -1000.f, 1000.0f);
-            float bps = total_blocks / elapsedSeconds;
+            float bps = total_blocks / (0.001f * (now - start));
             ImGui::Text("total %d", total_blocks);
             ImGui::SameLine();
             ImGui::Text("bps %1.2f", bps);
@@ -362,10 +371,10 @@ void VulkanRenderer::render_loop()
             t += dt;
         } while (dt <= frameTimeMin);
 
-
-        
     }
-}
+
+}   /* render_loop() */
+
 
 void VulkanRenderer::render()
 {
@@ -430,7 +439,9 @@ void VulkanRenderer::render()
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
-}
+
+}   /* render() */
+
 
 void VulkanRenderer::Resize()
 {
@@ -455,7 +466,9 @@ void VulkanRenderer::Resize()
     height = new_height;
 
     resize();
-}
+
+}   /* Resize() */
+
 
 void VulkanRenderer::resize()
 {
@@ -490,7 +503,9 @@ void VulkanRenderer::resize()
 
     create_depth_resources();
     create_framebuffers();
-}
+
+}   /* resize() */
+
 
 void VulkanRenderer::create_depth_resources()
 {
@@ -507,7 +522,9 @@ void VulkanRenderer::create_depth_resources()
         &deviceMemProps
         );
     depthImageView = create_image_view(device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-}
+
+}   /* create_depth_resources() */
+
 
 void VulkanRenderer::create_image_views()
 {
@@ -516,7 +533,8 @@ void VulkanRenderer::create_image_views()
     {
         swapchainImageViews[i] = create_image_view(device, swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-}
+}   /* create_image_views() */
+
 
 void VulkanRenderer::create_render_pass()
 {
@@ -552,6 +570,7 @@ void VulkanRenderer::create_render_pass()
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
     VkAttachmentDescription  attachments[2] = { colorAttachment, depthAttachment };
 
@@ -566,7 +585,9 @@ void VulkanRenderer::create_render_pass()
     {
         throw std::runtime_error("Failed to create render pass");
     }
-}
+
+}   /* create_render_pass() */
+
 
 void VulkanRenderer::create_descriptor_set_layout()
 {
@@ -585,7 +606,9 @@ void VulkanRenderer::create_descriptor_set_layout()
     {
         throw std::runtime_error("Failed to create descriptor set layout");
     }
-}
+
+}   /* create_descriptor_set_layout() */
+
 
 void VulkanRenderer::create_graphics_pipeline()
 {
@@ -707,7 +730,7 @@ void VulkanRenderer::create_graphics_pipeline()
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -776,7 +799,9 @@ void VulkanRenderer::create_graphics_pipeline()
 
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
-}
+
+}   /* create_graphics_pipeline() */
+
 
 void VulkanRenderer::create_framebuffers()
 {
@@ -799,7 +824,9 @@ void VulkanRenderer::create_framebuffers()
             throw std::runtime_error("Failed to create framebuffer");
         }
     }
-}
+
+}   /* create_framebuffers() */
+
 
 void VulkanRenderer::create_vertex_buffer()
 {
@@ -812,7 +839,9 @@ void VulkanRenderer::create_vertex_buffer()
     vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
     memcpy(data, CUBE_VERTICES, bufferSize);
     vkUnmapMemory(device, vertexBufferMemory);
-}
+
+}   /* create_vertex_buffer() */
+
 
 void VulkanRenderer::create_index_buffer()
 {
@@ -825,7 +854,9 @@ void VulkanRenderer::create_index_buffer()
     vkMapMemory(device, indexBufferMemory, 0, bufferSize, 0, &data);
     memcpy(data, CUBE_INDICES, bufferSize);
     vkUnmapMemory(device, indexBufferMemory);
-}
+
+}   /* create_index_buffer() */
+
 
 void VulkanRenderer::create_instance_buffer()
 {
@@ -836,7 +867,9 @@ void VulkanRenderer::create_instance_buffer()
 
     vkMapMemory(device, instanceBufferMemory, 0, bufferSize, 0, &mappedInstanceMemory);
     instanceCount = 0;
-}
+
+}   /* create_instance_buffer() */
+
 
 void VulkanRenderer::create_uniform_buffer()
 {
@@ -844,7 +877,8 @@ void VulkanRenderer::create_uniform_buffer()
     create_buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         uniformBuffer, uniformBufferMemory);
-}
+
+}   /* create_uniform_buffer() */
 
 
 void VulkanRenderer::create_descriptor_pool()
@@ -866,7 +900,9 @@ void VulkanRenderer::create_descriptor_pool()
     {
         throw std::runtime_error("Failed to create descriptor pool");
     }
-}
+
+}   /* create_descriptor_pool() */
+
 
 void VulkanRenderer::create_descriptor_sets()
 {
@@ -896,7 +932,9 @@ void VulkanRenderer::create_descriptor_sets()
     descriptorWrite.pBufferInfo = &bufferInfo;
 
     vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
-}
+
+}   /* create_descriptor_sets() */
+
 
 void VulkanRenderer::create_command_pool()
 {
@@ -923,12 +961,7 @@ void VulkanRenderer::create_command_pool()
             throw std::runtime_error("Failed to allocate command buffers");
         }
     }
-}
-
-void VulkanRenderer::create_command_buffers()
-{
-    // Empty - handled in render_loop()
-}
+}   /* create_command_pool() */
 
 
 void VulkanRenderer::create_sync_objects()
@@ -949,7 +982,8 @@ void VulkanRenderer::create_sync_objects()
             throw std::runtime_error("Failed to create synchronization objects");
         }
     }
-}
+
+}   /* create_sync_objects() */
 
 
 void VulkanRenderer::update_uniform_buffer()
@@ -959,7 +993,7 @@ void VulkanRenderer::update_uniform_buffer()
     float meters =  meters_per_second * elapsedSeconds;
 
     glm::vec3 eye = glm::vec3(0.0f, 0.0f, eye_z - meters);
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, -meters);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, eye_z - meters + 1);
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
@@ -974,7 +1008,8 @@ void VulkanRenderer::update_uniform_buffer()
     vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
     memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(device, uniformBufferMemory);
-}
+
+}   /* update_uniform_buffer() */
 
 void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
@@ -1091,6 +1126,7 @@ VkFormat VulkanRenderer::find_depth_format()
 
 }   /* find_depth_format() */
 
+
 void VulkanRenderer::cleanup()
 {
     vkDeviceWaitIdle(device);
@@ -1136,11 +1172,12 @@ void VulkanRenderer::cleanup()
         destroy_image_view(device, imageView);
         
     }
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
+    destroy_swapchain(device, swapchain);
     destroy_device(device);
 
     destroy_surface(instance, surface);
     destroy_debug_messenger(instance);
 
     destroy_instance(instance);
-}
+
+}   /* cleanup() */

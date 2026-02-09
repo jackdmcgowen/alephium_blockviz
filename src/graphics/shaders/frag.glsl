@@ -16,27 +16,59 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    // Phong lighting parameters
-    vec3 lightColor = vec3(1.0, 1.0, 1.0);
-    
-    // Ambient
-    float ambientStrength = 0.7;
+// ───────────────────────────────────────────────
+    //  Material / Lighting parameters
+    // ───────────────────────────────────────────────
+    vec3  lightColor       = vec3(1.00, 0.98, 0.92);  // slightly warm white
+    float ambientStrength  = 0.15;
+    float diffuseStrength  = 0.85;
+    float specularStrength = 0.45;
+    float shininess        = 16.0;                     // higher = smaller, sharper highlight
+
+    // Normalize inputs (usually already normalized, but safe)
+    vec3 N = normalize(fragNormal);
+    vec3 L = normalize(ubo.lightPos - fragPos);        // light direction
+    vec3 V = normalize(ubo.viewPos  - fragPos);        // view direction
+    vec3 R = reflect(-L, N);                           // reflection direction
+
+    // ───────────────────────────────────────────────
+    // Phong components
+    // ───────────────────────────────────────────────
+
+    // 1. Ambient
     vec3 ambient = ambientStrength * lightColor;
-    
-    // Diffuse
-    vec3 norm = normalize(fragNormal);
-    vec3 lightDir = normalize(ubo.lightPos - fragPos);
-    float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = diff * lightColor * fragColor;
-    
-    // Specular
-    float specularStrength = 0.1;
-    vec3 viewDir = normalize(ubo.viewPos - fragPos);
-    vec3 reflectDir = reflect(-lightDir, norm);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+
+    // 2. Diffuse
+    float NdotL   = max(dot(N, L), 0.0);
+    vec3  diffuse = diffuseStrength * NdotL * lightColor;
+
+    // Blinn-Phong specular
+    vec3 H = normalize(L + V);                // halfway vector
+    float NdotH = max(dot(N, H), 0.0);
+    float spec  = pow(NdotH, shininess * 4.0); // shininess usually needs higher exponent
     vec3 specular = specularStrength * spec * lightColor;
     
-    // Combine Phong components and multiply by instance color
-    vec3 result = ambient * diffuse;
-    outColor = vec4(result, 1.0);
+    //float distance    = length(ubo.lightPos - fragPos);
+    //float attenuation = 1.0 / (1.0 + 0.09 * distance + 0.032 * distance * distance);
+    //diffuse  *= attenuation;
+    //specular *= attenuation;
+
+    // ───────────────────────────────────────────────
+    // Final color
+    // ───────────────────────────────────────────────
+    vec3 lighting = ambient + diffuse + specular;
+
+    // Apply material/instance color
+    vec3 finalColor = lighting * fragColor;
+    
+    // Rim / fresnel effect (optional – gives nice edge glow)
+    //float rim = 1.0 - max(dot(N, V), 0.0);
+    //rim = pow(rim, 3.0);                      // sharper rim
+    //vec3 rimLight = vec3(0.4, 0.6, 1.0) * rim * 0.6;
+    //finalColor += rimLight;
+
+    // Optional: slight gamma-like correction or tone mapping
+    //finalColor = pow(finalColor, vec3(1.0/2.2));   // approx gamma 2.2 → sRGB
+
+    outColor = vec4(finalColor, 1.0);
 }

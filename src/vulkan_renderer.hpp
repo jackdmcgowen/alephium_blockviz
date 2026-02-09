@@ -9,6 +9,9 @@
 #include <condition_variable>
 #include <deque>
 #include <set>
+
+#define GLM_FORCE_LEFT_HANDED
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
@@ -135,7 +138,6 @@ private:
     void create_descriptor_pool();
     void create_descriptor_sets();
     void create_command_pool();
-    void create_command_buffers();
     void create_sync_objects();
     void update_uniform_buffer();
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
