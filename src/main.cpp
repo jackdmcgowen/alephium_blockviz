@@ -48,7 +48,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     switch (msg)
     {
-    case WM_SIZING:
+    //case WM_SIZING:
     case WM_SIZE:
         renderer.Resize();
         break;
@@ -72,7 +72,7 @@ int main()
     WNDCLASS wc = { 0 };
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"Alephium_BlockFlow";
+    wc.lpszClassName = L"Alephium BlockFlow";
 
     // Load icon
     wc.hIcon = (HICON)LoadImage(NULL, L"alephium-logo-round.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
@@ -112,6 +112,8 @@ int main()
     }
     baseUrl = config_array.configs[0].url;
 
+    printf("Using config url: %s\n", baseUrl);
+
     curl = curl_easy_init();
     if (!curl)
     {
@@ -146,7 +148,7 @@ int main()
         int64_t now = (int64_t)time(NULL) * 1000;
         if (now - lastPollTs >= ( ALPH_TARGET_POLL_SECONDS * 1000 )) // 8 seconds
         {
-            printf("\nPolling blockflow at %lld\n", now);
+            printf("\nPolling blockflow from %lld to %lld\n", lastPollTs, now);
             ResponseData response = { NULL, 0, 0, 0 };
             cJSON* obj = get_blockflow_blocks_with_events(lastPollTs, now);
 

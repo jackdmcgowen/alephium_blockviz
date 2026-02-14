@@ -73,6 +73,7 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
     3, 4, 7, 7, 5, 3
 };
 
+static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 static float meters_per_second = 1;
 static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
 
@@ -110,6 +111,7 @@ VulkanRenderer::VulkanRenderer()
     , descriptorSet(VK_NULL_HANDLE)
     , running(false)
     , elapsedSeconds(0.0f)
+    , chains(16)
 {
 }   /* VulkanRenderer() */
 
@@ -199,8 +201,40 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
 
 void VulkanRenderer::Add_Block(cJSON* block)
 {
+    AlphBlock alph_block(block);
+
     std::lock_guard<std::mutex> lock(dataMutex);
-    blockSet.insert(AlphBlock(block));
+
+
+    uint8_t chainIndex = alph_block.chain_idx();
+
+    auto& heightMap = chains[chainIndex];
+    auto& blocksAtHeight = heightMap[alph_block.height];
+
+    auto result = blocksAtHeight.emplace(alph_block.hash, alph_block);
+    if (result.second)
+        blockQueue.push_back(alph_block);
+    else
+        printf("duplicate\n");
+
+    for (auto& bh : heightMap)
+    {
+        for (auto unc : alph_block.uncles)
+        {
+            auto uncle_find = bh.second.find(unc);
+            if (uncle_find != bh.second.end())
+            {
+                AlphBlock b = bh.second[unc];
+                bh.second.erase(unc);
+            }
+        }
+    }
+
+    total_blocks++;
+
+    if (blockQueue.size() > 120)
+        blockQueue.pop_back();
+
     dataCond.notify_one();
 
 }   /* Add_Block() */
@@ -239,6 +273,7 @@ void VulkanRenderer::render_loop()
     QueryPerformanceFrequency(&freq);
 
     int64_t start = static_cast<int64_t>(time(NULL) - ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    std::vector<int> start_height(16);
     while (running)
     {
         // Start the Dear ImGui frame
@@ -248,52 +283,69 @@ void VulkanRenderer::render_loop()
 
         //start frame
         QueryPerformanceCounter(&t1);
-
         std::unique_lock<std::mutex> lock(dataMutex);
-        if (!blockSet.empty())
+
+        instanceCount = 0;
+
+        //uint8_t chainIndex = alph_block.chain_idx();
+
+        //auto& heightMap = chains[chainIndex];
+        //auto& blocksAtHeight = heightMap[alph_block.height];
+
+        for( auto& heightMap : chains)
         {
-            auto it = blockSet.begin();
-            AlphBlock block = *it;
-            int64_t block_time = block.timestamp;
-
+            for (auto& hashesAtHeight : heightMap)
             {
-                int shardId = block.chainFrom * 4 + block.chainTo;
-                float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
-                float radius = 20.0f;
-
-
-                float z = -static_cast<float>(block_time - start) / 1000.0f;
-
-                glm::vec3 pos(
-                    radius * cosf(angle),
-                    radius * sinf(angle),
-                    z
-                );
-                InstanceData inst = { pos, SHARD_COLORS[shardId] };
-
-
-                if (instanceCount < MAX_INSTANCES)
+                for (auto& hashesAtBlocks : hashesAtHeight.second)
                 {
-                    memcpy(static_cast<char*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
-                    instanceCount++;
-                }
-                else
-                {
-                    printf("Instance buffer full\n");
-                }
+                    auto& block = hashesAtBlocks.second;
+                    //int64_t block_time = block.timestamp;
+                    int shardId = block.chain_idx();
+                    if (start_height[shardId] == 0 )
+                    {
+                        start_height[shardId] = block.height;
+                    }
 
-                ++total_blocks;
-                blockQueue.push_front(block);
-                blockSet.erase(it);
+                    {
+                        float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
+                        float radius = 20.0f;
+
+                        //float z = -static_cast<float>(block_time - start) / 1000.0f;
+                        float z = -static_cast<float>( block.height - start_height[shardId] ) * meters_per_height;// / 1000.0f;
+                        glm::vec3 pos(
+                            radius * cosf(angle),
+                            radius * sinf(angle),
+                            z
+                        );
+                        InstanceData inst = { pos, SHARD_COLORS[shardId] };
+
+
+                        if (instanceCount < MAX_INSTANCES)
+                        {
+                            memcpy(static_cast<uint8_t *>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
+                            instanceCount++;
+                        }
+                        else
+                        {
+                            printf("Instance buffer full\n");
+                        }
+
+                        //++total_blocks;
+                        //blockQueue.push_front(block);
+                        //blockMap.erase(it);
+                    }
+                }
             }
         }
 
-        lock.unlock();
+        //blockQueue.em
 
-        if( blockQueue.size() > 120)
-        {
-            blockQueue.pop_back();
-        }
+        //if( blockQueue.size() > 120)
+        //{
+        //    blockQueue.pop_back();
+        //}
+
+        lock.unlock();
 
         static AlphBlock selected;
 
@@ -310,25 +362,27 @@ void VulkanRenderer::render_loop()
             ImGui::Text("total %d", total_blocks);
             ImGui::SameLine();
             ImGui::Text("bps %1.2f", bps);
-            for (auto it2 : blockQueue)
+            for (auto &block : blockQueue)
             {
 
-                ImGui::PushID(it2.hash.c_str());
+                ImGui::PushID(block.hash.c_str());
 
-                int shardId = it2.chainFrom * 4 + it2.chainTo;
-                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", it2.chainFrom, it2.chainTo);
+                int shardId = block.chain_idx();
+
+                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", block.chainFrom, block.chainTo);
                 ImGui::SameLine();
-                if (ImGui::Button(it2.hash.c_str()))
+                if (ImGui::Button(block.hash.c_str()))
                 {
-                    selected.hash = it2.hash;
-                    selected.chainFrom = it2.chainFrom;
-                    selected.chainTo = it2.chainTo;
-                    selected.deps.resize(it2.deps.size());
-                    selected.txns.resize(it2.txns.size());
-                    std::copy(it2.deps.begin(), it2.deps.end(), selected.deps.begin());
-                    std::copy(it2.txns.begin(), it2.txns.end(), selected.txns.begin());
+                    selected.hash = block.hash;
+                    selected.chainFrom = block.chainFrom;
+                    selected.chainTo = block.chainTo;
+                    selected.height = block.height;
+                    selected.deps.resize(block.deps.size());
+                    selected.txns.resize(block.txns.size());
+                    std::copy(block.deps.begin(), block.deps.end(), selected.deps.begin());
+                    std::copy(block.txns.begin(), block.txns.end(), selected.txns.begin());
 
-                    ImGui::SetClipboardText(it2.hash.c_str());
+                    ImGui::SetClipboardText(block.hash.c_str());
                 }
                 ImGui::PopID();
             }
@@ -352,6 +406,8 @@ void VulkanRenderer::render_loop()
                 ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
                 ImGui::SameLine();
                 ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
+
+                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected.height);
 
                 for( auto tx : selected.txns)
                     ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
@@ -610,43 +666,41 @@ void VulkanRenderer::create_descriptor_set_layout()
 }   /* create_descriptor_set_layout() */
 
 
+static void load_shader_source( const char * const   filename,
+                                std::vector<uint8_t> &src )
+{
+    char dirpath[128] = { 0 };
+
+    snprintf(dirpath, 128, "src/graphics/shaders/%s", filename);
+
+    FILE* file = fopen(dirpath, "rb");
+    if (!file) {
+        throw std::runtime_error("Failed to load shader");
+    }
+
+    fseek(file, 0, SEEK_END);
+    long sz = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    src.resize(sz);
+    fread(src.data(), 1, sz, file);
+    fclose(file);
+
+}   /* load_shader_source() */
+
+
 void VulkanRenderer::create_graphics_pipeline()
 {
     // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
-    FILE* vertFile = fopen("src/graphics/shaders/vert.spv", "rb");
-    FILE* fragFile = fopen("src/graphics/shaders/frag.spv", "rb");
-    if (!vertFile || !fragFile)
-    {
-        throw std::runtime_error("Failed to load shaders");
-    }
+    std::vector<uint8_t> vertShaderCode;
+    std::vector<uint8_t> fragShaderCode;
 
-    fseek(vertFile, 0, SEEK_END);
-    long vertSize = ftell(vertFile);
-    fseek(vertFile, 0, SEEK_SET);
-    std::vector<char> vertShaderCode(vertSize);
-    fread(vertShaderCode.data(), 1, vertSize, vertFile);
-    fclose(vertFile);
+    load_shader_source("vert.spv", vertShaderCode);
+    load_shader_source("frag.spv", fragShaderCode);
 
-    fseek(fragFile, 0, SEEK_END);
-    long fragSize = ftell(fragFile);
-    fseek(fragFile, 0, SEEK_SET);
-    std::vector<char> fragShaderCode(fragSize);
-    fread(fragShaderCode.data(), 1, fragSize, fragFile);
-    fclose(fragFile);
-
-    VkShaderModuleCreateInfo vertShaderInfo{};
-    vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vertShaderInfo.codeSize = vertShaderCode.size();
-    vertShaderInfo.pCode = reinterpret_cast<const uint32_t*>(vertShaderCode.data());
     VkShaderModule vertShaderModule;
-    vkCreateShaderModule(device, &vertShaderInfo, nullptr, &vertShaderModule);
-
-    VkShaderModuleCreateInfo fragShaderInfo{};
-    fragShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    fragShaderInfo.codeSize = fragShaderCode.size();
-    fragShaderInfo.pCode = reinterpret_cast<const uint32_t*>(fragShaderCode.data());
     VkShaderModule fragShaderModule;
-    vkCreateShaderModule(device, &fragShaderInfo, nullptr, &fragShaderModule);
+    create_shader_module(device, vertShaderModule, vertShaderCode);
+    create_shader_module(device, fragShaderModule, fragShaderCode);
 
     VkPipelineShaderStageCreateInfo vertStageInfo{};
     vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -797,8 +851,8 @@ void VulkanRenderer::create_graphics_pipeline()
         throw std::runtime_error("Failed to create graphics pipeline");
     }
 
-    vkDestroyShaderModule(device, fragShaderModule, nullptr);
-    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+    destroy_shader_module(device, fragShaderModule);
+    destroy_shader_module(device, vertShaderModule);
 
 }   /* create_graphics_pipeline() */
 

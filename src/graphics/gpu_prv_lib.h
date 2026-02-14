@@ -60,3 +60,8 @@ void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory);
 
 VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 void destroy_image_view(VkDevice device, VkImageView imageview);
+
+  //shader.cpp
+void create_shader_module(VkDevice device, VkShaderModule &shaderModule, std::vector<uint8_t> &pCode );
+
+void destroy_shader_module(VkDevice device, VkShaderModule shaderModule);

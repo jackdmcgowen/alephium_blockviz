@@ -8,7 +8,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
-#include <set>
+#include <map>
 
 #define GLM_FORCE_LEFT_HANDED
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -114,7 +114,12 @@ private:
     std::mutex  renderMutex;
     std::mutex  dataMutex;
     std::condition_variable dataCond;
-    std::set<AlphBlock> blockSet;
+
+    using HashToBlocks = std::map<std::string, AlphBlock>;
+    using HeightToHash = std::map<uint64_t, HashToBlocks>;
+    std::vector<HeightToHash> chains;
+
+
     std::deque<AlphBlock> blockQueue;
     int total_blocks;
     bool running;

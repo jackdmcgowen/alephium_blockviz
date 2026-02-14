@@ -119,11 +119,17 @@
       <AdditionalDependencies>glm.lib;vulkan-1.lib;</AdditionalDependencies>
     </Lib>
     <PostBuildEvent>
-      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
     <PostBuildEvent>
-      <Message>Compile Vulkan Shaders</Message>
+      <Message>
+      </Message>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+      <Message>Compile Vulkan Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -142,16 +148,23 @@
       <AdditionalDependencies>glm.lib;vulkan-1.lib;</AdditionalDependencies>
     </Lib>
     <PostBuildEvent>
-      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
     <PostBuildEvent>
-      <Message>Compile Vulkan Shaders</Message>
+      <Message>
+      </Message>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>python $(SolutionDir)\src\graphics\shaders\compile_shaders.py</Command>
+      <Message>Compile Vulkan Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\graphics\device.cpp" />
     <ClCompile Include="..\src\graphics\image.cpp" />
     <ClCompile Include="..\src\graphics\instance.cpp" />
+    <ClCompile Include="..\src\graphics\shader.cpp" />
     <ClCompile Include="..\src\graphics\surface.cpp" />
     <ClCompile Include="..\src\graphics\swapchain.cpp" />
     <ClCompile Include="..\src\graphics\validation.cpp" />
