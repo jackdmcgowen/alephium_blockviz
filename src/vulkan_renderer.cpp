@@ -32,6 +32,14 @@ static void check_vk_result(VkResult err)
 }   /* check_vk_result() */
 
 
+static uint32_t lastPickedID = ~0u;
+const VkFormat PICKING_FORMAT = VK_FORMAT_R32_UINT;
+const uint32_t INVALID_ID = ~0u;
+const VkExtent2D PICKING_EXT = { 4, 4 }; //smallest pow2 most drivers like
+static uint32_t pickMouseX;
+static uint32_t pickMouseY;
+
+
 static const float FOV = glm::radians(45.0f);
 
 const glm::vec3 SHARD_COLORS[16] = {
@@ -53,7 +61,7 @@ const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(0.00f, 1.00f, 0.00f)   // #00FF00 Lime
 };
 
-const VulkanRenderer::Vertex VulkanRenderer::CUBE_VERTICES[8] = {
+const VulkanRenderer::VertexNormal VulkanRenderer::CUBE_VERTICES[8] = {
     { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
     { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
     { glm::vec3(-1, -1, -1), glm::normalize(glm::vec3(-1, -1, -1)) }, // 2
@@ -147,6 +155,8 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     create_render_pass();
     create_descriptor_set_layout();
     create_graphics_pipeline();
+    create_picker_pipeline();
+    create_picker_resources();
     create_framebuffers();
     create_command_pool();
     create_vertex_buffer();
@@ -319,6 +329,11 @@ void VulkanRenderer::render_loop()
                         );
                         InstanceData inst = { pos, SHARD_COLORS[shardId] };
 
+                        if (lastPickedID == instanceCount)
+                        {
+                            selected_block = block;
+                        }
+
 
                         if (instanceCount < MAX_INSTANCES)
                         {
@@ -398,18 +413,21 @@ void VulkanRenderer::render_loop()
         char url[512];
         ImGui::Begin("Block", 0, flags);
         {
-            if (selected.txns.size())
+            if (selected_block.txns.size())
                 {
                 memset(url, 0, sizeof(url));
-                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected.hash.c_str());
+                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected_block.hash.c_str());
 
                 ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
                 ImGui::SameLine();
-                ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
+                ImGui::TextLinkOpenURL(selected_block.hash.c_str(), url);
 
-                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected.height);
+                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected_block.height);
 
-                for( auto tx : selected.txns)
+                int shardId = selected_block.chain_idx();
+                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
+
+                for( auto tx : selected_block.txns)
                     ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
                 }
         }
@@ -463,6 +481,25 @@ void VulkanRenderer::render()
         resizing = false;
     }
 
+    if (inFlightFrames[currentFrame].pendingPick)
+    {
+        inFlightFrames[currentFrame].pendingPick = false;
+
+        uint32_t picked = read_picker_obj_id(device);
+
+        if (picked != INVALID_ID)  // ~0u or 0xFFFFFFFFu
+        {
+            lastPickedID = picked;
+            printf("Picked instance/object ID: %u\n", picked);
+            //highlight it, show properties in ImGui sidebar, etc.
+        }
+        else
+        {
+            lastPickedID = ~0u;
+            printf("Nothing picked (background)\n");
+        }
+    }
+
     result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
     {
@@ -496,6 +533,7 @@ void VulkanRenderer::render()
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 
+    // After submitting command buffer and waiting (or next frame with fence)
 }   /* render() */
 
 
@@ -538,12 +576,18 @@ void VulkanRenderer::resize()
     }
 
     vkDeviceWaitIdle(device);
+
     
+    vkDestroyFramebuffer(device, picker_Framebuffer, nullptr);
+
+    destroy_image_view(device, picker_imageView);
+
+    destroy_image(device, picker_image, picker_memory);
+
     for (auto framebuffer : swapchainFramebuffers)
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
-
 
     for (auto imageView : swapchainImageViews)
     {
@@ -559,6 +603,7 @@ void VulkanRenderer::resize()
 
     create_depth_resources();
     create_framebuffers();
+    create_picker_resources();
 
 }   /* resize() */
 
@@ -608,7 +653,7 @@ void VulkanRenderer::create_render_pass()
     depthAttachment.format = find_depth_format();
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -688,6 +733,274 @@ static void load_shader_source( const char * const   filename,
 }   /* load_shader_source() */
 
 
+void VulkanRenderer::create_picker_resources()
+{
+    // 1. Picking image
+    create_image(
+        device,
+        width, height,
+        PICKING_FORMAT,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        picker_image,
+        picker_memory,
+        &deviceMemProps
+        );
+
+    picker_imageView = create_image_view(device, picker_image, PICKING_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // 2. Staging buffer (host visible)
+    create_buffer(
+        PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingMemory
+        );
+
+    // 4. Framebuffer
+    VkImageView fbAttachments[2] = {
+        picker_imageView,
+        depthImageView
+    };
+
+    VkFramebufferCreateInfo fbInfo{};
+    fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fbInfo.renderPass = picker_renderPass;
+    fbInfo.attachmentCount = _countof(fbAttachments);
+    fbInfo.pAttachments = fbAttachments;
+    fbInfo.width = width;
+    fbInfo.height = height;
+    fbInfo.layers = 1;
+
+    vkCreateFramebuffer(device, &fbInfo, nullptr, &picker_Framebuffer);
+
+}   /* create_picker_resources() */
+
+
+void VulkanRenderer::create_picker_pipeline()
+{
+    // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
+    std::vector<uint8_t> vertShaderCode;
+    std::vector<uint8_t> fragShaderCode;
+
+    load_shader_source("picker_vert.spv", vertShaderCode);
+    load_shader_source("picker_frag.spv", fragShaderCode);
+
+    VkShaderModule vertShaderModule;
+    VkShaderModule fragShaderModule;
+    create_shader_module(device, vertShaderModule, vertShaderCode);
+    create_shader_module(device, fragShaderModule, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertStageInfo{};
+    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertStageInfo.module = vertShaderModule;
+    vertStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragStageInfo{};
+    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragStageInfo.module = fragShaderModule;
+    fragStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
+
+    VkVertexInputBindingDescription bindingDescriptions[2];
+    bindingDescriptions[0].binding = 0;
+    bindingDescriptions[0].stride = sizeof(VertexNormal);
+    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    bindingDescriptions[1].binding = 1;
+    bindingDescriptions[1].stride = sizeof(InstanceData);
+    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    VkVertexInputAttributeDescription attributeDescriptions[2];
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(VertexNormal, pos.x);
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(VertexNormal, normal.x);
+
+    VkVertexInputAttributeDescription instanceAttributes[2];
+    instanceAttributes[0].binding = 1;
+    instanceAttributes[0].location = 2;
+    instanceAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    instanceAttributes[0].offset = offsetof(InstanceData, pos);
+    instanceAttributes[1].binding = 1;
+    instanceAttributes[1].location = 3;
+    instanceAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    instanceAttributes[1].offset = offsetof(InstanceData, color);
+
+    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], attributeDescriptions[1], instanceAttributes[0], instanceAttributes[1] };
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 2;
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
+    vertexInputInfo.vertexAttributeDescriptionCount = 4;
+    vertexInputInfo.pVertexAttributeDescriptions = attributes;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)swapchainExtent.width;
+    viewport.height = (float)swapchainExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_FALSE; //reuse depth buffer for picker pass
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    VkPushConstantRange range{};
+    range.stageFlags =  VK_SHADER_STAGE_FRAGMENT_BIT;
+    range.offset = 0;
+    range.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;//&picker_descSetLayout;
+    pipelineLayoutInfo.pPushConstantRanges = &range;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &picker_pipelineLayout) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create picker pipeline layout");
+    }
+
+    // 3. Render pass
+    VkAttachmentDescription attachments[2] = {};
+
+    // 0 = Picking color (tiny, cleared)
+    attachments[0].format = PICKING_FORMAT;
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // Clear -> invalid ID
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    // 1 = Reused depth (full res, load existing values, read-only)
+    attachments[1].format = find_depth_format();                   // e.g. VK_FORMAT_D32_SFLOAT
+    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;        // important: preserve main depth
+    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;      // or DONT_CARE if not needed later
+    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference colorRef{};
+    colorRef.attachment = 0;
+    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthRef{};
+    depthRef.attachment = 1;
+    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef; //attach depth here
+
+    VkRenderPassCreateInfo rpInfo{};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = _countof(attachments);
+    rpInfo.pAttachments = attachments;
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+
+    vkCreateRenderPass(device, &rpInfo, nullptr, &picker_renderPass);
+
+    VkDynamicState dynamicStates[] = {
+    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = _countof(dynamicStates);
+    dynamicState.pDynamicStates = dynamicStates;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = picker_pipelineLayout;
+    pipelineInfo.renderPass = picker_renderPass;
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &picker_pipeline) != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to create picker graphics pipeline");
+    }
+
+    destroy_shader_module(device, fragShaderModule);
+    destroy_shader_module(device, vertShaderModule);
+
+}   /* create_picker_pipeline() */
+
+
 void VulkanRenderer::create_graphics_pipeline()
 {
     // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
@@ -718,7 +1031,7 @@ void VulkanRenderer::create_graphics_pipeline()
 
     VkVertexInputBindingDescription bindingDescriptions[2];
     bindingDescriptions[0].binding = 0;
-    bindingDescriptions[0].stride = sizeof(Vertex);
+    bindingDescriptions[0].stride = sizeof(VertexNormal);
     bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     bindingDescriptions[1].binding = 1;
     bindingDescriptions[1].stride = sizeof(InstanceData);
@@ -728,11 +1041,11 @@ void VulkanRenderer::create_graphics_pipeline()
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos.x);
+    attributeDescriptions[0].offset = offsetof(VertexNormal, pos.x);
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, normal.x);
+    attributeDescriptions[1].offset = offsetof(VertexNormal, normal.x);
 
     VkVertexInputAttributeDescription instanceAttributes[2];
     instanceAttributes[0].binding = 1;
@@ -945,7 +1258,7 @@ void VulkanRenderer::create_descriptor_pool()
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 2;
+    poolInfo.poolSizeCount = _countof(pool_sizes);
     poolInfo.pPoolSizes = pool_sizes;
     poolInfo.maxSets = 2;
     poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -1065,6 +1378,140 @@ void VulkanRenderer::update_uniform_buffer()
 
 }   /* update_uniform_buffer() */
 
+
+uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
+{
+    uint32_t* ptr;
+    std::vector<uint32_t> id(PICKING_EXT.width * PICKING_EXT.height);
+
+    vkMapMemory(device, stagingMemory, 0, VK_WHOLE_SIZE, 0, (void**)&ptr);
+    memcpy(id.data(), ptr, PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t));
+    vkUnmapMemory(device, stagingMemory);
+
+    return (id[0] == INVALID_ID) ? ~0u : id[0];
+
+}   /* read_picker_obj_id() */
+
+
+void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
+{
+    static bool firstPickingFrame = true;
+
+    // Transition to COLOR_ATTACHMENT_OPTIMAL (assume coming from UNDEFINED or TRANSFER_SRC)
+    VkImageMemoryBarrier prepare{};
+    prepare.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    prepare.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    prepare.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    prepare.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; // or UNDEFINED first time
+    prepare.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    prepare.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prepare.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prepare.image = picker_image;
+    prepare.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+
+    if (firstPickingFrame) {
+        prepare.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        prepare.srcAccessMask = 0;
+        firstPickingFrame = false;
+    }
+
+    vkCmdPipelineBarrier(buffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &prepare);
+
+    // Begin render pass
+
+    VkRenderPassBeginInfo rpBegin{};
+    rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = picker_renderPass;
+    rpBegin.framebuffer = picker_Framebuffer;
+    rpBegin.renderArea.offset = { 0,0 };
+    rpBegin.renderArea.extent = swapchainExtent;
+
+    VkClearValue clearValues[2];
+    clearValues[0].color.uint32[0] = INVALID_ID;
+    clearValues[1].depthStencil = { 1.0f, 0 };
+    rpBegin.clearValueCount = 2;
+    rpBegin.pClearValues = clearValues;
+
+    vkCmdBeginRenderPass(buffer, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+    // Scissor = 1x1 at mouse position
+    VkRect2D scissor{};
+
+    scissor.offset = { (int32_t)mouseX, (int32_t)mouseY };
+    scissor.extent = { 1, 1 };
+    vkCmdSetScissor(buffer, 0, 1, &scissor);
+
+    // Viewport can stay full image
+    VkViewport vp{};
+    vp.x = 0;
+    vp.y = 0;
+    vp.width = (float)swapchainExtent.width;
+    vp.height = (float)swapchainExtent.height;
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+    vkCmdSetViewport(buffer, 0, 1, &vp);
+
+    // Bind your picking pipeline (color write only, no depth usually)
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipeline);
+    vkCmdSetPrimitiveTopology(buffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+    // Push constants with mouse position
+    PushConstants pc{};
+    pc.mouseX = mouseX;
+    pc.mouseY = mouseY;
+    pc.instanceOffset = instanceOffset;
+
+    vkCmdPushConstants(buffer, picker_pipelineLayout,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        0, sizeof(PushConstants), &pc);
+
+    VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
+    VkDeviceSize offsets[] = { 0, 0 };
+    vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
+
+    vkCmdEndRenderPass(buffer);
+
+    // Transition to TRANSFER_SRC
+    VkImageMemoryBarrier finish = {};
+    finish.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    finish.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    finish.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    finish.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    finish.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    finish.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    finish.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    finish.image = picker_image;
+    finish.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+
+    vkCmdPipelineBarrier(buffer,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &finish);
+
+    // Copy 4x4 (or whole small image) to staging
+    VkBufferImageCopy copyRegion{};
+    copyRegion.bufferOffset = 0;
+    copyRegion.bufferRowLength = 0;
+    copyRegion.bufferImageHeight = 0;
+    copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copyRegion.imageOffset = { (int32_t)mouseX, (int32_t)mouseY, 0 };
+    copyRegion.imageExtent = { PICKING_EXT.width, PICKING_EXT.height, 1 };
+
+    vkCmdCopyImageToBuffer(buffer,
+        picker_image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        stagingBuffer,
+        1, &copyRegion);
+
+}   /* record_picker_pass() */
+
+
 void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
     VkCommandBufferBeginInfo beginInfo{};
@@ -1111,13 +1558,29 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
     vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
-    
+
     ImDrawData* data = ImGui::GetDrawData();
     if (data)
     {
         ImGui_ImplVulkan_RenderDrawData(data, buffer);
     }
     vkCmdEndRenderPass(buffer);
+
+    {
+        ImGuiIO& io = ImGui::GetIO();
+
+        if (io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
+        {
+            // Mouse click happened outside ImGui UI -> trigger pick
+            pickMouseX = static_cast<uint32_t>(io.MousePos.x);
+            pickMouseY = static_cast<uint32_t>(io.MousePos.y);
+
+            record_picker_pass(buffer, pickMouseX, pickMouseY);
+
+            inFlightFrames[currentFrame].pendingPick = true;  // flag to read back after submit
+        }
+
+    }
 
     if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
     {
@@ -1204,6 +1667,10 @@ void VulkanRenderer::cleanup()
     vkFreeMemory(device, instanceBufferMemory, nullptr);
     vkDestroyBuffer(device, uniformBuffer, nullptr);
     vkFreeMemory(device, uniformBufferMemory, nullptr);
+
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -1214,6 +1681,16 @@ void VulkanRenderer::cleanup()
         vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);
+
+
+    vkDestroyFramebuffer(device, picker_Framebuffer, nullptr);
+    destroy_image_view(device, picker_imageView);
+    destroy_image(device, picker_image, picker_memory);
+
+    vkDestroyPipeline(device, picker_pipeline, nullptr);
+    vkDestroyPipelineLayout(device, picker_pipelineLayout, nullptr);
+    vkDestroyRenderPass(device, picker_renderPass, nullptr);
+
     for (auto framebuffer : swapchainFramebuffers)
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);

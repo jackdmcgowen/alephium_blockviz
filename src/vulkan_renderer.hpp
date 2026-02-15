@@ -26,7 +26,7 @@
 class VulkanRenderer
 {
 public:
-    struct Vertex
+    struct VertexNormal
     {
         glm::vec3 pos;    // Vertex position
         glm::vec3 normal; // Vertex normal
@@ -49,6 +49,12 @@ public:
         glm::float32 meters;
     };
 
+    struct PushConstants {
+        uint32_t mouseX;
+        uint32_t mouseY;
+        uint32_t instanceOffset;
+    };
+
     VulkanRenderer();
     ~VulkanRenderer();
     void Init(void *hInstance, void *hwnd);
@@ -60,7 +66,7 @@ public:
 private:
     void resize();
     static const int MAX_INSTANCES = 1024*1024; // Arbitrary large size
-    static const Vertex CUBE_VERTICES[8]; // 8 corners
+    static const VertexNormal CUBE_VERTICES[8]; // 8 corners
     static const uint16_t CUBE_INDICES[36]; // 12 triangles
 
     void *hInstance;
@@ -85,6 +91,20 @@ private:
     VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
+
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+
+    VkImage picker_image;
+    VkImageView picker_imageView;
+    VkDeviceMemory picker_memory;
+    VkFramebuffer picker_Framebuffer;
+    VkRenderPass picker_renderPass;
+    //VkDescriptorSetLayout picker_descSetLayout;
+    VkPipelineLayout picker_pipelineLayout;
+    VkPipeline picker_pipeline;
+
     std::vector<VkFramebuffer> swapchainFramebuffers;
     VkCommandPool commandPool;
 
@@ -94,6 +114,7 @@ private:
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
         VkFence         fence;
+        bool            pendingPick;
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
     int currentFrame;
@@ -119,6 +140,8 @@ private:
     using HeightToHash = std::map<uint64_t, HashToBlocks>;
     std::vector<HeightToHash> chains;
 
+    AlphBlock selected_block;
+
 
     std::deque<AlphBlock> blockQueue;
     int total_blocks;
@@ -135,6 +158,8 @@ private:
     void create_render_pass();
     void create_descriptor_set_layout();
     void create_graphics_pipeline();
+    void create_picker_resources();
+    void create_picker_pipeline();
     void create_framebuffers();
     void create_vertex_buffer();
     void create_index_buffer();
@@ -146,6 +171,10 @@ private:
     void create_sync_objects();
     void update_uniform_buffer();
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
+
+    void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
+    uint32_t read_picker_obj_id(VkDevice device);
+
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
     VkFormat find_depth_format();
     void cleanup();
