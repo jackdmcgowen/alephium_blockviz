@@ -114,6 +114,7 @@ private:
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
         VkFence         fence;
+        bool            pendingPick;
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
     int currentFrame;

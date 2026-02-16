@@ -35,6 +35,8 @@ static void check_vk_result(VkResult err)
 const VkFormat PICKING_FORMAT = VK_FORMAT_R32_UINT;
 const uint32_t INVALID_ID = ~0u;
 const VkExtent2D PICKING_EXT = { 4, 4 }; //smallest pow2 most drivers like
+static uint32_t pickMouseX;
+static uint32_t pickMouseY;
 
 
 static const float FOV = glm::radians(45.0f);
@@ -81,8 +83,6 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
 static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 static float meters_per_second = 1;
 static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
-
-static bool pendingPick = false;
 
 static const uint32_t statusBarHeight = 200;
 
@@ -398,31 +398,31 @@ void VulkanRenderer::render_loop()
         }
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
-        ImGui::SetNextWindowBgAlpha(0.0f);
+        //ImGui::SetNextWindowPos(ImVec2(0, 0));
+        //ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
+        //ImGui::SetNextWindowBgAlpha(0.0f);
 
-        flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
+        //flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
 
-        char url[512];
-        ImGui::Begin("Block", 0, flags);
-        {
-            if (selected.txns.size())
-                {
-                memset(url, 0, sizeof(url));
-                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected.hash.c_str());
+        //char url[512];
+        //ImGui::Begin("Block", 0, flags);
+        //{
+        //    if (selected.txns.size())
+        //        {
+        //        memset(url, 0, sizeof(url));
+        //        snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected.hash.c_str());
 
-                ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
-                ImGui::SameLine();
-                ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
+        //        ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
+        //        ImGui::SameLine();
+        //        ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
 
-                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected.height);
+        //        ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected.height);
 
-                for( auto tx : selected.txns)
-                    ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
-                }
-        }
-        ImGui::End();
+        //        for( auto tx : selected.txns)
+        //            ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
+        //        }
+        //}
+        //ImGui::End();
         ImGui::Render();
         update_uniform_buffer();
         render();
@@ -446,7 +446,6 @@ void VulkanRenderer::render()
     static uint64_t s_frameCounter;
     static uint32_t imageIndex;
     static bool     resizing = false;
-
     static uint32_t lastPickedID = ~0u;
 
     VkResult 		result;
@@ -474,12 +473,11 @@ void VulkanRenderer::render()
         resizing = false;
     }
 
-    // After submitting command buffer and waiting (or next frame with fence)
-    if (pendingPick)
+    if (inFlightFrames[currentFrame].pendingPick)
     {
-        pendingPick = false;
+        inFlightFrames[currentFrame].pendingPick = false;
 
-        uint32_t picked = read_picker_obj_id( device );
+        uint32_t picked = read_picker_obj_id(device);
 
         if (picked != INVALID_ID)  // ~0u or 0xFFFFFFFFu
         {
@@ -527,6 +525,7 @@ void VulkanRenderer::render()
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 
+    // After submitting command buffer and waiting (or next frame with fence)
 }   /* render() */
 
 
@@ -639,7 +638,7 @@ void VulkanRenderer::create_render_pass()
     depthAttachment.format = find_depth_format();
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -734,7 +733,7 @@ void VulkanRenderer::create_picker_resources()
     imgCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgCI.imageType = VK_IMAGE_TYPE_2D;
     imgCI.format = PICKING_FORMAT;
-    imgCI.extent = { PICKING_EXT.width, PICKING_EXT.height, 1 };
+    imgCI.extent = { swapchainExtent.width, swapchainExtent.height, 1 };
     imgCI.mipLevels = 1;
     imgCI.arrayLayers = 1;
     imgCI.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -777,6 +776,7 @@ void VulkanRenderer::create_picker_resources()
     vkCreateBuffer(device, &bufCI, nullptr, &stagingBuffer);
 
     vkGetBufferMemoryRequirements(device, stagingBuffer, &memReq);
+
 
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = find_device_memory_type(&deviceMemProps, memReq.memoryTypeBits,
@@ -825,7 +825,7 @@ void VulkanRenderer::create_picker_resources()
 
     VkRenderPassCreateInfo rpInfo{};
     rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rpInfo.attachmentCount = 2;
+    rpInfo.attachmentCount = _countof(attachments);
     rpInfo.pAttachments = attachments;
     rpInfo.subpassCount = 1;
     rpInfo.pSubpasses = &subpass;
@@ -841,10 +841,10 @@ void VulkanRenderer::create_picker_resources()
     VkFramebufferCreateInfo fbInfo{};
     fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fbInfo.renderPass = picker_renderPass;
-    fbInfo.attachmentCount = 2;
+    fbInfo.attachmentCount = _countof(fbAttachments);
     fbInfo.pAttachments = fbAttachments;
-    fbInfo.width = PICKING_EXT.width;
-    fbInfo.height = PICKING_EXT.height;
+    fbInfo.width = width;
+    fbInfo.height = height;
     fbInfo.layers = 1;
 
     vkCreateFramebuffer(device, &fbInfo, nullptr, &picker_Framebuffer);
@@ -925,14 +925,14 @@ void VulkanRenderer::create_picker_pipeline()
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = 1.0f;
-    viewport.height = 1.0f;
+    viewport.width = (float)swapchainExtent.width;
+    viewport.height = (float)swapchainExtent.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = { 0, 0 };
-    scissor.extent = PICKING_EXT;
+    scissor.extent = swapchainExtent;
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -959,12 +959,12 @@ void VulkanRenderer::create_picker_pipeline()
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_FALSE; //reuse depth buffer for picker pass
-    depthStencil.depthCompareOp = VK_COMPARE_OP_EQUAL; //equal good enough?
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
     colorBlendAttachment.blendEnable = VK_FALSE;
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
@@ -1408,65 +1408,85 @@ void VulkanRenderer::update_uniform_buffer()
 
 uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
 {
-    uint32_t* data = nullptr;
-    vkMapMemory(device, stagingMemory, 0, VK_WHOLE_SIZE, 0, (void**)&data);
+    uint32_t* ptr;
+    std::vector<uint32_t> id(PICKING_EXT.width * PICKING_EXT.height);
 
-    // because we used 4x4, mouse pixel is at (mouseX % 4, mouseY % 4) - but since scissor=1x1
-    // and we discard everywhere else -> only one pixel should be written
-    // Simplest: just take [0] (top-left)
-    uint32_t id = data[0];
+    //uint32_t inv_id[16] = { { INVALID_ID } };
+
+    vkMapMemory(device, stagingMemory, 0, VK_WHOLE_SIZE, 0, (void**)&ptr);
+
+    memcpy(id.data(), ptr, PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t));
+
 
     vkUnmapMemory(device, stagingMemory);
 
-    return (id == INVALID_ID) ? ~0u : id;
+    if (id[0] != INVALID_ID)
+    {
+        printf("!");
+    }
+
+    return (id[0] == INVALID_ID) ? ~0u : id[0];
 
 }   /* read_picker_obj_id() */
 
 
 void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
 {
+    static bool firstPickingFrame = true;
+
     // Transition to COLOR_ATTACHMENT_OPTIMAL (assume coming from UNDEFINED or TRANSFER_SRC)
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; // or UNDEFINED first time
-    barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    barrier.image = picker_image;
-    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+    VkImageMemoryBarrier prepare{};
+    prepare.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    prepare.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    prepare.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    prepare.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; // or UNDEFINED first time
+    prepare.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    prepare.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prepare.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    prepare.image = picker_image;
+    prepare.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+
+    if (firstPickingFrame) {
+        prepare.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        prepare.srcAccessMask = 0;
+        firstPickingFrame = false;
+    }
 
     vkCmdPipelineBarrier(buffer,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+        0, 0, nullptr, 0, nullptr, 1, &prepare);
 
     // Begin render pass
-    VkClearValue clear{};
-    clear.color.uint32[0] = INVALID_ID;
 
     VkRenderPassBeginInfo rpBegin{};
     rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpBegin.renderPass = picker_renderPass;
     rpBegin.framebuffer = picker_Framebuffer;
     rpBegin.renderArea.offset = { 0,0 };
-    rpBegin.renderArea.extent = PICKING_EXT;
-    rpBegin.clearValueCount = 1;
-    rpBegin.pClearValues = &clear;
+    rpBegin.renderArea.extent = swapchainExtent;
+
+    VkClearValue clearValues[2];
+    clearValues[0].color.uint32[0] = INVALID_ID;
+    clearValues[1].depthStencil = { 1.0f, 0 };
+    rpBegin.clearValueCount = 2;
+    rpBegin.pClearValues = clearValues;
 
     vkCmdBeginRenderPass(buffer, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
     // Scissor = 1x1 at mouse position
     VkRect2D scissor{};
+
     scissor.offset = { (int32_t)mouseX, (int32_t)mouseY };
-    scissor.extent = { 1,1 };
+    scissor.extent = { 1, 1 };
     vkCmdSetScissor(buffer, 0, 1, &scissor);
 
-    // Viewport can stay full tiny image
+    // Viewport can stay full image
     VkViewport vp{};
     vp.x = 0;
     vp.y = 0;
-    vp.width = (float)PICKING_EXT.width;
-    vp.height = (float)PICKING_EXT.height;
+    vp.width = (float)swapchainExtent.width;
+    vp.height = (float)swapchainExtent.height;
     vp.minDepth = 0.0f;
     vp.maxDepth = 1.0f;
     vkCmdSetViewport(buffer, 0, 1, &vp);
@@ -1495,15 +1515,21 @@ void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX,
     vkCmdEndRenderPass(buffer);
 
     // Transition to TRANSFER_SRC
-    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    VkImageMemoryBarrier finish = {};
+    finish.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    finish.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    finish.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    finish.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    finish.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    finish.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    finish.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    finish.image = picker_image;
+    finish.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
 
     vkCmdPipelineBarrier(buffer,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+        0, 0, nullptr, 0, nullptr, 1, &finish);
 
     // Copy 4x4 (or whole small image) to staging
     VkBufferImageCopy copyRegion{};
@@ -1511,7 +1537,7 @@ void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX,
     copyRegion.bufferRowLength = 0;
     copyRegion.bufferImageHeight = 0;
     copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.imageOffset = { 0,0,0 };
+    copyRegion.imageOffset = { (int32_t)mouseX, (int32_t)mouseY, 0 };
     copyRegion.imageExtent = { PICKING_EXT.width, PICKING_EXT.height, 1 };
 
     vkCmdCopyImageToBuffer(buffer,
@@ -1583,12 +1609,12 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
         if (!io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
         {
             // Mouse click happened outside ImGui UI -> trigger pick
-            uint32_t pickMouseX = static_cast<uint32_t>(io.MousePos.x);
-            uint32_t pickMouseY = static_cast<uint32_t>(io.MousePos.y);
+            pickMouseX = static_cast<uint32_t>(io.MousePos.x);
+            pickMouseY = static_cast<uint32_t>(io.MousePos.y);
 
             record_picker_pass(buffer, pickMouseX, pickMouseY);
 
-            pendingPick = true;  // flag to read back after submit
+            inFlightFrames[currentFrame].pendingPick = true;  // flag to read back after submit
         }
 
     }
