@@ -32,6 +32,7 @@ static void check_vk_result(VkResult err)
 }   /* check_vk_result() */
 
 
+static uint32_t lastPickedID = ~0u;
 const VkFormat PICKING_FORMAT = VK_FORMAT_R32_UINT;
 const uint32_t INVALID_ID = ~0u;
 const VkExtent2D PICKING_EXT = { 4, 4 }; //smallest pow2 most drivers like
@@ -328,6 +329,11 @@ void VulkanRenderer::render_loop()
                         );
                         InstanceData inst = { pos, SHARD_COLORS[shardId] };
 
+                        if (lastPickedID == instanceCount)
+                        {
+                            selected_block = block;
+                        }
+
 
                         if (instanceCount < MAX_INSTANCES)
                         {
@@ -398,31 +404,34 @@ void VulkanRenderer::render_loop()
         }
         ImGui::End();
 
-        //ImGui::SetNextWindowPos(ImVec2(0, 0));
-        //ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
-        //ImGui::SetNextWindowBgAlpha(0.0f);
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
+        ImGui::SetNextWindowBgAlpha(0.0f);
 
-        //flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
+        flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
 
-        //char url[512];
-        //ImGui::Begin("Block", 0, flags);
-        //{
-        //    if (selected.txns.size())
-        //        {
-        //        memset(url, 0, sizeof(url));
-        //        snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected.hash.c_str());
+        char url[512];
+        ImGui::Begin("Block", 0, flags);
+        {
+            if (selected_block.txns.size())
+                {
+                memset(url, 0, sizeof(url));
+                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected_block.hash.c_str());
 
-        //        ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
-        //        ImGui::SameLine();
-        //        ImGui::TextLinkOpenURL(selected.hash.c_str(), url);
+                ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
+                ImGui::SameLine();
+                ImGui::TextLinkOpenURL(selected_block.hash.c_str(), url);
 
-        //        ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected.height);
+                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected_block.height);
 
-        //        for( auto tx : selected.txns)
-        //            ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
-        //        }
-        //}
-        //ImGui::End();
+                int shardId = selected_block.chain_idx();
+                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
+
+                for( auto tx : selected_block.txns)
+                    ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
+                }
+        }
+        ImGui::End();
         ImGui::Render();
         update_uniform_buffer();
         render();
@@ -446,7 +455,6 @@ void VulkanRenderer::render()
     static uint64_t s_frameCounter;
     static uint32_t imageIndex;
     static bool     resizing = false;
-    static uint32_t lastPickedID = ~0u;
 
     VkResult 		result;
     VkFence         fence;
@@ -1411,19 +1419,9 @@ uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
     uint32_t* ptr;
     std::vector<uint32_t> id(PICKING_EXT.width * PICKING_EXT.height);
 
-    //uint32_t inv_id[16] = { { INVALID_ID } };
-
     vkMapMemory(device, stagingMemory, 0, VK_WHOLE_SIZE, 0, (void**)&ptr);
-
     memcpy(id.data(), ptr, PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t));
-
-
     vkUnmapMemory(device, stagingMemory);
-
-    if (id[0] != INVALID_ID)
-    {
-        printf("!");
-    }
 
     return (id[0] == INVALID_ID) ? ~0u : id[0];
 
@@ -1606,7 +1604,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         ImGuiIO& io = ImGui::GetIO();
 
-        if (!io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
+        if (io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
         {
             // Mouse click happened outside ImGui UI -> trigger pick
             pickMouseX = static_cast<uint32_t>(io.MousePos.x);

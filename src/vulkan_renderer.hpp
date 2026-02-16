@@ -140,6 +140,8 @@ private:
     using HeightToHash = std::map<uint64_t, HashToBlocks>;
     std::vector<HeightToHash> chains;
 
+    AlphBlock selected_block;
+
 
     std::deque<AlphBlock> blockQueue;
     int total_blocks;
