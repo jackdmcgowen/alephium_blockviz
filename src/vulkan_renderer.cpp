@@ -155,8 +155,8 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     create_render_pass();
     create_descriptor_set_layout();
     create_graphics_pipeline();
-    create_picker_resources();
     create_picker_pipeline();
+    create_picker_resources();
     create_framebuffers();
     create_command_pool();
     create_vertex_buffer();
@@ -576,12 +576,18 @@ void VulkanRenderer::resize()
     }
 
     vkDeviceWaitIdle(device);
+
     
+    vkDestroyFramebuffer(device, picker_Framebuffer, nullptr);
+
+    destroy_image_view(device, picker_imageView);
+
+    destroy_image(device, picker_image, picker_memory);
+
     for (auto framebuffer : swapchainFramebuffers)
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
-
 
     for (auto imageView : swapchainImageViews)
     {
@@ -597,6 +603,7 @@ void VulkanRenderer::resize()
 
     create_depth_resources();
     create_framebuffers();
+    create_picker_resources();
 
 }   /* resize() */
 
@@ -701,14 +708,6 @@ void VulkanRenderer::create_descriptor_set_layout()
         throw std::runtime_error("Failed to create descriptor set layout");
     }
 
-    //picker
-    //uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    //if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &picker_descSetLayout) != VK_SUCCESS)
-    //{
-    //    throw std::runtime_error("Failed to create picker desc set layout");
-    //}
-
-
 }   /* create_descriptor_set_layout() */
 
 
@@ -737,108 +736,28 @@ static void load_shader_source( const char * const   filename,
 void VulkanRenderer::create_picker_resources()
 {
     // 1. Picking image
-    VkImageCreateInfo imgCI{};
-    imgCI.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imgCI.imageType = VK_IMAGE_TYPE_2D;
-    imgCI.format = PICKING_FORMAT;
-    imgCI.extent = { swapchainExtent.width, swapchainExtent.height, 1 };
-    imgCI.mipLevels = 1;
-    imgCI.arrayLayers = 1;
-    imgCI.samples = VK_SAMPLE_COUNT_1_BIT;
-    imgCI.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imgCI.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    imgCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    create_image(
+        device,
+        width, height,
+        PICKING_FORMAT,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        picker_image,
+        picker_memory,
+        &deviceMemProps
+        );
 
-    if (vkCreateImage(device, &imgCI, nullptr, &picker_image) != VK_SUCCESS)
-        return;
-
-    VkMemoryRequirements memReq{};
-    vkGetImageMemoryRequirements(device, picker_image, &memReq);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memReq.size;
-    allocInfo.memoryTypeIndex = find_device_memory_type(&deviceMemProps, memReq.memoryTypeBits,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(device, &allocInfo, nullptr, &picker_memory);
-    vkBindImageMemory(device, picker_image, picker_memory, 0);
-
-    // Image view
-    VkImageViewCreateInfo viewCI{};
-    viewCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewCI.image = picker_image;
-    viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewCI.format = PICKING_FORMAT;
-    viewCI.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-    vkCreateImageView(device, &viewCI, nullptr, &picker_imageView);
+    picker_imageView = create_image_view(device, picker_image, PICKING_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 
     // 2. Staging buffer (host visible)
-    VkBufferCreateInfo bufCI{};
-    bufCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufCI.size = sizeof(uint32_t) * PICKING_EXT.width * PICKING_EXT.height;
-    bufCI.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(device, &bufCI, nullptr, &stagingBuffer);
-
-    vkGetBufferMemoryRequirements(device, stagingBuffer, &memReq);
-
-
-    allocInfo.allocationSize = memReq.size;
-    allocInfo.memoryTypeIndex = find_device_memory_type(&deviceMemProps, memReq.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory);
-    vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0);
-
-    // 3. Render pass (very simple - one color attachment)
-    VkAttachmentDescription attachments[2] = {};
-
-    // 0 = Picking color (tiny, cleared)
-    attachments[0].format = PICKING_FORMAT;
-    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // Clear -> invalid ID
-    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-
-    // 1 = Reused depth (full res, load existing values, read-only)
-    attachments[1].format = find_depth_format();                   // e.g. VK_FORMAT_D32_SFLOAT
-    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;        // important: preserve main depth
-    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;      // or DONT_CARE if not needed later
-    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorRef{};
-    colorRef.attachment = 0;
-    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthRef{};
-    depthRef.attachment = 1;
-    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorRef;
-    subpass.pDepthStencilAttachment = &depthRef; //attach depth here
-
-    VkRenderPassCreateInfo rpInfo{};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rpInfo.attachmentCount = _countof(attachments);
-    rpInfo.pAttachments = attachments;
-    rpInfo.subpassCount = 1;
-    rpInfo.pSubpasses = &subpass;
-
-    vkCreateRenderPass(device, &rpInfo, nullptr, &picker_renderPass);
+    create_buffer(
+        PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingMemory
+        );
 
     // 4. Framebuffer
     VkImageView fbAttachments[2] = {
@@ -997,6 +916,52 @@ void VulkanRenderer::create_picker_pipeline()
     {
         throw std::runtime_error("Failed to create picker pipeline layout");
     }
+
+    // 3. Render pass
+    VkAttachmentDescription attachments[2] = {};
+
+    // 0 = Picking color (tiny, cleared)
+    attachments[0].format = PICKING_FORMAT;
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // Clear -> invalid ID
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    // 1 = Reused depth (full res, load existing values, read-only)
+    attachments[1].format = find_depth_format();                   // e.g. VK_FORMAT_D32_SFLOAT
+    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;        // important: preserve main depth
+    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;      // or DONT_CARE if not needed later
+    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference colorRef{};
+    colorRef.attachment = 0;
+    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthRef{};
+    depthRef.attachment = 1;
+    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef; //attach depth here
+
+    VkRenderPassCreateInfo rpInfo{};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = _countof(attachments);
+    rpInfo.pAttachments = attachments;
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+
+    vkCreateRenderPass(device, &rpInfo, nullptr, &picker_renderPass);
 
     VkDynamicState dynamicStates[] = {
     VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
@@ -1702,6 +1667,10 @@ void VulkanRenderer::cleanup()
     vkFreeMemory(device, instanceBufferMemory, nullptr);
     vkDestroyBuffer(device, uniformBuffer, nullptr);
     vkFreeMemory(device, uniformBufferMemory, nullptr);
+
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -1712,6 +1681,16 @@ void VulkanRenderer::cleanup()
         vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);
+
+
+    vkDestroyFramebuffer(device, picker_Framebuffer, nullptr);
+    destroy_image_view(device, picker_imageView);
+    destroy_image(device, picker_image, picker_memory);
+
+    vkDestroyPipeline(device, picker_pipeline, nullptr);
+    vkDestroyPipelineLayout(device, picker_pipelineLayout, nullptr);
+    vkDestroyRenderPass(device, picker_renderPass, nullptr);
+
     for (auto framebuffer : swapchainFramebuffers)
     {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
