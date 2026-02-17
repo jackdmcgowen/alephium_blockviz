@@ -306,6 +306,7 @@ void VulkanRenderer::render_loop()
         {
             for (auto& hashesAtHeight : heightMap)
             {
+                int block_index = 0;
                 for (auto& hashesAtBlocks : hashesAtHeight.second)
                 {
                     auto& block = hashesAtBlocks.second;
@@ -318,7 +319,7 @@ void VulkanRenderer::render_loop()
 
                     {
                         float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
-                        float radius = 20.0f;
+                        float radius = 20.0f + block_index * meters_per_height;
 
                         //float z = -static_cast<float>(block_time - start) / 1000.0f;
                         float z = -static_cast<float>( block.height - start_height[shardId] ) * meters_per_height;// / 1000.0f;
@@ -349,6 +350,7 @@ void VulkanRenderer::render_loop()
                         //blockQueue.push_front(block);
                         //blockMap.erase(it);
                     }
+                    block_index++;
                 }
             }
         }
@@ -414,22 +416,59 @@ void VulkanRenderer::render_loop()
         ImGui::Begin("Block", 0, flags);
         {
             if (selected_block.txns.size())
-                {
+            {
                 memset(url, 0, sizeof(url));
                 snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected_block.hash.c_str());
 
-                ImGui::TextColored(ImVec4(0,0,0,1), "hash: ");
+                ImGui::TextColored(ImVec4(0, 0, 0, 1), "hash: ");
                 ImGui::SameLine();
                 ImGui::TextLinkOpenURL(selected_block.hash.c_str(), url);
 
                 ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected_block.height);
 
                 int shardId = selected_block.chain_idx();
+                ImGui::TextColored(ImVec4(0, 0, 0, 1), "chain: ");
+                ImGui::SameLine();
                 ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
 
-                for( auto tx : selected_block.txns)
-                    ImGui::TextColored(ImVec4(0,0,0,1),"%s", tx.c_str());
+                ImGui::Indent();
+                for (auto tx : selected_block.txns)
+                {
+                    memset(url, 0, sizeof(url));
+                    snprintf(url, 512, "https://explorer.alephium.org/transactions/%s", tx.txid.c_str());
+
+                    ImGui::Separator();
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "txid: ");
+                    ImGui::SameLine();
+                    ImGui::TextLinkOpenURL(tx.txid.c_str(), url);
+
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "version: %d", tx.version);
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "networkId: %d", tx.networkId);
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "scriptOpt: %s", tx.scriptOpt.c_str());
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "gasAmount: %d", tx.gasAmount);
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "gasPrice: %s", tx.gasPrice.c_str());
+
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "inputs: %d", tx.inputs.size());
+                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "outputs: %d", tx.outputs.size());
+
+                    ImGui::Indent();
+                    for (auto out : tx.outputs)
+                    {
+                        memset(url, 0, sizeof(url));
+                        snprintf(url, 512, "https://explorer.alephium.org/addresses/%s", out.address.c_str());
+
+                        ImGui::Separator();
+                        ImGui::TextColored(ImVec4(0, 0, 0, 1), "address: ");
+                        ImGui::SameLine();
+                        ImGui::TextLinkOpenURL(out.address.c_str(), url);
+
+
+                        ImGui::TextColored(ImVec4(0, 0, 0, 1), "amount: %s", out.toAmount().c_str() );
+                    }
+                    ImGui::Unindent();
                 }
+                ImGui::Unindent();
+            }
         }
         ImGui::End();
         ImGui::Render();
@@ -489,14 +528,11 @@ void VulkanRenderer::render()
 
         if (picked != INVALID_ID)  // ~0u or 0xFFFFFFFFu
         {
-            lastPickedID = picked;
-            printf("Picked instance/object ID: %u\n", picked);
-            //highlight it, show properties in ImGui sidebar, etc.
+            lastPickedID = picked; //printf("Picked instance/object ID: %u\n", picked);
         }
         else
         {
-            lastPickedID = ~0u;
-            printf("Nothing picked (background)\n");
+            lastPickedID = ~0u; //printf("Nothing picked (background)\n");
         }
     }
 
@@ -533,7 +569,6 @@ void VulkanRenderer::render()
     presentInfo.pImageIndices = &imageIndex;
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 
-    // After submitting command buffer and waiting (or next frame with fence)
 }   /* render() */
 
 
@@ -1114,7 +1149,16 @@ void VulkanRenderer::create_graphics_pipeline()
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+
+
+
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

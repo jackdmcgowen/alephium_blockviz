@@ -33,9 +33,9 @@ void get_heights(int heights[4][4])
     {
         for (int toGroup = 0; toGroup < 4; toGroup++)
         {
-            heights[fromGroup][toGroup] = 0;
+            int prev = heights[fromGroup][toGroup];
             int h = get_height(fromGroup, toGroup);
-            printf("Chain Height for shard [%d,%d]: %d\n", fromGroup, toGroup, h);
+            printf("Chain Height for shard [%d,%d]: %d (+%d)\n", fromGroup, toGroup, h, (h - prev) );
             heights[fromGroup][toGroup] = h;
         }
     }
@@ -62,7 +62,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int main()
 {
-    //int heights[4][4];
+    int curr_heights[4][4];
     int64_t lastPollTs;
     std::vector<cJSON*> blockQueue;
     int64_t lastAddTime = 0;
@@ -103,7 +103,6 @@ int main()
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
     
-
     ConfigArray config_array = load_configs("config.json");
     if (config_array.count == 0 || !config_array.configs[0].url)
     {
@@ -146,11 +145,14 @@ int main()
         }
 
         int64_t now = (int64_t)time(NULL) * 1000;
-        if (now - lastPollTs >= ( ALPH_TARGET_POLL_SECONDS * 1000 )) // 8 seconds
+
+        if (now - lastPollTs >= (ALPH_TARGET_BLOCK_SECONDS * 1000 )) // 8 seconds
         {
+            //get_heights(curr_heights);
             printf("\nPolling blockflow from %lld to %lld\n", lastPollTs, now);
             ResponseData response = { NULL, 0, 0, 0 };
-            cJSON* obj = get_blockflow_blocks_with_events(lastPollTs, now);
+            cJSON* obj = get_blockflow_blocks_with_events(lastPollTs - (ALPH_TARGET_BLOCK_SECONDS * 1000), now);
+
 
             if (obj)
             {
