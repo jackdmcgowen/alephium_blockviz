@@ -11,7 +11,7 @@ void create_swapchain(
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
-    createInfo.minImageCount = 3;
+    createInfo.minImageCount = MAX_SWAPCHAIN_IMAGES;
     createInfo.oldSwapchain = *swapchain;
     createInfo.imageFormat = format;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;

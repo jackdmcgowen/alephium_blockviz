@@ -1,7 +1,11 @@
+#pragma once
+
 #include <vulkan/vulkan.h>
 
 #include <stdexcept>
 #include <vector>
+
+#define MAX_SWAPCHAIN_IMAGES ( 3 )
 
   //instance.cpp
 VkInstance create_instance();

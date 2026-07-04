@@ -104,6 +104,7 @@ VulkanRenderer::VulkanRenderer()
     , graphicsPipeline(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
     , inFlightFrames{}
+    , renderFinishedSemaphores(MAX_SWAPCHAIN_IMAGES)
     , currentFrame(0)
     , vertexBuffer(VK_NULL_HANDLE)
     , vertexBufferMemory(VK_NULL_HANDLE)
@@ -507,8 +508,6 @@ void VulkanRenderer::render()
 
     fence = inFlightFrames[currentFrame].fence;
     commandBuffer = inFlightFrames[currentFrame].commandBuffer;
-    imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
-    renderFinishedSemaphore = inFlightFrames[currentFrame].renderFinishedSemaphore;
 
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkResetFences(device, 1, &fence );
@@ -536,12 +535,14 @@ void VulkanRenderer::render()
         }
     }
 
+    imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
     result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
     {
     resizing = true;
     }
-    
+    renderFinishedSemaphore = renderFinishedSemaphores[imageIndex];
+
     record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
 
     VkSubmitInfo submitInfo{};
@@ -1384,10 +1385,14 @@ void VulkanRenderer::create_sync_objects()
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+    for (int i = 0; i < MAX_SWAPCHAIN_IMAGES; ++i)
+    {
+        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]);
+    }
+
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].imageAvailableSemaphore) != VK_SUCCESS
-         || vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].renderFinishedSemaphore) != VK_SUCCESS
          || vkCreateFence(device, &fenceInfo, nullptr, &inFlightFrames[i].fence) != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to create synchronization objects");
@@ -1718,10 +1723,14 @@ void VulkanRenderer::cleanup()
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
+    for (int i = 0; i < MAX_SWAPCHAIN_IMAGES; ++i)
+    {
+        vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+    }
+
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         vkDestroySemaphore(device, inFlightFrames[i].imageAvailableSemaphore, nullptr);
-        vkDestroySemaphore(device, inFlightFrames[i].renderFinishedSemaphore, nullptr);
         vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);

@@ -84,6 +84,7 @@ private:
     VkFormat swapchainImageFormat;
     VkExtent2D swapchainExtent;
     std::vector<VkImageView> swapchainImageViews;
+    std::vector<VkSemaphore> renderFinishedSemaphores;
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
@@ -110,7 +111,6 @@ private:
 
     struct FramesInFlight
     {
-        VkSemaphore     renderFinishedSemaphore;
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
         VkFence         fence;
