@@ -47,6 +47,22 @@ void create_swapchain(
     VkExtent2D extent);
 void destroy_swapchain(VkDevice device, VkSwapchainKHR swapchain);
 
+  //buffer.cpp
+void create_buffer(
+    VkDevice                device, 
+    VkPhysicalDeviceMemoryProperties
+                           *deviceMemProps,
+    VkDeviceSize            size,
+    VkBufferUsageFlags      usage,
+    VkMemoryPropertyFlags   properties,
+    VkBuffer               &buffer,
+    VkDeviceMemory         &memory);
+
+void destroy_buffer(
+    VkDevice                device,
+    VkBuffer                buffer,
+    VkDeviceMemory          memory);
+
   //image.cpp
 void create_image(
     VkDevice device,

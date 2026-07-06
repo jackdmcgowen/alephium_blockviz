@@ -175,7 +175,6 @@ private:
     void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
     uint32_t read_picker_obj_id(VkDevice device);
 
-    void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
     VkFormat find_depth_format();
     void cleanup();
 };

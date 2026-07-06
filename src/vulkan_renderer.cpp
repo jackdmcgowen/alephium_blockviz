@@ -81,6 +81,8 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
     3, 4, 7, 7, 5, 3
 };
 
+static bool s_picker_resized;
+
 static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 static float meters_per_second = 1;
 static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
@@ -639,6 +641,7 @@ void VulkanRenderer::resize()
 
     create_depth_resources();
     create_framebuffers();
+
     create_picker_resources();
 
 }   /* resize() */
@@ -786,15 +789,6 @@ void VulkanRenderer::create_picker_resources()
 
     picker_imageView = create_image_view(device, picker_image, PICKING_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    // 2. Staging buffer (host visible)
-    create_buffer(
-        PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer,
-        stagingMemory
-        );
-
     // 4. Framebuffer
     VkImageView fbAttachments[2] = {
         picker_imageView,
@@ -811,6 +805,8 @@ void VulkanRenderer::create_picker_resources()
     fbInfo.layers = 1;
 
     vkCreateFramebuffer(device, &fbInfo, nullptr, &picker_Framebuffer);
+
+    s_picker_resized = true;
 
 }   /* create_picker_resources() */
 
@@ -963,7 +959,7 @@ void VulkanRenderer::create_picker_pipeline()
     attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
     // 1 = Reused depth (full res, load existing values, read-only)
@@ -1033,6 +1029,17 @@ void VulkanRenderer::create_picker_pipeline()
 
     destroy_shader_module(device, fragShaderModule);
     destroy_shader_module(device, vertShaderModule);
+
+    // 2. Staging buffer (host visible)
+    create_buffer(
+        device, &deviceMemProps,
+        PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingMemory
+    );
+
 
 }   /* create_picker_pipeline() */
 
@@ -1243,7 +1250,8 @@ void VulkanRenderer::create_framebuffers()
 void VulkanRenderer::create_vertex_buffer()
 {
     VkDeviceSize bufferSize = sizeof(CUBE_VERTICES);
-    create_buffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    create_buffer(device, &deviceMemProps, 
+        bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         vertexBuffer, vertexBufferMemory);
 
@@ -1252,13 +1260,15 @@ void VulkanRenderer::create_vertex_buffer()
     memcpy(data, CUBE_VERTICES, bufferSize);
     vkUnmapMemory(device, vertexBufferMemory);
 
+
 }   /* create_vertex_buffer() */
 
 
 void VulkanRenderer::create_index_buffer()
 {
     VkDeviceSize bufferSize = sizeof(CUBE_INDICES);
-    create_buffer(bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+    create_buffer(device, &deviceMemProps, 
+        bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         indexBuffer, indexBufferMemory);
 
@@ -1273,7 +1283,8 @@ void VulkanRenderer::create_index_buffer()
 void VulkanRenderer::create_instance_buffer()
 {
     VkDeviceSize bufferSize = sizeof(InstanceData) * MAX_INSTANCES;
-    create_buffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    create_buffer(device, &deviceMemProps, 
+        bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         instanceBuffer, instanceBufferMemory);
 
@@ -1286,7 +1297,8 @@ void VulkanRenderer::create_instance_buffer()
 void VulkanRenderer::create_uniform_buffer()
 {
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-    create_buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    create_buffer(device, &deviceMemProps, 
+        bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         uniformBuffer, uniformBufferMemory);
 
@@ -1444,7 +1456,7 @@ uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
 
 void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
 {
-    static bool firstPickingFrame = true;
+    VkImageSubresourceRange         subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
 
     // Transition to COLOR_ATTACHMENT_OPTIMAL (assume coming from UNDEFINED or TRANSFER_SRC)
     VkImageMemoryBarrier prepare{};
@@ -1456,16 +1468,16 @@ void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX,
     prepare.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     prepare.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     prepare.image = picker_image;
-    prepare.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
+    prepare.subresourceRange = subresourceRange;
 
-    if (firstPickingFrame) {
+    if (s_picker_resized) {
         prepare.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         prepare.srcAccessMask = 0;
-        firstPickingFrame = false;
+        s_picker_resized = false;
     }
 
     vkCmdPipelineBarrier(buffer,
-        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         0, 0, nullptr, 0, nullptr, 1, &prepare);
 
@@ -1525,23 +1537,6 @@ void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX,
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
     vkCmdEndRenderPass(buffer);
-
-    // Transition to TRANSFER_SRC
-    VkImageMemoryBarrier finish = {};
-    finish.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    finish.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    finish.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    finish.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    finish.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    finish.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    finish.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    finish.image = picker_image;
-    finish.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
-
-    vkCmdPipelineBarrier(buffer,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &finish);
 
     // Copy 4x4 (or whole small image) to staging
     VkBufferImageCopy copyRegion{};
@@ -1639,37 +1634,6 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 }   /* record_command_buffer() */
 
 
-void VulkanRenderer::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory)
-{
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create buffer");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = find_device_memory_type(&deviceMemProps, memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to allocate buffer memory");
-    }
-
-    vkBindBufferMemory(device, buffer, memory, 0);
-
-}   /* create_buffer() */
-
-
 VkFormat VulkanRenderer::find_depth_format()
 {
     VkFormat candidates[] = 
@@ -1708,17 +1672,13 @@ void VulkanRenderer::cleanup()
     destroy_image_view(device, depthImageView);
     destroy_image(device, depthImage, depthImageMemory);
 
-    vkDestroyBuffer(device, vertexBuffer, nullptr);
-    vkFreeMemory(device, vertexBufferMemory, nullptr);
-    vkDestroyBuffer(device, indexBuffer, nullptr);
-    vkFreeMemory(device, indexBufferMemory, nullptr);
-    vkDestroyBuffer(device, instanceBuffer, nullptr);
-    vkFreeMemory(device, instanceBufferMemory, nullptr);
-    vkDestroyBuffer(device, uniformBuffer, nullptr);
-    vkFreeMemory(device, uniformBufferMemory, nullptr);
+    destroy_buffer(device, vertexBuffer, vertexBufferMemory);
+    destroy_buffer(device, indexBuffer, indexBufferMemory);
+    destroy_buffer(device, instanceBuffer, instanceBufferMemory);
+    destroy_buffer(device, uniformBuffer, uniformBufferMemory);
 
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
-    vkFreeMemory(device, stagingMemory, nullptr);
+    destroy_buffer(device, stagingBuffer, stagingMemory);
+
 
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);

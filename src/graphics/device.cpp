@@ -48,15 +48,27 @@ void create_device(
     float queuePriority = 1.0f;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
+    VkPhysicalDeviceSynchronization2Features
+        sync2Features;
+
+    sync2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    sync2Features.synchronization2 = VK_TRUE;
+    sync2Features.pNext = nullptr;
+
     VkPhysicalDeviceFeatures deviceFeatures{};
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pEnabledFeatures = &deviceFeatures;
-    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    createInfo.enabledExtensionCount = 1;
+    const char* extensions[] = 
+        { 
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+        };
+    createInfo.enabledExtensionCount = 2;
     createInfo.ppEnabledExtensionNames = extensions;
+    createInfo.pNext = &sync2Features;
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, device) != VK_SUCCESS)
     {
