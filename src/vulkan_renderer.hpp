@@ -113,10 +113,11 @@ private:
     {
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
-        VkFence         fence;
         bool            pendingPick;
+        uint64_t        value;
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
+    VkSemaphore     timeline;
     int currentFrame;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;

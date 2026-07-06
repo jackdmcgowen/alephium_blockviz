@@ -48,12 +48,16 @@ void create_device(
     float queuePriority = 1.0f;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
+    VkPhysicalDeviceVulkan12Features vulkan12Features{};
+    vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan12Features.timelineSemaphore = VK_TRUE;
+
     VkPhysicalDeviceSynchronization2Features
         sync2Features;
 
     sync2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     sync2Features.synchronization2 = VK_TRUE;
-    sync2Features.pNext = nullptr;
+    sync2Features.pNext = &vulkan12Features;
 
     VkPhysicalDeviceFeatures deviceFeatures{};
     VkDeviceCreateInfo createInfo{};
@@ -64,7 +68,8 @@ void create_device(
     const char* extensions[] = 
         { 
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
         };
     createInfo.enabledExtensionCount = 2;
     createInfo.ppEnabledExtensionNames = extensions;

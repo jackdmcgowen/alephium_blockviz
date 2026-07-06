@@ -499,21 +499,30 @@ void VulkanRenderer::render()
     static bool     resizing = false;
 
     VkResult 		result;
-    VkFence         fence;
     VkCommandBuffer commandBuffer;
     VkSemaphore     imageAvailableSemaphore;
     VkSemaphore     renderFinishedSemaphore;
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
-    currentFrame = s_frameCounter++ % MAX_FRAMES_IN_FLIGHT;
+    currentFrame = s_frameCounter % MAX_FRAMES_IN_FLIGHT;
 
-    fence = inFlightFrames[currentFrame].fence;
-    commandBuffer = inFlightFrames[currentFrame].commandBuffer;
+    FramesInFlight& frame = inFlightFrames[currentFrame];
+    commandBuffer = frame.commandBuffer;
 
-    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(device, 1, &fence );
-    vkResetCommandBuffer(commandBuffer, 0);
+    /* wait for the previous (in-flight) frame's use */
+    if (frame.value > 0) {
+
+    VkSemaphoreWaitInfo
+        waitInfo{};
+
+    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    waitInfo.semaphoreCount = 1;
+    waitInfo.pSemaphores = &timeline;
+    waitInfo.pValues = &frame.value;
+
+    vkWaitSemaphores( device, &waitInfo, UINT64_MAX );
+    }
 
     if (resizing)
     {
@@ -545,7 +554,10 @@ void VulkanRenderer::render()
     }
     renderFinishedSemaphore = renderFinishedSemaphores[imageIndex];
 
+    vkResetCommandBuffer(commandBuffer, 0);
     record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
+
+    uint64_t    signalValues[] = { s_frameCounter + 1, 0 };
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -555,10 +567,18 @@ void VulkanRenderer::render()
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &renderFinishedSemaphore;
+    submitInfo.signalSemaphoreCount = 2;
+    VkSemaphore signalSemaphores[] = { timeline, renderFinishedSemaphore };
+    submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS)
+    VkTimelineSemaphoreSubmitInfo timelineSubmit = {};
+    timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    timelineSubmit.signalSemaphoreValueCount = 2;
+    timelineSubmit.pSignalSemaphoreValues = signalValues;
+
+    submitInfo.pNext = &timelineSubmit;
+
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE ) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to submit draw command buffer");
     }
@@ -570,7 +590,12 @@ void VulkanRenderer::render()
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
+
+
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
+
+    frame.value = signalValues[0];
+    s_frameCounter++;
 
 }   /* render() */
 
@@ -1390,8 +1415,15 @@ void VulkanRenderer::create_command_pool()
 
 void VulkanRenderer::create_sync_objects()
 {
+
+    VkSemaphoreTypeCreateInfo semaphoreTypeCI{};
+    semaphoreTypeCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    semaphoreTypeCI.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
+    semaphoreTypeCI.initialValue = 0;
+
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphoreInfo.pNext = &semaphoreTypeCI;
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -1404,12 +1436,12 @@ void VulkanRenderer::create_sync_objects()
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].imageAvailableSemaphore) != VK_SUCCESS
-         || vkCreateFence(device, &fenceInfo, nullptr, &inFlightFrames[i].fence) != VK_SUCCESS)
-        {
-            throw std::runtime_error("Failed to create synchronization objects");
-        }
+        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].imageAvailableSemaphore);
     }
+
+    semaphoreTypeCI.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+
+    vkCreateSemaphore(device, &semaphoreInfo, nullptr, &timeline);
 
 }   /* create_sync_objects() */
 
@@ -1687,11 +1719,11 @@ void VulkanRenderer::cleanup()
     {
         vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
     }
+    vkDestroySemaphore(device, timeline, nullptr);
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         vkDestroySemaphore(device, inFlightFrames[i].imageAvailableSemaphore, nullptr);
-        vkDestroyFence(device, inFlightFrames[i].fence, nullptr);
     }
     vkDestroyCommandPool(device, commandPool, nullptr);
 
