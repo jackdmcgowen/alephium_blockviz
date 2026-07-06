@@ -88,7 +88,6 @@ private:
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
-    VkRenderPass renderPass;
     VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
@@ -100,13 +99,11 @@ private:
     VkImage picker_image;
     VkImageView picker_imageView;
     VkDeviceMemory picker_memory;
-    VkFramebuffer picker_Framebuffer;
-    VkRenderPass picker_renderPass;
+
     //VkDescriptorSetLayout picker_descSetLayout;
     VkPipelineLayout picker_pipelineLayout;
     VkPipeline picker_pipeline;
 
-    std::vector<VkFramebuffer> swapchainFramebuffers;
     VkCommandPool commandPool;
 
     struct FramesInFlight
@@ -156,12 +153,10 @@ private:
     void render();
     void create_depth_resources();
     void create_image_views();
-    void create_render_pass();
     void create_descriptor_set_layout();
     void create_graphics_pipeline();
     void create_picker_resources();
     void create_picker_pipeline();
-    void create_framebuffers();
     void create_vertex_buffer();
     void create_index_buffer();
     void create_instance_buffer();
