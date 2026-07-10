@@ -1,11 +1,10 @@
 #pragma once
 
 // Polar layout for multi-lane block cubes. No Vulkan / cJSON.
-#include "alph_block.hpp"
+// Source of truth: GraphNode list from BlockGraph (PR9).
 #include "domain/block_graph.hpp"
 
 #include <cstdint>
-#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -35,7 +34,6 @@ struct PlacedBlock
     int         height = 0;
     glm::vec3   pos{ 0.0f };
     glm::vec3   color{ 1.0f };
-    const AlphBlock* block = nullptr; // non-owning; valid only during caller's lock
 };
 
 struct LayoutResult
@@ -51,11 +49,8 @@ class PolarShardLayout
 public:
     explicit PolarShardLayout(LanePalette palette = LanePalette::default_alephium());
 
-    // chains[lane] = height -> hash -> AlphBlock (same structure as BlockScene)
-    using HashToBlocks = std::map<std::string, AlphBlock>;
-    using HeightToHash = std::map<uint64_t, HashToBlocks>;
-
-    LayoutResult build(const std::vector<HeightToHash>& chains, const LayoutParams& params);
+    // nodes: live GraphNode snapshot (any order; grouped by lane/height inside).
+    LayoutResult build(const std::vector<GraphNode>& nodes, const LayoutParams& params);
 
     void reset_origins();
 

@@ -52,7 +52,7 @@ public:
     bool contains(const NodeId& id) const;
     std::optional<GraphNode> get(const NodeId& id) const;
 
-    // Sorted by id for stable dual-write validation / layout
+    // Sorted by id for layout / tooling
     std::vector<GraphNode> nodes_snapshot() const;
     std::vector<GraphEdge> edges_from(const NodeId& id) const;
 

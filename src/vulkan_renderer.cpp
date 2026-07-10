@@ -410,7 +410,9 @@ void VulkanRenderer::render_loop()
             layout_params.base_radius = 20.0f;
             layout_params.lane_count = 16;
 
-            LayoutResult layout = polar_layout_.build(scene_->chains(), layout_params);
+            // Single graph path (PR9): layout from BlockGraph nodes, not chains dual-write
+            const std::vector<GraphNode> graph_nodes = scene_->nodes_snapshot();
+            LayoutResult layout = polar_layout_.build(graph_nodes, layout_params);
             const auto& block_positions = layout.positions;
 
             {
@@ -503,25 +505,11 @@ void VulkanRenderer::render_loop()
                     }
                 };
 
-                const auto& chains = scene_->chains();
-
-                for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
+                // A) Active tip BlockFlow edges — tip nodes from graph (max height / lane)
+                for (const NodeId& tip_hash : scene_->tip_ids())
                 {
-                    for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
-                    {
-                        const uint8_t shard_id =
-                            static_cast<uint8_t>(chain_from * ALPH_NUM_GROUPS + chain_to);
-                        if (shard_id >= chains.size())
-                            continue;
-
-                        const auto& heightMap = chains[shard_id];
-                        if (heightMap.empty())
-                            continue;
-
-                        const auto tip_it = std::prev(heightMap.end());
-                        for (const auto& hash_and_block : tip_it->second)
-                            draw_deps_of(hash_and_block.second, kActiveArrowColor, 1.f);
-                    }
+                    if (auto d = scene_->detail_store().get(tip_hash))
+                        draw_deps_of(*d, kActiveArrowColor, 1.f);
                 }
 
                 const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
@@ -573,22 +561,6 @@ void VulkanRenderer::render_loop()
                 {
                     if (auto d = scene_->detail_store().get(hovered_hash_local))
                         draw_deps_of(*d, kHoverArrowColor, 1.05f);
-                    else
-                    {
-                        for (const auto& heightMap : chains)
-                        {
-                            for (const auto& he : heightMap)
-                            {
-                                auto it = he.second.find(hovered_hash_local);
-                                if (it != he.second.end())
-                                {
-                                    draw_deps_of(it->second, kHoverArrowColor, 1.05f);
-                                    goto hover_deps_done;
-                                }
-                            }
-                        }
-                    hover_deps_done:;
-                    }
                 }
             }
 
@@ -597,7 +569,7 @@ void VulkanRenderer::render_loop()
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
-            for (const AlphBlock& b : scene_->feed())
+            for (const RecentFeedItem& b : scene_->feed())
             {
                 FeedEntry e;
                 e.hash = b.hash;

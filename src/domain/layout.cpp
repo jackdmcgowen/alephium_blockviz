@@ -1,7 +1,9 @@
 #include "domain/layout.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <map>
+#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -49,25 +51,38 @@ void PolarShardLayout::reset_origins()
     }
 }
 
-LayoutResult PolarShardLayout::build(const std::vector<HeightToHash>& chains, const LayoutParams& params)
+LayoutResult PolarShardLayout::build(const std::vector<GraphNode>& nodes, const LayoutParams& params)
 {
     LayoutResult out;
-    out.placements.reserve(4096);
-    out.positions.reserve(4096);
-    out.lanes.reserve(4096);
+    out.placements.reserve(nodes.size());
+    out.positions.reserve(nodes.size());
+    out.lanes.reserve(nodes.size());
 
     const uint32_t lane_count = params.lane_count > 0 ? params.lane_count : 16;
 
-    for (size_t lane = 0; lane < chains.size() && lane < lane_count; ++lane)
+    // lane -> height -> nodes at that height (stable order by id for forks)
+    std::map<uint32_t, std::map<int64_t, std::vector<const GraphNode*>>> by_lane_height;
+    for (const GraphNode& n : nodes)
     {
-        const HeightToHash& heightMap = chains[lane];
-        for (const auto& hashesAtHeight : heightMap)
+        if (n.id.empty() || n.lane >= lane_count)
+            continue;
+        by_lane_height[n.lane][n.height].push_back(&n);
+    }
+
+    for (auto& lane_entry : by_lane_height)
+    {
+        const uint32_t lane = lane_entry.first;
+        for (auto& height_entry : lane_entry.second)
         {
+            auto& at_height = height_entry.second;
+            std::sort(at_height.begin(), at_height.end(),
+                      [](const GraphNode* a, const GraphNode* b) { return a->id < b->id; });
+
             int block_index = 0;
-            for (const auto& hashesAtBlocks : hashesAtHeight.second)
+            for (const GraphNode* np : at_height)
             {
-                const AlphBlock& block = hashesAtBlocks.second;
-                const int shardId = block.chain_idx();
+                const GraphNode& node = *np;
+                const int shardId = static_cast<int>(node.lane);
                 if (shardId < 0 || shardId >= 16)
                 {
                     ++block_index;
@@ -76,7 +91,7 @@ LayoutResult PolarShardLayout::build(const std::vector<HeightToHash>& chains, co
 
                 if (!origin_set_[shardId])
                 {
-                    origin_height_by_lane_[shardId] = block.height;
+                    origin_height_by_lane_[shardId] = static_cast<int>(node.height);
                     origin_set_[shardId] = true;
                 }
 
@@ -85,16 +100,15 @@ LayoutResult PolarShardLayout::build(const std::vector<HeightToHash>& chains, co
                     2.0f * static_cast<float>(M_PI);
                 const float radius = params.base_radius + block_index * params.meters_per_height;
                 const float z =
-                    -static_cast<float>(block.height - origin_height_by_lane_[shardId]) *
+                    -static_cast<float>(static_cast<int>(node.height) - origin_height_by_lane_[shardId]) *
                     params.meters_per_height;
 
                 PlacedBlock placed;
-                placed.hash = block.hash;
+                placed.hash = node.id;
                 placed.lane = static_cast<uint8_t>(shardId);
-                placed.height = block.height;
+                placed.height = static_cast<int>(node.height);
                 placed.pos = glm::vec3(radius * std::cos(angle), radius * std::sin(angle), z);
                 placed.color = palette_.color_for(static_cast<uint32_t>(shardId));
-                placed.block = &block;
 
                 out.positions[placed.hash] = placed.pos;
                 out.lanes[placed.hash] = placed.lane;
