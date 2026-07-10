@@ -77,7 +77,7 @@ static const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
 
 static constexpr bool kHoverPickEnabled = true;
 
-const VulkanEngine::VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
+const VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
     { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
     { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
     { glm::vec3(-1, -1, -1), glm::normalize(glm::vec3(-1, -1, -1)) }, // 2
@@ -152,11 +152,8 @@ VulkanEngine::VulkanEngine()
     , surface(VK_NULL_HANDLE)
     , swapchain(VK_NULL_HANDLE)
     , descriptorSetLayout(VK_NULL_HANDLE)
-    , pipelineLayout(VK_NULL_HANDLE)
-    , graphicsPipeline(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
     , inFlightFrames{}
-    , renderFinishedSemaphores(MAX_SWAPCHAIN_IMAGES)
     , currentFrame(0)
     , vertexBuffer(VK_NULL_HANDLE)
     , vertexBufferMemory(VK_NULL_HANDLE)
@@ -223,9 +220,10 @@ void VulkanEngine::Init(void *hInstance, void *hwnd)
     create_depth_resources();
     create_image_views();
     create_descriptor_set_layout();
-    create_graphics_pipeline();
-    create_picker_pipeline();
+    cube_pipe_.create(device, descriptorSetLayout, swapchainImageFormat, depthFormat, width, height);
     create_picker_resources();
+    picker_pipe_.create(device, descriptorSetLayout, PICKING_FORMAT, depthFormat, width, height);
+    create_picker_staging();
     create_command_pool();
     create_vertex_buffer();
     create_index_buffer();
@@ -694,19 +692,7 @@ void VulkanEngine::render()
     FramesInFlight& frame = inFlightFrames[currentFrame];
     commandBuffer = frame.commandBuffer;
 
-    /* wait for the previous (in-flight) frame's use */
-    if (frame.value > 0) {
-
-    VkSemaphoreWaitInfo
-        waitInfo{};
-
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-    waitInfo.semaphoreCount = 1;
-    waitInfo.pSemaphores = &timeline;
-    waitInfo.pValues = &frame.value;
-
-    vkWaitSemaphores( device, &waitInfo, UINT64_MAX );
-    }
+    frame_sync_.wait_frame(device, static_cast<uint32_t>(currentFrame));
 
     if (resizing)
     {
@@ -731,31 +717,27 @@ void VulkanEngine::render()
         {
             if (!resolved.empty())
                 set_selection(resolved);
-            // miss: keep sticky selection
         }
         else if (kind == PickKind::Hover)
         {
             std::lock_guard<std::mutex> slock(selection_mutex_);
-            hovered_hash_ = resolved; // empty clears hover highlight
+            hovered_hash_ = resolved;
         }
     }
 
-    // Bind this frame's pick map + seq (matches GPU-visible instances after apply_published_frame)
     inFlightFrames[currentFrame].pick_map = pick_id_to_hash_;
     inFlightFrames[currentFrame].pick_frame_seq = gpu_frame_seq_;
 
-    imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
+    imageAvailableSemaphore = frame_sync_.image_available(static_cast<uint32_t>(currentFrame));
     result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-    {
-    resizing = true;
-    }
-    renderFinishedSemaphore = renderFinishedSemaphores[imageIndex];
+        resizing = true;
+    renderFinishedSemaphore = frame_sync_.render_finished(imageIndex);
 
     vkResetCommandBuffer(commandBuffer, 0);
-    record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST );
+    record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-    uint64_t    signalValues[] = { s_frameCounter + 1, 0 };
+    const uint64_t signalValues[] = { s_frameCounter + 1, 0 };
 
     VkCommandBufferSubmitInfo cbSubmitInfo{};
     cbSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
@@ -767,7 +749,7 @@ void VulkanEngine::render()
 
     VkSemaphoreSubmitInfo signalInfo[2]{};
     signalInfo[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalInfo[0].semaphore = timeline;
+    signalInfo[0].semaphore = frame_sync_.timeline();
     signalInfo[0].value = signalValues[0];
     signalInfo[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
@@ -786,9 +768,7 @@ void VulkanEngine::render()
     submitInfo2.pWaitSemaphoreInfos = &waitInfo;
 
     if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo2, VK_NULL_HANDLE) != VK_SUCCESS)
-    {
         throw std::runtime_error("Failed to submit draw command buffer");
-    }
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -800,7 +780,7 @@ void VulkanEngine::render()
 
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 
-    frame.value = signalValues[0];
+    frame_sync_.set_frame_timeline_value(static_cast<uint32_t>(currentFrame), signalValues[0]);
     s_frameCounter++;
 
 }   /* render() */
@@ -942,189 +922,8 @@ void VulkanEngine::create_picker_resources()
 }   /* create_picker_resources() */
 
 
-void VulkanEngine::create_picker_pipeline()
+void VulkanEngine::create_picker_staging()
 {
-    // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
-    std::vector<uint8_t> vertShaderCode;
-    std::vector<uint8_t> fragShaderCode;
-
-    load_shader_source("picker_vert.spv", vertShaderCode);
-    load_shader_source("picker_frag.spv", fragShaderCode);
-
-    VkShaderModule vertShaderModule;
-    VkShaderModule fragShaderModule;
-    create_shader_module(device, vertShaderModule, vertShaderCode);
-    create_shader_module(device, fragShaderModule, fragShaderCode);
-
-    VkPipelineShaderStageCreateInfo vertStageInfo{};
-    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStageInfo.module = vertShaderModule;
-    vertStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStageInfo{};
-    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStageInfo.module = fragShaderModule;
-    fragStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
-
-    VkVertexInputBindingDescription bindingDescriptions[2];
-    bindingDescriptions[0].binding = 0;
-    bindingDescriptions[0].stride = sizeof(VertexNormal);
-    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    bindingDescriptions[1].binding = 1;
-    bindingDescriptions[1].stride = sizeof(InstanceData);
-    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-
-    VkVertexInputAttributeDescription attributeDescriptions[2];
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(VertexNormal, pos.x);
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(VertexNormal, normal.x);
-
-    VkVertexInputAttributeDescription instanceAttributes[2];
-    instanceAttributes[0].binding = 1;
-    instanceAttributes[0].location = 2;
-    instanceAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    instanceAttributes[0].offset = offsetof(InstanceData, pos);
-    instanceAttributes[1].binding = 1;
-    instanceAttributes[1].location = 3;
-    instanceAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    instanceAttributes[1].offset = offsetof(InstanceData, color);
-
-    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], attributeDescriptions[1], instanceAttributes[0], instanceAttributes[1] };
-
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 2;
-    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
-    vertexInputInfo.vertexAttributeDescriptionCount = 4;
-    vertexInputInfo.pVertexAttributeDescriptions = attributes;
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)swapchainExtent.width;
-    viewport.height = (float)swapchainExtent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = swapchainExtent;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_FALSE; //reuse depth buffer for picker pass
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    VkPushConstantRange range{};
-    range.stageFlags =  VK_SHADER_STAGE_FRAGMENT_BIT;
-    range.offset = 0;
-    range.size = sizeof(PushConstants);
-
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;//&picker_descSetLayout;
-    pipelineLayoutInfo.pPushConstantRanges = &range;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &picker_pipelineLayout) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create picker pipeline layout");
-    }
-
-
-    VkDynamicState dynamicStates[] = {
-    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-    VK_DYNAMIC_STATE_VIEWPORT,
-    VK_DYNAMIC_STATE_SCISSOR
-    };
-
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = _countof(dynamicStates);
-    dynamicState.pDynamicStates = dynamicStates;
-
-    VkFormat colorFormat = PICKING_FORMAT;
-    VkPipelineRenderingCreateInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachmentFormats = &colorFormat;
-    renderingInfo.depthAttachmentFormat = depthFormat;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.pNext = &renderingInfo;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = picker_pipelineLayout;
-    pipelineInfo.renderPass = VK_NULL_HANDLE;
-    pipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &picker_pipeline) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create picker graphics pipeline");
-    }
-
-    destroy_shader_module(device, fragShaderModule);
-    destroy_shader_module(device, vertShaderModule);
-
-    // 2. Staging buffer (host visible)
     create_buffer(
         device, &deviceMemProps,
         PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
@@ -1133,194 +932,7 @@ void VulkanEngine::create_picker_pipeline()
         stagingBuffer,
         stagingMemory
     );
-
-
-}   /* create_picker_pipeline() */
-
-
-void VulkanEngine::create_graphics_pipeline()
-{
-    // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
-    std::vector<uint8_t> vertShaderCode;
-    std::vector<uint8_t> fragShaderCode;
-
-    load_shader_source("vert.spv", vertShaderCode);
-    load_shader_source("frag.spv", fragShaderCode);
-
-    VkShaderModule vertShaderModule;
-    VkShaderModule fragShaderModule;
-    create_shader_module(device, vertShaderModule, vertShaderCode);
-    create_shader_module(device, fragShaderModule, fragShaderCode);
-
-    VkPipelineShaderStageCreateInfo vertStageInfo{};
-    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStageInfo.module = vertShaderModule;
-    vertStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStageInfo{};
-    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStageInfo.module = fragShaderModule;
-    fragStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
-
-    VkVertexInputBindingDescription bindingDescriptions[2];
-    bindingDescriptions[0].binding = 0;
-    bindingDescriptions[0].stride = sizeof(VertexNormal);
-    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    bindingDescriptions[1].binding = 1;
-    bindingDescriptions[1].stride = sizeof(InstanceData);
-    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-
-    VkVertexInputAttributeDescription attributeDescriptions[2];
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(VertexNormal, pos.x);
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(VertexNormal, normal.x);
-
-    VkVertexInputAttributeDescription instanceAttributes[2];
-    instanceAttributes[0].binding = 1;
-    instanceAttributes[0].location = 2;
-    instanceAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    instanceAttributes[0].offset = offsetof(InstanceData, pos);
-    instanceAttributes[1].binding = 1;
-    instanceAttributes[1].location = 3;
-    instanceAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    instanceAttributes[1].offset = offsetof(InstanceData, color);
-
-    VkVertexInputAttributeDescription attributes[] = { attributeDescriptions[0], attributeDescriptions[1], instanceAttributes[0], instanceAttributes[1] };
-
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 2;
-    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
-    vertexInputInfo.vertexAttributeDescriptionCount = 4;
-    vertexInputInfo.pVertexAttributeDescriptions = attributes;
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)width;
-    viewport.height = (float)height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = swapchainExtent;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-
-
-
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create pipeline layout");
-    }
-
-    VkDynamicState dynamicStates[] = {
-    VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-    VK_DYNAMIC_STATE_VIEWPORT,
-    VK_DYNAMIC_STATE_SCISSOR
-    };
-
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = _countof( dynamicStates );
-    dynamicState.pDynamicStates = dynamicStates;
-
-    VkPipelineRenderingCreateInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachmentFormats = &swapchainImageFormat;
-    renderingInfo.depthAttachmentFormat = depthFormat;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.pNext = &renderingInfo;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = VK_NULL_HANDLE;
-    pipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create graphics pipeline");
-    }
-
-    destroy_shader_module(device, fragShaderModule);
-    destroy_shader_module(device, vertShaderModule);
-
-}   /* create_graphics_pipeline() */
+}
 
 
 void VulkanEngine::create_vertex_buffer()
@@ -1466,35 +1078,12 @@ void VulkanEngine::create_command_pool()
 
 void VulkanEngine::create_sync_objects()
 {
-
-    VkSemaphoreTypeCreateInfo semaphoreTypeCI{};
-    semaphoreTypeCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-    semaphoreTypeCI.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
-    semaphoreTypeCI.initialValue = 0;
-
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphoreInfo.pNext = &semaphoreTypeCI;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    for (int i = 0; i < MAX_SWAPCHAIN_IMAGES; ++i)
-    {
-        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]);
-    }
-
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        vkCreateSemaphore(device, &semaphoreInfo, nullptr, &inFlightFrames[i].imageAvailableSemaphore);
-    }
-
-    semaphoreTypeCI.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-
-    vkCreateSemaphore(device, &semaphoreInfo, nullptr, &timeline);
-
-}   /* create_sync_objects() */
+    FrameSyncCreateInfo info{};
+    info.device = device;
+    info.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
+    info.swapchain_image_count = MAX_SWAPCHAIN_IMAGES;
+    frame_sync_.create(info);
+}
 
 
 glm::vec3 VulkanEngine::camera_eye() const
@@ -1803,23 +1392,23 @@ void VulkanEngine::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, u
     vkCmdSetViewport(buffer, 0, 1, &vp);
 
     // Bind your picking pipeline (color write only, no depth usually)
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipeline);
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipe_.pipeline);
     vkCmdSetPrimitiveTopology(buffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
     // Push constants with mouse position
-    PushConstants pc{};
+    PickerPushConstants pc{};
     pc.mouseX = mouseX;
     pc.mouseY = mouseY;
     pc.instanceOffset = instanceOffset;
 
-    vkCmdPushConstants(buffer, picker_pipelineLayout,
+    vkCmdPushConstants(buffer, picker_pipe_.layout,
         VK_SHADER_STAGE_FRAGMENT_BIT,
-        0, sizeof(PushConstants), &pc);
+        0, sizeof(PickerPushConstants), &pc);
 
     VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
     vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
@@ -1901,7 +1490,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     }
 
     vkCmdBeginRendering(buffer, &renderInfo);
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.pipeline);
     vkCmdSetPrimitiveTopology(buffer, topology);
 
     VkViewport viewport;
@@ -1921,7 +1510,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
     vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
@@ -2051,28 +1640,14 @@ void VulkanEngine::cleanup()
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-    for (int i = 0; i < MAX_SWAPCHAIN_IMAGES; ++i)
-    {
-        vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-    }
-    vkDestroySemaphore(device, timeline, nullptr);
-
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        vkDestroySemaphore(device, inFlightFrames[i].imageAvailableSemaphore, nullptr);
-    }
+    frame_sync_.destroy(device);
     vkDestroyCommandPool(device, commandPool, nullptr);
-
 
     destroy_image_view(device, picker_imageView);
     destroy_image(device, picker_image, picker_memory);
 
-    vkDestroyPipeline(device, picker_pipeline, nullptr);
-    vkDestroyPipelineLayout(device, picker_pipelineLayout, nullptr);
-
-
-    vkDestroyPipeline(device, graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    picker_pipe_.destroy(device);
+    cube_pipe_.destroy(device);
 
     for (auto imageView : swapchainImageViews)
     {

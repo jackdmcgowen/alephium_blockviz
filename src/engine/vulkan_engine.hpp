@@ -17,7 +17,12 @@
 #include "app/ui_snapshot.hpp"
 #include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
+#include "engine/frame_sync.hpp"
+#include "engine/pipelines/cube_pipeline.hpp"
+#include "engine/pipelines/picker_pipeline.hpp"
+#include "engine/vertex_types.hpp"
 #include "graphics/gpu_pub_lib.h"
+#include "graphics/gpu_prv_lib.h"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
@@ -26,76 +31,37 @@
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 5000.0f )
 
-// PR6b: engine has no cJSON ingest. Domain lives in BlockScene (adapter writes, renderer reads).
-// PR7: triple-buffer FrameSubmit + UiSnapshot for race-free ImGui.
-// PR8: engine hosts ImGui; chrome via IUiOverlay; camera via CameraState (no explorer URLs).
+// PR6b–PR11 modular engine; E3 FrameSync; E4 pipelines.
 class VulkanEngine
 {
 public:
-    struct VertexNormal
-    {
-        glm::vec3 pos;
-        glm::vec3 normal;
-    };
-
-    struct InstanceData
-    {
-        glm::vec3 pos;
-        glm::vec3 color;
-    };
-
-    struct UniformBufferObject
-    {
-        glm::mat4 view;
-        glm::mat4 proj;
-        glm::vec3 lightPos;
-        glm::float32 pad1;
-        glm::vec3 viewPos;
-        glm::float32 pad2;
-        glm::float32 meters;
-    };
-
-    struct PushConstants {
-        uint32_t mouseX;
-        uint32_t mouseY;
-        uint32_t instanceOffset;
-    };
+    using PushConstants = PickerPushConstants;
 
     VulkanEngine();
     ~VulkanEngine();
     void Init(void *hInstance, void *hwnd);
 
-    // Domain scene (owned by app; set before Start / network). Not owned.
     void set_scene(BlockScene* scene);
-
-    // PR8: client chrome + camera (not owned; set before Start).
     void set_ui_overlay(IUiOverlay* overlay);
     void set_camera(CameraState* camera);
 
-    // Thread-safe selection (network may call after replace).
     void set_selection(const std::string& hash);
     void clear_selection();
     bool is_selected(const std::string& hash) const;
     AlphBlock copy_selected_block() const;
-
-    // PR11: network thread consumes a pending detail rehydrate request (hash or empty).
     std::string consume_detail_refill_request();
 
     void Resize();
     void Start();
     void Stop();
 
-    // PR6a/PR7: deep-copy into triple-buffer slot (latest-wins). Thread-safe.
-    // Does not touch GPU; call apply_published_frame() on the render thread.
     void submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map);
-
-    // PR7: publish overlay data (feed + selected detail). Thread-safe.
     void publish_ui_snapshot(UiSnapshot snap);
     UiSnapshot copy_ui_snapshot() const;
 
 private:
     void resize();
-    static const int MAX_INSTANCES = 1024*1024;
+    static const int MAX_INSTANCES = 1024 * 1024;
     static const VertexNormal CUBE_VERTICES[8];
     static const uint16_t CUBE_INDICES[36];
 
@@ -114,14 +80,14 @@ private:
     VkFormat swapchainImageFormat;
     VkExtent2D swapchainExtent;
     std::vector<VkImageView> swapchainImageViews;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
     VkImage depthImage;
     VkFormat depthFormat;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
     VkDescriptorSetLayout descriptorSetLayout;
-    VkPipelineLayout pipelineLayout;
-    VkPipeline graphicsPipeline;
+
+    CubePipeline cube_pipe_;
+    PickerPipeline picker_pipe_;
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingMemory;
@@ -130,25 +96,21 @@ private:
     VkImageView picker_imageView;
     VkDeviceMemory picker_memory;
 
-    VkPipelineLayout picker_pipelineLayout;
-    VkPipeline picker_pipeline;
-
     VkCommandPool commandPool;
+    FrameSync frame_sync_;
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
 
+    // App/pick policy only — GPU sync lives in FrameSync (E3)
     struct FramesInFlight
     {
-        VkSemaphore     imageAvailableSemaphore;
-        VkCommandBuffer commandBuffer;
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         bool            pendingPick = false;
         PickKind        pickKind = PickKind::None;
-        uint64_t        value = 0;
         std::vector<std::string> pick_map;
-        uint64_t        pick_frame_seq = 0; // client_seq of GPU-visible frame when pick recorded
-    } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
+        uint64_t        pick_frame_seq = 0;
+    } inFlightFrames[MAX_FRAMES_IN_FLIGHT];
 
-    VkSemaphore     timeline;
     int currentFrame;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -165,7 +127,7 @@ private:
 
     std::thread renderThread;
     std::mutex  renderMutex;
-    mutable std::mutex  selection_mutex_; // selection only; scene has its own mutex
+    mutable std::mutex  selection_mutex_;
 
     BlockScene*   scene_   = nullptr;
     IUiOverlay*   overlay_ = nullptr;
@@ -177,7 +139,6 @@ private:
     std::string hovered_hash_;
     bool      has_look_target_ = false;
     glm::vec3 selected_look_pos_{ 0.f };
-    // Left-click: rotate into full lookAt (hold). Right-click: rotate home to +Z forward.
     glm::vec3 look_dir_{ 0.f, 0.f, 1.f };
     bool      look_dir_init_ = false;
     float     last_frame_dt_sec_ = 1.f / 60.f;
@@ -185,9 +146,8 @@ private:
     glm::vec3   look_aim_dir_{ 0.f, 0.f, 1.f };
     bool        look_engaged_ = false;
     std::vector<std::string> pick_id_to_hash_;
-    uint64_t  gpu_frame_seq_ = 0; // client_seq of currently applied GPU frame
+    uint64_t  gpu_frame_seq_ = 0;
 
-    // PR11: request full txn payload rehydrate from network when selection is slim
     mutable std::mutex detail_refill_mutex_;
     std::string        detail_refill_hash_;
 
@@ -203,14 +163,12 @@ private:
     uint32_t height;
 
     void render_loop();
-
     void render();
     void create_depth_resources();
     void create_image_views();
     void create_descriptor_set_layout();
-    void create_graphics_pipeline();
     void create_picker_resources();
-    void create_picker_pipeline();
+    void create_picker_staging();
     void create_vertex_buffer();
     void create_index_buffer();
     void create_instance_buffer();
@@ -223,12 +181,11 @@ private:
     glm::vec3 camera_eye() const;
     void begin_look_aim(const glm::vec3& eye, const glm::vec3& target_pos,
                         const std::string& hash);
-    void end_look_aim(); // disengage → slerp back to original forward
+    void end_look_aim();
     void update_look_direction(float dt, const glm::vec3& eye);
     CameraUBO build_camera_ubo() const;
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
 
-    // PR7 triple-buffer: writing free slot → pending; render acquires pending → reading
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot
     {
@@ -239,16 +196,14 @@ private:
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
     mutable std::mutex submit_mutex_;
-    int pending_slot_ = -1;  // latest published, not yet acquired (-1 = none)
-    int reading_slot_ = -1;  // currently GPU-visible on render thread
+    int pending_slot_ = -1;
+    int reading_slot_ = -1;
     uint64_t submit_seq_ = 0;
     uint64_t ui_snap_seq_ = 0;
 
-    // Acquire pending → reading and upload instances/camera to GPU. Render thread only.
     bool apply_published_frame();
     int  find_free_gpu_slot_unlocked() const;
 
-    // UiSnapshot publish (separate from GPU slots)
     mutable std::mutex ui_snap_mutex_;
     UiSnapshot ui_snap_;
 
