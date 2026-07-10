@@ -76,7 +76,8 @@ void NetworkPoller::thread_main()
         curl_easy_cleanup(curl);
         curl = nullptr;
     }
-    std::printf("[net] poller stopped (verified_ok=%d removed=%d replaced=%d queue=%zu)\n",
+    std::printf("[net] poller stopped (verified_ok=%d removed=%d replaced=%d refilled=%d queue=%zu)\n",
                 adapter_.stats_verified_ok(), adapter_.stats_removed(),
-                adapter_.stats_replaced(), adapter_.verify_queue_size());
+                adapter_.stats_replaced(), adapter_.stats_detail_refilled(),
+                adapter_.verify_queue_size());
 }

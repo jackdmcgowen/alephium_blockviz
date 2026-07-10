@@ -37,10 +37,14 @@ public:
     // Background main-chain verify / remove / replace.
     void drain_verify(int max_jobs, const std::atomic<bool>& running);
 
+    // PR11: rehydrate slim selection detail from API if engine requested it.
+    void maybe_refill_selection_detail();
+
     size_t verify_queue_size() const { return verify_q_.size(); }
     int stats_verified_ok() const { return stats_verified_ok_; }
     int stats_removed() const { return stats_removed_; }
     int stats_replaced() const { return stats_replaced_; }
+    int stats_detail_refilled() const { return stats_detail_refilled_; }
 
     int64_t poll_interval_ms() const { return cfg_.poll_interval_ms; }
     int64_t lookback_ms() const { return cfg_.lookback_ms; }
@@ -57,6 +61,7 @@ private:
 
     void enqueue_verify(VerifyJob job);
     void verify_one(const VerifyJob& job);
+    void prune_detail_store();
 
     BlockScene& scene_;
     VulkanEngine& engine_;
@@ -71,6 +76,7 @@ private:
     int stats_verified_ok_ = 0;
     int stats_removed_ = 0;
     int stats_replaced_ = 0;
+    int stats_detail_refilled_ = 0;
 
     static constexpr size_t kMaxVerifyQueue = 50000;
     static constexpr int kTipRefreshEveryNPolls = 3;

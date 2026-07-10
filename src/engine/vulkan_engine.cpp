@@ -279,10 +279,30 @@ void VulkanEngine::Init(void *hInstance, void *hwnd)
 }   /* Init() */
 
 
+void VulkanEngine::request_detail_refill_unlocked(const std::string& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(detail_refill_mutex_);
+    detail_refill_hash_ = hash;
+}
+
+void VulkanEngine::pin_and_maybe_refill(const std::string& hash, bool has_txns)
+{
+    if (!scene_)
+        return;
+    // Pin selection so prune keeps full payloads for this id.
+    scene_->detail_store().set_full_detail_pin(hash);
+    if (!hash.empty() && !has_txns)
+        request_detail_refill_unlocked(hash);
+}
+
 void VulkanEngine::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
+    if (scene_)
+        scene_->detail_store().set_full_detail_pin({});
 }
 
 void VulkanEngine::clear_selection()
@@ -313,6 +333,7 @@ void VulkanEngine::set_selection_unlocked(const std::string& hash)
             selected_block = AlphBlock{};
             selected_block.hash = hash;
         }
+        pin_and_maybe_refill(hash, !selected_block.txns.empty());
     }
     else
     {
@@ -325,6 +346,14 @@ void VulkanEngine::set_selection(const std::string& hash)
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     set_selection_unlocked(hash);
+}
+
+std::string VulkanEngine::consume_detail_refill_request()
+{
+    std::lock_guard<std::mutex> lock(detail_refill_mutex_);
+    std::string out = std::move(detail_refill_hash_);
+    detail_refill_hash_.clear();
+    return out;
 }
 
 bool VulkanEngine::is_selected(const std::string& hash) const
@@ -345,7 +374,14 @@ void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
     if (selected_hash_.empty())
         return;
     if (selected_block.hash != selected_hash_ || selected_block.txns.empty())
+    {
         selected_block = scene.resolve_detail_under_lock(selected_hash_);
+        // If still slim after store catch-up, re-request network rehydrate (PR11).
+        if (selected_block.txns.empty())
+            pin_and_maybe_refill(selected_hash_, false);
+        else
+            scene.detail_store().set_full_detail_pin(selected_hash_);
+    }
 }
 
 

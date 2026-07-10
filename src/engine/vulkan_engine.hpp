@@ -78,6 +78,9 @@ public:
     bool is_selected(const std::string& hash) const;
     AlphBlock copy_selected_block() const;
 
+    // PR11: network thread consumes a pending detail rehydrate request (hash or empty).
+    std::string consume_detail_refill_request();
+
     void Resize();
     void Start();
     void Stop();
@@ -177,9 +180,15 @@ private:
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0; // client_seq of currently applied GPU frame
 
+    // PR11: request full txn payload rehydrate from network when selection is slim
+    mutable std::mutex detail_refill_mutex_;
+    std::string        detail_refill_hash_;
+
     void set_selection_unlocked(const std::string& hash);
     void clear_selection_unlocked();
     void refresh_selection_if_needed(BlockScene& scene);
+    void request_detail_refill_unlocked(const std::string& hash);
+    void pin_and_maybe_refill(const std::string& hash, bool has_txns);
 
     bool running;
     float elapsedSeconds;

@@ -22,9 +22,66 @@ void AlephiumAdapter::reset_stats()
 {
     poll_count_ = 0;
     stats_verified_ok_ = stats_removed_ = stats_replaced_ = 0;
+    stats_detail_refilled_ = 0;
     verify_q_.clear();
     verify_queued_.clear();
     verify_done_.clear();
+}
+
+void AlephiumAdapter::prune_detail_store()
+{
+    const size_t slimmed = scene_.detail_store().prune_unpinned_txns();
+    if (slimmed == 0)
+        return;
+    const DetailStoreStats st = scene_.detail_store().stats();
+    std::printf("[adapter] detail slim: pruned=%zu full=%zu slim=%zu total=%zu\n",
+                slimmed, st.full_blocks, st.slim_blocks, st.entries);
+}
+
+void AlephiumAdapter::maybe_refill_selection_detail()
+{
+    const std::string hash = engine_.consume_detail_refill_request();
+    if (hash.empty())
+        return;
+
+    // Already full (race with concurrent upsert) — refresh selection copy only.
+    if (!scene_.detail_store().is_slim(hash))
+    {
+        if (engine_.is_selected(hash))
+            engine_.set_selection(hash);
+        return;
+    }
+
+    cJSON* block_obj = get_blockflow_blocks_blockhash(hash.c_str());
+    if (!block_obj)
+    {
+        // Retry later
+        engine_.set_selection(hash); // re-queues refill if still slim
+        return;
+    }
+
+    cJSON* block = block_obj;
+    if (!cJSON_GetObjectItem(block_obj, "hash"))
+    {
+        cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
+        if (inner)
+            block = inner;
+    }
+
+    // Upsert full payload without re-admitting into the graph (may already be live).
+    AlphBlock alph(block);
+    if (!alph.hash.empty())
+    {
+        scene_.detail_store().upsert(alph);
+        scene_.detail_store().set_full_detail_pin(alph.hash);
+        ++stats_detail_refilled_;
+        std::printf("[adapter] detail refilled %s txns=%zu\n",
+                    alph.hash.c_str(), alph.txns.size());
+        if (engine_.is_selected(alph.hash))
+            engine_.set_selection(alph.hash);
+    }
+
+    cJSON_Delete(block_obj);
 }
 
 void AlephiumAdapter::on_start()
@@ -169,6 +226,8 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
 
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
+    maybe_refill_selection_detail();
+
     int n = 0;
     while (n < max_jobs && running.load() && !verify_q_.empty())
     {
@@ -181,6 +240,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 {
+    // Prefer selection inspector continuity before long poll work
+    maybe_refill_selection_detail();
+
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
     std::printf("\n[adapter] Polling blockflow from %lld to %lld (verify_q=%zu)\n",
                 static_cast<long long>(last_poll_ts), static_cast<long long>(now),
@@ -193,7 +255,10 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     const int64_t from_ts = last_poll_ts - (ALPH_TARGET_BLOCK_SECONDS * 1000);
     cJSON* obj = get_blockflow_blocks_with_events(from_ts, now);
     if (!obj)
+    {
+        maybe_refill_selection_detail();
         return;
+    }
 
     GET_OBJECT_ITEM(obj, blocksAndEvents);
     if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
@@ -254,11 +319,16 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         }
 
         std::printf("[adapter] seen=%d added=%d verify_queued+=%d skipped_bad=%d "
-                    "q=%zu verified_ok=%d removed=%d replaced=%d\n",
+                    "q=%zu verified_ok=%d removed=%d replaced=%d refilled=%d\n",
                     seen, added, queued, skipped_bad, verify_q_.size(),
-                    stats_verified_ok_, stats_removed_, stats_replaced_);
+                    stats_verified_ok_, stats_removed_, stats_replaced_,
+                    stats_detail_refilled_);
     }
 
     last_poll_ts = now;
     cJSON_Delete(obj);
+
+    // PR11: drop txn payloads for unselected blocks (pin keeps selection full)
+    prune_detail_store();
+    maybe_refill_selection_detail();
 }
