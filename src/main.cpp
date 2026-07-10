@@ -56,7 +56,7 @@ int main()
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"Alephium BlockFlow";
-    wc.hIcon = (HICON)LoadImage(NULL, L"alephium-logo-round.ico", IMAGE_ICON, 0, 0,
+    wc.hIcon = (HICON)LoadImage(NULL, L"resource\\Alephium-Logo-round.ico", IMAGE_ICON, 0, 0,
                                 LR_LOADFROMFILE | LR_DEFAULTSIZE);
 
     RegisterClass(&wc);

@@ -69,7 +69,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\Alephium-Logo-round.ico" />
+    <Image Include="..\resource\Alephium-Logo-round.ico" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
