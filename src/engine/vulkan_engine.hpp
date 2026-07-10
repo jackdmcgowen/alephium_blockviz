@@ -177,10 +177,13 @@ private:
     std::string hovered_hash_;
     bool      has_look_target_ = false;
     glm::vec3 selected_look_pos_{ 0.f };
-    // Soft look-at: slerp look_dir_ toward (biased) selection; eye stays on Z-track
+    // One-shot glance: full lookAt angle on select, then ease back to forward
     glm::vec3 look_dir_{ 0.f, 0.f, 1.f };
     bool      look_dir_init_ = false;
     float     last_frame_dt_sec_ = 1.f / 60.f;
+    std::string look_glance_hash_;
+    glm::vec3   look_glance_dir_{ 0.f, 0.f, 1.f };
+    bool        look_glance_active_ = false;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0; // client_seq of currently applied GPU frame
 
@@ -218,8 +221,10 @@ private:
     void create_sync_objects();
     void update_uniform_buffer();
     glm::vec3 camera_eye() const;
-    void update_look_direction(float dt, const glm::vec3& eye,
-                               bool has_target, const glm::vec3& target_pos);
+    void begin_look_glance(const glm::vec3& eye, const glm::vec3& target_pos,
+                           const std::string& hash);
+    void cancel_look_glance();
+    void update_look_direction(float dt, const glm::vec3& eye);
     CameraUBO build_camera_ubo() const;
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
 
