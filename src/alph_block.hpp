@@ -123,7 +123,7 @@ public:
 	std::vector<AlphTxn> txns;
 	std::vector<std::string> uncles;
 
-	uint8_t chain_idx() { return( chainFrom * ALPH_NUM_GROUPS + chainTo ); }
+	uint8_t chain_idx() const { return static_cast<uint8_t>(chainFrom * ALPH_NUM_GROUPS + chainTo); }
 
 	AlphBlock()
 		: chainFrom(0xFF)

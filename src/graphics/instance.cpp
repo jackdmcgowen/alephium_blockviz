@@ -1,18 +1,34 @@
 #include "gpu_prv_lib.h"
+#include "engine_requirements.hpp"
 
 #include <windows.h>
 #include <vulkan/vulkan_win32.h>
 
-VkInstance create_instance()
+VkInstance create_instance(const SoftwareIdentity& application,
+                           const SoftwareIdentity& engine)
 {
-    VkInstance   instance;
+    VkInstance instance;
+
+    const char* app_name = (application.name && application.name[0])
+                               ? application.name
+                               : "App";
+    const char* eng_name = (engine.name && engine.name[0])
+                               ? engine.name
+                               : "Engine";
+
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Alephium DAG";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.pApplicationName = app_name;
+    appInfo.applicationVersion = VK_MAKE_VERSION(
+        application.version_major,
+        application.version_minor,
+        application.version_patch);
+    appInfo.pEngineName = eng_name;
+    appInfo.engineVersion = VK_MAKE_VERSION(
+        engine.version_major,
+        engine.version_minor,
+        engine.version_patch);
+    appInfo.apiVersion = kRequiredVulkanApiVersion;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -22,8 +38,9 @@ VkInstance create_instance()
 #ifndef NDEBUG
         VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
+
         VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
     };
     const char* enbl_layers[] = { "VK_LAYER_KHRONOS_validation" };
 #ifndef NDEBUG
@@ -42,14 +59,13 @@ VkInstance create_instance()
         throw std::runtime_error("Failed to create Vulkan instance");
     }
 
-    return(instance);
+    return instance;
 
 }   /* create_instance() */
 
 
 void destroy_instance(VkInstance instance)
 {
-vkDestroyInstance(instance, nullptr);
+    vkDestroyInstance(instance, nullptr);
 
 }   /* destroy_instance() */
-

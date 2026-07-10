@@ -36,10 +36,12 @@ void create_debug_messenger(VkInstance instance)
     if (!enableValidationLayers) return;
 
     if (enableValidationLogging) {
-        validationFile = fopen( "debug.log", "a+");
+        // CWD is repo root (LocalDebuggerWorkingDirectory); keep logs out of source tree.
+        CreateDirectoryA("build", nullptr);
+        validationFile = fopen("build/debug.log", "a+");
 
         if (!validationFile)
-            throw std::runtime_error("Failed to setup debug log");
+            throw std::runtime_error("Failed to setup debug log (build/debug.log)");
     }
 
     VkDebugUtilsMessengerCreateInfoEXT createInfo{};

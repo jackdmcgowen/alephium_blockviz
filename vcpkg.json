@@ -1,0 +1,10 @@
+{
+  "name": "alephium-blockviz",
+  "version-string": "0.1.0",
+  "description": "Alephium BlockFlow Vulkan visualizer",
+  "dependencies": [
+    "curl",
+    "cjson",
+    "glm"
+  ]
+}

@@ -23,6 +23,7 @@ typedef enum AlephiumCommand
     CMD_BLOCKFLOW_CHAIN_INFO,
     CMD_BLOCKFLOW_HASHES,
     CMD_BLOCKFLOW_HEADERS_BLOCKHASH,
+    CMD_BLOCKFLOW_IS_BLOCK_IN_MAIN_CHAIN,
 
     CMD_COUNT /* Sentinel */
     } AlephiumCommand;
@@ -125,6 +126,13 @@ cJSON* get_blockflow_blocks_with_events_blockhash
 cJSON* get_blockflow_headers_blockhash
     (
     const char * const  blockHash
+    );
+
+/* Returns 1 if main-chain, 0 if not. *transport_ok is 1 on HTTP 200+parse, else 0. */
+int get_blockflow_is_block_in_main_chain
+    (
+    const char * const  blockHash,
+    int                *transport_ok
     );
 
 int get_height

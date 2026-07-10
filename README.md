@@ -6,6 +6,6 @@ Switch between testnet and mainnet in the config.json
 
 ---
 
-![](images/screenshot_1.png)
-![](images/screenshot_2.png)
-![](images/screenshot_3.png)
+![](docs/images/screenshot_1.png)
+![](docs/images/screenshot_2.png)
+![](docs/images/screenshot_3.png)

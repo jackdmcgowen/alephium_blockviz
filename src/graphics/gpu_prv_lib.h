@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gpu_pub_lib.h"
+
 #include <vulkan/vulkan.h>
 
 #include <stdexcept>
@@ -7,8 +9,9 @@
 
 #define MAX_SWAPCHAIN_IMAGES ( 3 )
 
-  //instance.cpp
-VkInstance create_instance();
+  //instance.cpp — app identity from host; engine identity from engine layer
+VkInstance create_instance(const SoftwareIdentity& application,
+                           const SoftwareIdentity& engine);
 void destroy_instance(VkInstance instance);
 
   //validation.cpp
@@ -82,6 +85,9 @@ VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, V
 void destroy_image_view(VkDevice device, VkImageView imageview);
 
   //shader.cpp
+void load_shader_source(const char* const   filename,
+    std::vector<uint8_t>& src);
+
 void create_shader_module(VkDevice device, VkShaderModule &shaderModule, std::vector<uint8_t> &pCode );
 
 void destroy_shader_module(VkDevice device, VkShaderModule shaderModule);
