@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
+#include "app/ui_snapshot.hpp"
 #include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
 #include "graphics/gpu_pub_lib.h"
@@ -25,6 +26,7 @@
 #define FAR_PLANE ( 5000.0f )
 
 // PR6b: engine has no cJSON ingest. Domain lives in BlockScene (adapter writes, renderer reads).
+// PR7: triple-buffer FrameSubmit + UiSnapshot for race-free ImGui.
 class VulkanRenderer
 {
 public:
@@ -73,8 +75,13 @@ public:
     void Start();
     void Stop();
 
-    // PR6a: publish GPU draw data (instances + camera).
+    // PR6a/PR7: deep-copy into triple-buffer slot (latest-wins). Thread-safe.
+    // Does not touch GPU; call apply_published_frame() on the render thread.
     void submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map);
+
+    // PR7: publish overlay data (feed + selected detail). Thread-safe.
+    void publish_ui_snapshot(UiSnapshot snap);
+    UiSnapshot copy_ui_snapshot() const;
 
 private:
     void resize();
@@ -128,6 +135,7 @@ private:
         PickKind        pickKind = PickKind::None;
         uint64_t        value = 0;
         std::vector<std::string> pick_map;
+        uint64_t        pick_frame_seq = 0; // client_seq of GPU-visible frame when pick recorded
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
     VkSemaphore     timeline;
@@ -158,6 +166,7 @@ private:
     bool      has_look_target_ = false;
     glm::vec3 selected_look_pos_{ 0.f };
     std::vector<std::string> pick_id_to_hash_;
+    uint64_t  gpu_frame_seq_ = 0; // client_seq of currently applied GPU frame
 
     void set_selection_unlocked(const std::string& hash);
     void clear_selection_unlocked();
@@ -189,6 +198,8 @@ private:
     CameraUBO build_camera_ubo() const;
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
 
+    // PR7 triple-buffer: writing free slot → pending; render acquires pending → reading
+    static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot
     {
         std::vector<GpuInstance> instances;
@@ -196,10 +207,20 @@ private:
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
     };
-    GpuFrameSlot gpu_slots_[2];
-    int gpu_write_slot_ = 0;
-    int gpu_published_slot_ = 0;
+    GpuFrameSlot gpu_slots_[kGpuSlots];
+    mutable std::mutex submit_mutex_;
+    int pending_slot_ = -1;  // latest published, not yet acquired (-1 = none)
+    int reading_slot_ = -1;  // currently GPU-visible on render thread
     uint64_t submit_seq_ = 0;
+    uint64_t ui_snap_seq_ = 0;
+
+    // Acquire pending → reading and upload instances/camera to GPU. Render thread only.
+    bool apply_published_frame();
+    int  find_free_gpu_slot_unlocked() const;
+
+    // UiSnapshot publish (separate from GPU slots)
+    mutable std::mutex ui_snap_mutex_;
+    UiSnapshot ui_snap_;
 
     void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
     uint32_t read_picker_obj_id(VkDevice device);

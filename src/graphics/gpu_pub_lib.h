@@ -76,8 +76,9 @@ public:
     virtual void start() = 0; // engine-owned render thread
     virtual void stop() = 0;  // joins thread; safe after last submit
 
-    // Thread-safe from main: deep-copy into next publish slot.
+    // Thread-safe from main: deep-copy into next publish slot (triple-buffer, latest-wins).
     // Pointers in FrameSubmit need only live for the duration of this call.
+    // Engine applies the published slot on the render thread before GPU upload.
     virtual void submit_frame(const FrameSubmit& frame) = 0;
 
     virtual void set_ui_overlay(IUiOverlay* overlay) = 0; // not owned; nullptr = none

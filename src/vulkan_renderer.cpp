@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <unordered_map>
 #include <string>
-#include <deque>
 #include "vulkan_renderer.hpp"
 #include "commands.h"
 
@@ -397,23 +396,21 @@ void VulkanRenderer::render_loop()
         //start frame
         QueryPerformanceCounter(&t1);
 
-        instanceCount = 0;
         debugDrawer.clear();
-        pick_id_to_hash_.clear();
 
-        // Snapshots for ImGui after domain lock is released
-        std::deque<AlphBlock> feed_snap;
-        int total_blocks_snap = 0;
-        AlphBlock selected_ui;
         std::string selected_hash_local;
         std::string hovered_hash_local;
+        AlphBlock selected_detail_local;
 
         {
             std::lock_guard<std::mutex> slock(selection_mutex_);
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
-            selected_ui = selected_block;
+            selected_detail_local = selected_block;
         }
+
+        UiSnapshot frame_ui{};
+        std::vector<std::string> frame_pick_map;
 
         if (scene_)
         {
@@ -432,10 +429,10 @@ void VulkanRenderer::render_loop()
                 refresh_selection_if_needed(*scene_);
                 selected_hash_local = selected_hash_;
                 hovered_hash_local = hovered_hash_;
-                selected_ui = selected_block;
+                selected_detail_local = selected_block;
             }
 
-            // Look-at: aim at selected cube, keep eye on Z track (eye_z unchanged here)
+            // Look-at: aim at selected cube, keep eye on Z track
             has_look_target_ = false;
             if (!selected_hash_local.empty())
             {
@@ -447,10 +444,10 @@ void VulkanRenderer::render_loop()
                 }
             }
 
-            // Build GPU instances + pick map, then publish via submit_frame (PR6a)
+            // Build GPU instances + pick map
             std::vector<GpuInstance> gpu_instances;
             gpu_instances.reserve(layout.placements.size());
-            pick_id_to_hash_.reserve(layout.placements.size());
+            frame_pick_map.reserve(layout.placements.size());
             for (const PlacedBlock& placed : layout.placements)
             {
                 if (gpu_instances.size() >= static_cast<size_t>(MAX_INSTANCES))
@@ -466,7 +463,7 @@ void VulkanRenderer::render_loop()
                     color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
                 gpu_instances.push_back(GpuInstance{ placed.pos, color });
-                pick_id_to_hash_.push_back(placed.hash);
+                frame_pick_map.push_back(placed.hash);
             }
 
             const CameraUBO camera = build_camera_ubo();
@@ -475,9 +472,9 @@ void VulkanRenderer::render_loop()
             submit.instance_count = gpu_instances.size();
             submit.camera = camera;
             submit.client_seq = ++submit_seq_;
-            submit_frame(submit, pick_id_to_hash_);
+            submit_frame(submit, frame_pick_map);
 
-            // Dependency arrows: active tip frontier + selection/hover confirmed deps
+            // Dependency arrows (render-thread debug meshes; domain still locked)
             {
                 const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
                 const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
@@ -519,7 +516,6 @@ void VulkanRenderer::render_loop()
 
                 const auto& chains = scene_->chains();
 
-                // A) Active tip BlockFlow edges (cyan)
                 for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
                 {
                     for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
@@ -539,7 +535,6 @@ void VulkanRenderer::render_loop()
                     }
                 }
 
-                // B) Selection deps: present → gold arrow; missing → edge wire box + link line
                 const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
                 const float ghost_half = 1.0f;
 
@@ -577,15 +572,14 @@ void VulkanRenderer::render_loop()
                     }
                 };
 
-                if (!selected_hash_local.empty() && selected_ui.hash == selected_hash_local)
-                    draw_selection_deps(selected_ui);
+                if (!selected_hash_local.empty() && selected_detail_local.hash == selected_hash_local)
+                    draw_selection_deps(selected_detail_local);
                 else if (!selected_hash_local.empty())
                 {
                     if (auto d = scene_->detail_store().get(selected_hash_local))
                         draw_selection_deps(*d);
                 }
 
-                // C) Hover preview deps (dim gold) if different from selection
                 if (!hovered_hash_local.empty() && hovered_hash_local != selected_hash_local)
                 {
                     if (auto d = scene_->detail_store().get(hovered_hash_local))
@@ -609,18 +603,40 @@ void VulkanRenderer::render_loop()
                 }
             }
 
-            feed_snap = scene_->feed();
-            total_blocks_snap = scene_->total_blocks();
+            // Build UiSnapshot while still under scene lock (feed/total stable)
+            frame_ui.total_blocks = scene_->total_blocks();
+            frame_ui.selected_hash = selected_hash_local;
+            frame_ui.selected_detail = selected_detail_local;
+            frame_ui.seq = submit_seq_;
+            for (const AlphBlock& b : scene_->feed())
+            {
+                FeedEntry e;
+                e.hash = b.hash;
+                e.chainFrom = b.chainFrom;
+                e.chainTo = b.chainTo;
+                e.height = b.height;
+                frame_ui.feed.push_back(std::move(e));
+            }
         }
         else
         {
             FrameSubmit submit{};
             submit.camera = build_camera_ubo();
             submit.client_seq = ++submit_seq_;
-            submit_frame(submit, pick_id_to_hash_);
+            submit_frame(submit, frame_pick_map);
+            frame_ui.selected_hash = selected_hash_local;
+            frame_ui.selected_detail = selected_detail_local;
+            frame_ui.seq = submit_seq_;
         }
 
-        // Frame dt for keyboard camera (ms from last frame; first frame uses ~16ms)
+        // PR7: publish overlay snapshot + apply latest GPU frame (triple-buffer acquire)
+        publish_ui_snapshot(std::move(frame_ui));
+        apply_published_frame();
+
+        // ImGui reads only the published snapshot (no live scene / selection races)
+        const UiSnapshot ui = copy_ui_snapshot();
+
+        // Frame dt for keyboard camera
         const float dt_sec = (dt > 0.0) ? static_cast<float>(dt) * 0.001f : (1.f / 60.f);
 
         ImGuiIO& io = ImGui::GetIO();
@@ -639,7 +655,7 @@ void VulkanRenderer::render_loop()
         const float toolbar_h = kToolbarHeight;
         const float scene_w = std::max(1.f, ui_w - inspector_w);
 
-        // --- Toolbar: bottom-left (does not sit under inspector) ---
+        // --- Toolbar: bottom-left ---
         {
             ImGuiWindowFlags flags =
                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
@@ -651,38 +667,33 @@ void VulkanRenderer::render_loop()
             ImGui::Begin("Blockflow", nullptr, flags);
 
             int64_t now = time(NULL) * 1000;
-            const float bps = total_blocks_snap / (0.001f * (now - start) + 1e-3f);
+            const float bps = ui.total_blocks / (0.001f * (now - start) + 1e-3f);
 
-            // Row 1: scroll speed (full-ish width)
             ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
             ImGui::SliderFloat("Scroll speed", &meters_per_second, 1.0f, 50.0f, "%.1f");
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
 
-            // Row 2: stats
             ImGui::Text("z: %.1f  (Up/Down)", eye_z);
             ImGui::SameLine(0.f, 24.f);
-            ImGui::Text("blocks: %d", total_blocks_snap);
+            ImGui::Text("blocks: %d", ui.total_blocks);
             ImGui::SameLine(0.f, 24.f);
             ImGui::Text("rate: %1.2f/s", bps);
 
             ImGui::Separator();
             ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-            for (const auto& block : feed_snap)
+            for (const FeedEntry& entry : ui.feed)
             {
-                ImGui::PushID(block.hash.c_str());
-                const int shardId = block.chain_idx();
+                ImGui::PushID(entry.hash.c_str());
+                const int shardId = entry.chain_idx();
                 ImGui::TextColored(
                     ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
-                    "[%d->%d]", block.chainFrom, block.chainTo);
+                    "[%d->%d]", entry.chainFrom, entry.chainTo);
                 ImGui::SameLine();
-                if (ImGui::Button(block.hash.c_str()))
+                if (ImGui::Button(entry.hash.c_str()))
                 {
-                    set_selection(block.hash);
-                    // Immediate UI fill from feed snapshot if store is still catching up
-                    if (selected_ui.txns.empty() && !block.txns.empty())
-                        selected_ui = block;
-                    ImGui::SetClipboardText(block.hash.c_str());
+                    set_selection(entry.hash);
+                    ImGui::SetClipboardText(entry.hash.c_str());
                 }
                 ImGui::PopID();
             }
@@ -691,12 +702,14 @@ void VulkanRenderer::render_loop()
             ImGui::PopStyleVar(2);
         }
 
-        // --- Inspector: right rail (opaque; does not cover center 3D) ---
+        // --- Inspector: right rail (detail from UiSnapshot; re-copy if feed click updated selection) ---
         {
-            // Refresh selection snapshot for inspector (may have changed via feed click)
+            AlphBlock inspector = ui.selected_detail;
             {
                 std::lock_guard<std::mutex> slock(selection_mutex_);
-                selected_ui = selected_block;
+                if (!selected_hash_.empty() &&
+                    (inspector.hash != selected_hash_ || inspector.txns.empty()))
+                    inspector = selected_block;
             }
 
             ImGuiWindowFlags flags =
@@ -708,29 +721,29 @@ void VulkanRenderer::render_loop()
             ImGui::Begin("Block", nullptr, flags);
 
             char url[512];
-            if (!selected_ui.hash.empty())
+            if (!inspector.hash.empty())
             {
                 memset(url, 0, sizeof(url));
                 snprintf(url, sizeof(url), "https://explorer.alephium.org/blocks/%s",
-                         selected_ui.hash.c_str());
+                         inspector.hash.c_str());
 
                 ImGui::Text("hash:");
                 ImGui::SameLine();
-                ImGui::TextLinkOpenURL(selected_ui.hash.c_str(), url);
+                ImGui::TextLinkOpenURL(inspector.hash.c_str(), url);
 
-                ImGui::Text("height: %d", selected_ui.height);
+                ImGui::Text("height: %d", inspector.height);
 
-                const int shardId = selected_ui.chain_idx();
+                const int shardId = inspector.chain_idx();
                 ImGui::Text("chain:");
                 ImGui::SameLine();
                 ImGui::TextColored(
                     ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
-                    "[%d->%d]", selected_ui.chainFrom, selected_ui.chainTo);
+                    "[%d->%d]", inspector.chainFrom, inspector.chainTo);
 
                 ImGui::Separator();
-                ImGui::Text("Transactions (%d)", static_cast<int>(selected_ui.txns.size()));
+                ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
 
-                for (auto& tx : selected_ui.txns)
+                for (auto& tx : inspector.txns)
                 {
                     memset(url, 0, sizeof(url));
                     snprintf(url, sizeof(url), "https://explorer.alephium.org/transactions/%s",
@@ -773,7 +786,7 @@ void VulkanRenderer::render_loop()
         }
 
         ImGui::Render();
-        // Camera/instances already published via submit_frame (PR6a); keep viewProj for debug draw
+        // GPU buffers filled via apply_published_frame (PR7); viewProj set there for debug draw
         render();
 
         elapsedSeconds += static_cast<float>(dt) * 0.001f; // auto scroll along view
@@ -849,12 +862,14 @@ void VulkanRenderer::render()
         }
         else if (kind == PickKind::Hover)
         {
+            std::lock_guard<std::mutex> slock(selection_mutex_);
             hovered_hash_ = resolved; // empty clears hover highlight
         }
     }
 
-    // Bind this slot's pick map to the instance list we are about to submit
+    // Bind this frame's pick map + seq (matches GPU-visible instances after apply_published_frame)
     inFlightFrames[currentFrame].pick_map = pick_id_to_hash_;
+    inFlightFrames[currentFrame].pick_frame_seq = gpu_frame_seq_;
 
     imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
     result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
@@ -1633,11 +1648,25 @@ CameraUBO VulkanRenderer::build_camera_ubo() const
     return cam;
 }
 
+int VulkanRenderer::find_free_gpu_slot_unlocked() const
+{
+    // Triple buffer: always one free among {0,1,2} when reading and pending are distinct.
+    for (int i = 0; i < kGpuSlots; ++i)
+    {
+        if (i != reading_slot_ && i != pending_slot_)
+            return i;
+    }
+    // Degenerate: prefer overwriting pending (latest-wins still holds)
+    return (pending_slot_ >= 0) ? pending_slot_ : 0;
+}
+
 void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
 {
-    // Render-thread publish: deep-copy into a slot, then upload to GPU buffers.
-    gpu_write_slot_ = 1 - gpu_published_slot_;
-    GpuFrameSlot& slot = gpu_slots_[gpu_write_slot_];
+    // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
+    std::lock_guard<std::mutex> lock(submit_mutex_);
+
+    const int write = find_free_gpu_slot_unlocked();
+    GpuFrameSlot& slot = gpu_slots_[write];
 
     slot.instances.resize(frame.instance_count);
     if (frame.instance_count > 0 && frame.instances)
@@ -1646,7 +1675,24 @@ void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<st
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
 
-    // Upload instances (layout matches InstanceData / GpuInstance: pos + color)
+    pending_slot_ = write;
+}
+
+bool VulkanRenderer::apply_published_frame()
+{
+    // Render thread: swap pending → reading and upload to GPU buffers.
+    int slot_idx = -1;
+    {
+        std::lock_guard<std::mutex> lock(submit_mutex_);
+        if (pending_slot_ < 0)
+            return false;
+        reading_slot_ = pending_slot_;
+        pending_slot_ = -1;
+        slot_idx = reading_slot_;
+    }
+
+    const GpuFrameSlot& slot = gpu_slots_[slot_idx];
+
     instanceCount = 0;
     const size_t n = std::min(slot.instances.size(), static_cast<size_t>(MAX_INSTANCES));
     if (mappedInstanceMemory && n > 0)
@@ -1656,7 +1702,6 @@ void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<st
         instanceCount = n;
     }
 
-    // Upload camera UBO (same layout as UniformBufferObject / CameraUBO)
     {
         UniformBufferObject ubo{};
         ubo.view = slot.camera.view;
@@ -1675,19 +1720,31 @@ void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<st
         }
     }
 
-    // Pick map for the in-flight slot used on the next record (currentFrame set in render())
     pick_id_to_hash_ = slot.pick_map;
-    gpu_published_slot_ = gpu_write_slot_;
+    gpu_frame_seq_ = slot.client_seq;
+    return true;
+}
+
+void VulkanRenderer::publish_ui_snapshot(UiSnapshot snap)
+{
+    std::lock_guard<std::mutex> lock(ui_snap_mutex_);
+    if (snap.seq == 0)
+        snap.seq = ++ui_snap_seq_;
+    else
+        ui_snap_seq_ = snap.seq;
+    ui_snap_ = std::move(snap);
+}
+
+UiSnapshot VulkanRenderer::copy_ui_snapshot() const
+{
+    std::lock_guard<std::mutex> lock(ui_snap_mutex_);
+    return ui_snap_;
 }
 
 void VulkanRenderer::update_uniform_buffer()
 {
-    // Legacy path: publish camera-only frame with current instances left as-is
+    // Legacy camera-only refresh (keeps current instance buffer)
     CameraUBO cam = build_camera_ubo();
-    FrameSubmit fs{};
-    fs.camera = cam;
-    fs.client_seq = ++submit_seq_;
-    // Keep existing instance buffer; only refresh camera
     UniformBufferObject ubo{};
     ubo.view = cam.view;
     ubo.proj = cam.proj;
@@ -1961,6 +2018,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
         }
         else if (!over_scene)
         {
+            std::lock_guard<std::mutex> slock(selection_mutex_);
             hovered_hash_.clear();
         }
 
