@@ -22,8 +22,9 @@ VkInstance create_instance()
 #ifndef NDEBUG
         VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
+
         VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
     };
     const char* enbl_layers[] = { "VK_LAYER_KHRONOS_validation" };
 #ifndef NDEBUG

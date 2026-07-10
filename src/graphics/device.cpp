@@ -17,11 +17,26 @@ VkPhysicalDevice pick_physical_device(
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
+    VkPhysicalDeviceProperties2 deviceProps2{};
+    deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
     physicalDevice = devices[0]; // Pick first device (simplified)
     for (uint32_t i = 0; i < deviceCount; ++i)
     {
+        uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceProperties(devices[i], device_props);
         vkGetPhysicalDeviceMemoryProperties(devices[i], device_mem_props);
+        vkGetPhysicalDeviceProperties2(devices[i], &deviceProps2);
+        vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties2> queueFamilyProps(queueFamilyCount);
+
+        for (auto &queueFamilyProp : queueFamilyProps)
+        {
+            queueFamilyProp.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+        }
+        vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queueFamilyCount, queueFamilyProps.data());
+
+
         if (device_props->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) //Pick discrete GPU (specific)
         {
             physicalDevice = devices[i];
