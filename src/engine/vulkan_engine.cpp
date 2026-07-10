@@ -414,7 +414,7 @@ void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
         return;
     if (selected_block.hash != selected_hash_ || selected_block.txns.empty())
     {
-        selected_block = scene.resolve_detail_under_lock(selected_hash_);
+        selected_block = scene.resolve_detail(selected_hash_);
         // If still slim after store catch-up, re-request network rehydrate (PR11).
         if (selected_block.txns.empty())
             pin_and_maybe_refill(selected_hash_, false);
@@ -482,7 +482,7 @@ void VulkanEngine::render_loop()
             layout_params.base_radius = 20.0f;
             layout_params.lane_count = 16;
 
-            // Single graph path (PR9): layout from BlockGraph nodes, not chains dual-write
+            // Layout from BlockGraph node snapshot
             const std::vector<GraphNode> graph_nodes = scene_->nodes_snapshot();
             LayoutResult layout = polar_layout_.build(graph_nodes, layout_params);
             const auto& block_positions = layout.positions;

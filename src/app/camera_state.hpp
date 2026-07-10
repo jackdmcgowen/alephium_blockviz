@@ -13,6 +13,7 @@ public:
     static constexpr float kEyeZMin  = -2000.f;
     static constexpr float kEyeZMax  =  2000.f;
     static constexpr float kEyeZStep = 40.f; // world units / second while key held
+    static constexpr float kWheelStep = 25.f; // world units per mouse-wheel notch
     static constexpr float kMpsMin   = 1.f;
     static constexpr float kMpsMax   = 50.f;
 

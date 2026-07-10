@@ -298,8 +298,8 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
-                scene_.add_block(block);
-                ++added;
+                if (scene_.add_block(block))
+                    ++added;
 
                 if (!main_chain_cache_.is_cached_main(block_hash) &&
                     !verify_done_.count(block_hash))

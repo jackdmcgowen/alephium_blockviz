@@ -42,7 +42,7 @@ void BlockflowOverlay::draw()
     ImGuiIO& io = ImGui::GetIO();
     const float dt_sec = (io.DeltaTime > 0.f) ? io.DeltaTime : (1.f / 60.f);
 
-    // Camera keys (Up/Down) — client-owned CameraState
+    // Camera motion — client-owned CameraState (keys + scroll wheel)
     if (!io.WantCaptureKeyboard)
     {
         if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
@@ -50,6 +50,10 @@ void BlockflowOverlay::draw()
         if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
             camera_.nudge_eye_z(-CameraState::kEyeZStep * dt_sec);
     }
+    // Wheel over the 3D scene (not ImGui panels): same axis as Up/Down.
+    // Positive MouseWheel = scroll up → +eye_z (matches Up arrow).
+    if (!io.WantCaptureMouse && io.MouseWheel != 0.f)
+        camera_.nudge_eye_z(io.MouseWheel * CameraState::kWheelStep);
 
     const UiSnapshot ui = engine_.copy_ui_snapshot();
     const float ui_w = io.DisplaySize.x;
@@ -87,7 +91,7 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
 
-    ImGui::Text("z: %.1f  (Up/Down)", cam.eye_z);
+    ImGui::Text("z: %.1f  (Up/Down / wheel)", cam.eye_z);
     ImGui::SameLine(0.f, 24.f);
     ImGui::Text("blocks: %d", ui.total_blocks);
     ImGui::SameLine(0.f, 24.f);
@@ -196,7 +200,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextWrapped(
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
-        ImGui::TextDisabled("Camera: Up/Down arrows scroll Z");
+        ImGui::TextDisabled("Camera: Up/Down or mouse wheel scroll Z");
     }
     ImGui::End();
 }

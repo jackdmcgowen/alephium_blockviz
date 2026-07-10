@@ -1,24 +1,21 @@
 #include "domain/block_scene.hpp"
 
 #include <algorithm>
-#include <cstdio>
 
-void BlockScene::add_block(cJSON* block)
+bool BlockScene::add_block(cJSON* block)
 {
     AlphBlock alph_block(block);
 
     std::lock_guard<std::mutex> lock(mu_);
 
     if (alph_block.hash.empty())
-        return;
+        return false;
 
+    // Idempotent: poll windows overlap; re-seen hashes are a no-op (not an error).
     if (graph_.contains(alph_block.hash))
-    {
-        std::printf("duplicate\n");
-        return;
-    }
+        return false;
 
-    // Uncle eviction: drop uncles still live in the graph (same policy as old chains path)
+    // Uncle eviction: drop uncles still live in the graph
     std::vector<NodeId> removed_uncles;
     for (const auto& unc : alph_block.uncles)
     {
@@ -66,6 +63,7 @@ void BlockScene::add_block(cJSON* block)
     ++total_blocks_;
     if (feed_.size() > 120)
         feed_.pop_front();
+    return true;
 }
 
 bool BlockScene::remove_block(const std::string& hash)
@@ -131,9 +129,4 @@ AlphBlock BlockScene::resolve_detail(const std::string& hash) const
     AlphBlock empty;
     empty.hash = hash;
     return empty;
-}
-
-AlphBlock BlockScene::resolve_detail_under_lock(const std::string& hash) const
-{
-    return resolve_detail(hash);
 }
