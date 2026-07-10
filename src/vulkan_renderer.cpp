@@ -51,6 +51,20 @@ glm::mat4 viewProj;
 
 static const float FOV = glm::radians(45.0f);
 
+// Shorten a segment so arrow ends sit outside cube centers (clearance in world units).
+static bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
+                          glm::vec3& from_out, glm::vec3& to_out)
+{
+    const glm::vec3 delta = to - from;
+    const float len = glm::length(delta);
+    if (len < 2.0f * clearance + 1e-4f)
+        return false;
+    const glm::vec3 dir = delta / len;
+    from_out = from + dir * clearance;
+    to_out   = to   - dir * clearance;
+    return true;
+}
+
 const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
     glm::vec3(0.20f, 1.00f, 0.34f),  // #33FF57 Green
@@ -460,15 +474,15 @@ void VulkanRenderer::render_loop()
             }
         }
 
-        // Dependency arrows for every chain group [from,to] in 0..3 x 0..3 (all 16 shards).
-        // Draws every resolved dep edge (same-chain + cross-chain). uint32 indices allow full coverage.
+        // Dependency arrows: only the frontier (max-height tip blocks) per chain — fresh & decluttered.
+        // Smaller heads; endpoints inset so cones don't sit inside cube geometry.
         {
-            const float tip_len = std::max(0.4f, meters_per_height * 0.25f);
-            const float tip_rad = std::max(0.12f, meters_per_height * 0.06f);
-            const float shaft_r = tip_rad * 0.35f;
-            // Slightly fewer segments for bulk deps (still a readable cone; saves verts).
-            constexpr uint32_t kDepRadial   = 8;
-            constexpr uint32_t kMaxDepArrows = 50000;
+            const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
+            const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
+            const float shaft_r    = tip_rad * 0.4f;
+            const float clearance  = std::max(0.55f, meters_per_height * 0.12f);
+            constexpr uint32_t kDepRadial    = 8;
+            constexpr uint32_t kMaxDepArrows = 512;
             uint32_t arrow_count = 0;
 
             for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
@@ -480,42 +494,51 @@ void VulkanRenderer::render_loop()
                         continue;
 
                     const HeightToHash& heightMap = chains[shard_id];
-                    for (const auto& hashesAtHeight : heightMap)
+                    if (heightMap.empty())
+                        continue;
+
+                    // map is ordered by height; last key is the tip height for this chain
+                    const auto tip_it = std::prev(heightMap.end());
+                    const int tip_height = static_cast<int>(tip_it->first);
+                    const HashToBlocks& tips_at_height = tip_it->second;
+                    (void)tip_height;
+
+                    const glm::vec3& dest_c = SHARD_COLORS[shard_id % 16];
+
+                    for (const auto& hash_and_block : tips_at_height)
                     {
-                        for (const auto& hashesAtBlocks : hashesAtHeight.second)
+                        if (arrow_count >= kMaxDepArrows)
+                            break;
+
+                        const AlphBlock& block = hash_and_block.second;
+                        auto to_it = block_positions.find(block.hash);
+                        if (to_it == block_positions.end())
+                            continue;
+
+                        const glm::vec3& to_pos = to_it->second;
+
+                        for (const std::string& dep_hash : block.deps)
                         {
                             if (arrow_count >= kMaxDepArrows)
                                 break;
 
-                            const AlphBlock& block = hashesAtBlocks.second;
-                            auto to_it = block_positions.find(block.hash);
-                            if (to_it == block_positions.end())
+                            auto from_it = block_positions.find(dep_hash);
+                            if (from_it == block_positions.end())
                                 continue;
 
-                            const glm::vec3& to_pos = to_it->second;
-                            const glm::vec3& dest_c = SHARD_COLORS[shard_id % 16];
+                            glm::vec3 from_inset, to_inset;
+                            if (!inset_segment(from_it->second, to_pos, clearance, from_inset, to_inset))
+                                continue;
 
-                            for (const std::string& dep_hash : block.deps)
-                            {
-                                if (arrow_count >= kMaxDepArrows)
-                                    break;
+                            auto from_shard_it = block_shards.find(dep_hash);
+                            const bool cross_chain =
+                                (from_shard_it != block_shards.end() && from_shard_it->second != shard_id);
 
-                                auto from_it = block_positions.find(dep_hash);
-                                if (from_it == block_positions.end())
-                                    continue;
+                            const float alpha = cross_chain ? 0.90f : 0.55f;
+                            const glm::vec4 color(dest_c.r, dest_c.g, dest_c.b, alpha);
 
-                                const glm::vec3& from_pos = from_it->second;
-                                auto from_shard_it = block_shards.find(dep_hash);
-                                const bool cross_chain =
-                                    (from_shard_it != block_shards.end() && from_shard_it->second != shard_id);
-
-                                // Cross-chain: solid destination color; same-chain: dimmer
-                                const float alpha = cross_chain ? 0.90f : 0.55f;
-                                const glm::vec4 color(dest_c.r, dest_c.g, dest_c.b, alpha);
-
-                                debugDrawer.add_arrow(from_pos, to_pos, color, tip_len, tip_rad, shaft_r, kDepRadial);
-                                ++arrow_count;
-                            }
+                            debugDrawer.add_arrow(from_inset, to_inset, color, tip_len, tip_rad, shaft_r, kDepRadial);
+                            ++arrow_count;
                         }
                     }
                 }
