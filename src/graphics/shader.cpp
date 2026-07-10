@@ -1,6 +1,28 @@
 #include "gpu_prv_lib.h"
 
 
+void load_shader_source(const char* const   filename,
+    std::vector<uint8_t>& src)
+{
+    char dirpath[128] = { 0 };
+
+    snprintf(dirpath, 128, "src/graphics/shaders/%s", filename);
+
+    FILE* file = fopen(dirpath, "rb");
+    if (!file) {
+        throw std::runtime_error("Failed to load shader");
+    }
+
+    fseek(file, 0, SEEK_END);
+    long sz = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    src.resize(sz);
+    fread(src.data(), 1, sz, file);
+    fclose(file);
+
+}   /* load_shader_source() */
+
+
 void create_shader_module(VkDevice device, VkShaderModule& shaderModule, std::vector<uint8_t>& pCode )
 {
     VkShaderModuleCreateInfo shaderInfo{};
@@ -11,7 +33,6 @@ void create_shader_module(VkDevice device, VkShaderModule& shaderModule, std::ve
     vkCreateShaderModule(device, &shaderInfo, nullptr, &shaderModule );
 
 }	/* create_shader_module() */
-
 
 
 void destroy_shader_module(VkDevice device, VkShaderModule shaderModule)

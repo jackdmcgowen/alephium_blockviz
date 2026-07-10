@@ -82,6 +82,9 @@ VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, V
 void destroy_image_view(VkDevice device, VkImageView imageview);
 
   //shader.cpp
+void load_shader_source(const char* const   filename,
+    std::vector<uint8_t>& src);
+
 void create_shader_module(VkDevice device, VkShaderModule &shaderModule, std::vector<uint8_t> &pCode );
 
 void destroy_shader_module(VkDevice device, VkShaderModule shaderModule);
