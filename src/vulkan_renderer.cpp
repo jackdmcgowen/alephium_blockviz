@@ -110,7 +110,12 @@ static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 static float meters_per_second = 1;
 static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
 
-static const uint32_t statusBarHeight = 200;
+// Modal ImGui chrome (does not cover center 3D view)
+static const float kInspectorWidth = 340.f;
+static const float kToolbarHeight  = 120.f;
+static const float kEyeZStep       = 40.f;   // world units per second while held
+static const float kEyeZMin        = -2000.f;
+static const float kEyeZMax        = 2000.f;
 
 static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
     VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
@@ -570,118 +575,143 @@ void VulkanRenderer::render_loop()
 
         lock.unlock();
 
-        static AlphBlock selected;
+        // Frame dt for keyboard camera (ms from last frame; first frame uses ~16ms)
+        const float dt_sec = (dt > 0.0) ? static_cast<float>(dt) * 0.001f : (1.f / 60.f);
 
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
-        ImGui::SetNextWindowPos(ImVec2(0, height - statusBarHeight));
-        ImGui::SetNextWindowSize(ImVec2(width, statusBarHeight));
-        ImGui::SetNextWindowBgAlpha(0.7f);
-        ImGui::Begin("Blockflow", 0, flags);
+        ImGuiIO& io = ImGui::GetIO();
+        if (!io.WantCaptureKeyboard)
         {
+            if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+                eye_z += kEyeZStep * dt_sec;
+            if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+                eye_z -= kEyeZStep * dt_sec;
+            eye_z = std::clamp(eye_z, kEyeZMin, kEyeZMax);
+        }
+
+        const float ui_w = static_cast<float>(width);
+        const float ui_h = static_cast<float>(height);
+        const float inspector_w = std::min(kInspectorWidth, ui_w * 0.35f);
+        const float toolbar_h = kToolbarHeight;
+        const float scene_w = std::max(1.f, ui_w - inspector_w);
+
+        // --- Toolbar: bottom-left (does not sit under inspector) ---
+        {
+            ImGuiWindowFlags flags =
+                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
+            ImGui::SetNextWindowPos(ImVec2(0, ui_h - toolbar_h), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(scene_w, toolbar_h), ImGuiCond_Always);
+            ImGui::SetNextWindowBgAlpha(0.88f);
+            ImGui::Begin("Blockflow", nullptr, flags);
+
             int64_t now = time(NULL) * 1000;
             ImGui::SliderFloat("meters/s", &meters_per_second, 1.0f, 50.0f);
-            ImGui::SliderFloat("pos", &eye_z, -1000.f, 1000.0f);
-            float bps = total_blocks / (0.001f * (now - start));
-            ImGui::Text("total %d", total_blocks);
             ImGui::SameLine();
-            ImGui::Text("bps %1.2f", bps);
-            for (auto &block : blockQueue)
+            ImGui::Text("z: %.1f  (Up/Down)", eye_z);
+            ImGui::SameLine();
+            const float bps = total_blocks / (0.001f * (now - start) + 1e-3f);
+            ImGui::Text("total %d  bps %1.2f", total_blocks, bps);
+
+            ImGui::Separator();
+            ImGui::BeginChild("feed", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            for (auto& block : blockQueue)
             {
-
                 ImGui::PushID(block.hash.c_str());
-
-                int shardId = block.chain_idx();
-
-                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", block.chainFrom, block.chainTo);
+                const int shardId = block.chain_idx();
+                ImGui::TextColored(
+                    ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
+                    "[%d->%d]", block.chainFrom, block.chainTo);
                 ImGui::SameLine();
-                if (ImGui::Button(block.hash.c_str()))
+                if (ImGui::SmallButton(block.hash.c_str()))
                 {
-                    selected.hash = block.hash;
-                    selected.chainFrom = block.chainFrom;
-                    selected.chainTo = block.chainTo;
-                    selected.height = block.height;
-                    selected.deps.resize(block.deps.size());
-                    selected.txns.resize(block.txns.size());
-                    std::copy(block.deps.begin(), block.deps.end(), selected.deps.begin());
-                    std::copy(block.txns.begin(), block.txns.end(), selected.txns.begin());
-
+                    selected_block = block;
                     ImGui::SetClipboardText(block.hash.c_str());
                 }
                 ImGui::PopID();
             }
+            ImGui::EndChild();
+            ImGui::End();
         }
-        ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2(width, height - statusBarHeight));
-        ImGui::SetNextWindowBgAlpha(0.0f);
-
-        flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysHorizontalScrollbar;
-
-        char url[512];
-        ImGui::Begin("Block", 0, flags);
+        // --- Inspector: right rail (opaque; does not cover center 3D) ---
         {
-            if (selected_block.txns.size())
+            ImGuiWindowFlags flags =
+                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_AlwaysVerticalScrollbar;
+            ImGui::SetNextWindowPos(ImVec2(ui_w - inspector_w, 0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(inspector_w, ui_h), ImGuiCond_Always);
+            ImGui::SetNextWindowBgAlpha(0.94f);
+            ImGui::Begin("Block", nullptr, flags);
+
+            char url[512];
+            if (!selected_block.hash.empty())
             {
                 memset(url, 0, sizeof(url));
-                snprintf(url, 512, "https://explorer.alephium.org/blocks/%s", selected_block.hash.c_str());
+                snprintf(url, sizeof(url), "https://explorer.alephium.org/blocks/%s",
+                         selected_block.hash.c_str());
 
-                ImGui::TextColored(ImVec4(0, 0, 0, 1), "hash: ");
+                ImGui::Text("hash:");
                 ImGui::SameLine();
                 ImGui::TextLinkOpenURL(selected_block.hash.c_str(), url);
 
-                ImGui::TextColored(ImVec4(0, 0, 0, 1), "height: %d", selected_block.height);
+                ImGui::Text("height: %d", selected_block.height);
 
-                int shardId = selected_block.chain_idx();
-                ImGui::TextColored(ImVec4(0, 0, 0, 1), "chain: ");
+                const int shardId = selected_block.chain_idx();
+                ImGui::Text("chain:");
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f), "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
+                ImGui::TextColored(
+                    ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
+                    "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
 
-                ImGui::Indent();
-                for (auto tx : selected_block.txns)
+                ImGui::Separator();
+                ImGui::Text("Transactions (%d)", static_cast<int>(selected_block.txns.size()));
+
+                for (auto& tx : selected_block.txns)
                 {
                     memset(url, 0, sizeof(url));
-                    snprintf(url, 512, "https://explorer.alephium.org/transactions/%s", tx.txid.c_str());
+                    snprintf(url, sizeof(url), "https://explorer.alephium.org/transactions/%s",
+                             tx.txid.c_str());
 
                     ImGui::Separator();
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "txid: ");
+                    ImGui::Text("txid:");
                     ImGui::SameLine();
                     ImGui::TextLinkOpenURL(tx.txid.c_str(), url);
 
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "version: %d", tx.version);
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "networkId: %d", tx.networkId);
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "scriptOpt: %s", tx.scriptOpt.c_str());
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "gasAmount: %d", tx.gasAmount);
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "gasPrice: %s", tx.gasPrice.c_str());
+                    ImGui::Text("version: %d", tx.version);
+                    ImGui::Text("networkId: %d", tx.networkId);
+                    ImGui::Text("scriptOpt: %s", tx.scriptOpt.c_str());
+                    ImGui::Text("gasAmount: %d", tx.gasAmount);
+                    ImGui::Text("gasPrice: %s", tx.gasPrice.c_str());
+                    ImGui::Text("inputs: %d  outputs: %d",
+                                static_cast<int>(tx.inputs.size()),
+                                static_cast<int>(tx.outputs.size()));
 
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "inputs: %d", tx.inputs.size());
-                    ImGui::TextColored(ImVec4(0, 0, 0, 1), "outputs: %d", tx.outputs.size());
-
-                    ImGui::Indent();
-                    for (auto out : tx.outputs)
+                    for (auto& out : tx.outputs)
                     {
                         memset(url, 0, sizeof(url));
-                        snprintf(url, 512, "https://explorer.alephium.org/addresses/%s", out.address.c_str());
-
-                        ImGui::Separator();
-                        ImGui::TextColored(ImVec4(0, 0, 0, 1), "address: ");
-                        ImGui::SameLine();
+                        snprintf(url, sizeof(url), "https://explorer.alephium.org/addresses/%s",
+                                 out.address.c_str());
+                        ImGui::Bullet();
                         ImGui::TextLinkOpenURL(out.address.c_str(), url);
-
-
-                        ImGui::TextColored(ImVec4(0, 0, 0, 1), "amount: %s", out.toAmount().c_str() );
+                        ImGui::SameLine();
+                        ImGui::Text("(%s)", out.toAmount().c_str());
                     }
-                    ImGui::Unindent();
                 }
-                ImGui::Unindent();
             }
+            else
+            {
+                ImGui::TextWrapped(
+                    "Select a block from the feed below or click a cube in the scene.");
+                ImGui::Spacing();
+                ImGui::TextDisabled("Camera: Up/Down arrows scroll Z");
+            }
+            ImGui::End();
         }
-        ImGui::End();
+
         ImGui::Render();
         update_uniform_buffer();
         render();
 
-        elapsedSeconds += static_cast<float>(dt) * 0.001f; // Scroll speed
+        elapsedSeconds += static_cast<float>(dt) * 0.001f; // auto scroll along view
 
         do //end frame
         {
