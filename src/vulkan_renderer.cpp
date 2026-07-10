@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <unordered_map>
+#include <string>
 #include <cjson/cJSON.h>
 #include "vulkan_renderer.hpp"
 #include "commands.h"
@@ -280,6 +281,8 @@ void VulkanRenderer::Add_Block(cJSON* block)
     else
         printf("duplicate\n");
 
+    // Collect uncle removals for dual-write (same scan as chains eviction)
+    std::vector<NodeId> removed_uncles;
     for (auto& bh : heightMap)
     {
         for (auto unc : alph_block.uncles)
@@ -287,9 +290,58 @@ void VulkanRenderer::Add_Block(cJSON* block)
             auto uncle_find = bh.second.find(unc);
             if (uncle_find != bh.second.end())
             {
-                AlphBlock b = bh.second[unc];
+                removed_uncles.push_back(unc);
                 bh.second.erase(unc);
             }
+        }
+    }
+
+    // Dual-write: BlockGraph (slim node) + AlphDetailStore (full block for inspector)
+    {
+        GraphDelta delta;
+        if (result.second)
+        {
+            GraphNode node;
+            node.id = alph_block.hash;
+            node.timestamp_ms = alph_block.timestamp;
+            node.height = alph_block.height;
+            node.group_from = alph_block.chainFrom;
+            node.group_to = alph_block.chainTo;
+            node.lane = alph_block.chain_idx();
+            node.lane_count_hint = 16;
+            node.chain_label = std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
+            delta.upsert_nodes.push_back(std::move(node));
+            // edges optional v1 — leave empty until edge viz (OQ3)
+            detail_store_.upsert(alph_block);
+        }
+        if (!removed_uncles.empty())
+        {
+            delta.remove_nodes = removed_uncles;
+            detail_store_.remove_many(removed_uncles);
+        }
+        if (!delta.upsert_nodes.empty() || !delta.remove_nodes.empty())
+            block_graph_.apply(delta);
+    }
+
+    if (dual_write_validate_)
+    {
+        std::vector<NodeId> chains_ids;
+        chains_ids.reserve(4096);
+        for (const auto& hm : chains)
+        {
+            for (const auto& height_entry : hm)
+            {
+                for (const auto& hash_entry : height_entry.second)
+                    chains_ids.push_back(hash_entry.first);
+            }
+        }
+        std::sort(chains_ids.begin(), chains_ids.end());
+        chains_ids.erase(std::unique(chains_ids.begin(), chains_ids.end()), chains_ids.end());
+        const std::vector<NodeId> graph_ids = block_graph_.live_ids_sorted();
+        if (chains_ids != graph_ids)
+        {
+            printf("[dual-write] hash-set mismatch: chains=%zu graph=%zu\n",
+                   chains_ids.size(), graph_ids.size());
         }
     }
 

@@ -16,6 +16,12 @@
     <Filter Include="Source Files\imgui">
       <UniqueIdentifier>{945d72ed-3a8c-4be2-bff3-295708be9572}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\domain">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\adapters">
+      <UniqueIdentifier>{b2c3d4e5-f6a7-8901-bcde-f12345678901}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp">
@@ -29,6 +35,12 @@
     </ClCompile>
     <ClCompile Include="src\vulkan_renderer.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\block_graph.cpp">
+      <Filter>Source Files\domain</Filter>
+    </ClCompile>
+    <ClCompile Include="src\adapters\alephium\alph_detail_store.cpp">
+      <Filter>Source Files\adapters</Filter>
     </ClCompile>
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\imgui</Filter>
@@ -60,6 +72,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\alph_block.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\block_graph.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
