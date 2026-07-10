@@ -1,7 +1,7 @@
 #pragma once
 
 // Public graphics-engine surface (no Vulkan types).
-// Stubs for modularization PR1 — not yet wired to VulkanEngine.
+// Implemented by VulkanEngine via IBlockvizEngine (E6).
 // See docs/graphics-modularization-design.md
 
 #include <cstddef>

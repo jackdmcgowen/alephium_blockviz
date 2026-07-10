@@ -1,6 +1,5 @@
 #include "app/blockflow_overlay.hpp"
 #include "app/ui_chrome.hpp"
-#include "engine/vulkan_engine.hpp"
 
 #include "imgui.h"
 
@@ -31,7 +30,7 @@ static const glm::vec3 kShardColors[16] = {
     glm::vec3(0.00f, 1.00f, 0.00f)
 };
 
-BlockflowOverlay::BlockflowOverlay(CameraState& camera, VulkanEngine& engine)
+BlockflowOverlay::BlockflowOverlay(CameraState& camera, IBlockvizEngine& engine)
     : camera_(camera)
     , engine_(engine)
 {

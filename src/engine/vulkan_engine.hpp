@@ -17,6 +17,8 @@
 #include "app/ui_snapshot.hpp"
 #include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
+#include "engine/blockviz_engine_api.hpp"
+#include "engine/frame_resources.hpp"
 #include "engine/frame_sync.hpp"
 #include "engine/pipelines/cube_pipeline.hpp"
 #include "engine/pipelines/picker_pipeline.hpp"
@@ -31,36 +33,44 @@
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 5000.0f )
 
-// PR6b–PR11 modular engine; E3 FrameSync; E4 pipelines.
-class VulkanEngine
+// Concrete engine: IRenderEngine + IBlockvizEngine (E6); FrameResources (E8).
+class VulkanEngine : public IBlockvizEngine
 {
 public:
     using PushConstants = PickerPushConstants;
 
     VulkanEngine();
-    ~VulkanEngine();
-    void Init(void *hInstance, void *hwnd);
+    ~VulkanEngine() override;
 
-    void set_scene(BlockScene* scene);
-    void set_ui_overlay(IUiOverlay* overlay);
-    void set_camera(CameraState* camera);
+    // IRenderEngine
+    void initialize(const EngineCreateInfo& info) override;
+    void resize(uint32_t width, uint32_t height) override;
+    void shutdown() override;
+    void start() override;
+    void stop() override;
+    void submit_frame(const FrameSubmit& frame) override;
+    void set_ui_overlay(IUiOverlay* overlay) override;
+    void request_pick(const PickQuery& q) override;
+    bool consume_pick(PickResult& out) override;
 
-    void set_selection(const std::string& hash);
-    void clear_selection();
-    bool is_selected(const std::string& hash) const;
-    AlphBlock copy_selected_block() const;
-    std::string consume_detail_refill_request();
-
-    void Resize();
-    void Start();
-    void Stop();
-
-    void submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map);
-    void publish_ui_snapshot(UiSnapshot snap);
-    UiSnapshot copy_ui_snapshot() const;
+    // IBlockvizEngine
+    void set_scene(BlockScene* scene) override;
+    void set_camera(CameraState* camera) override;
+    void set_selection(const std::string& hash) override;
+    void clear_selection() override;
+    bool is_selected(const std::string& hash) const override;
+    AlphBlock copy_selected_block() const override;
+    std::string consume_detail_refill_request() override;
+    void publish_ui_snapshot(UiSnapshot snap) override;
+    UiSnapshot copy_ui_snapshot() const override;
+    void publish_frame(const FrameSubmit& frame,
+                       const std::vector<std::string>& pick_map) override;
+    void init_platform(void* hInstance, void* hwnd) override;
+    void on_resize() override;
 
 private:
-    void resize();
+    void resize_internal();
+    void Resize(); // Win32 client-rect path
     static const int MAX_INSTANCES = 1024 * 1024;
     static const VertexNormal CUBE_VERTICES[8];
     static const uint16_t CUBE_INDICES[36];
@@ -88,6 +98,7 @@ private:
 
     CubePipeline cube_pipe_;
     PickerPipeline picker_pipe_;
+    FrameResources frame_resources_;
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingMemory;
@@ -101,7 +112,6 @@ private:
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
 
-    // App/pick policy only — GPU sync lives in FrameSync (E3)
     struct FramesInFlight
     {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
@@ -112,16 +122,7 @@ private:
     } inFlightFrames[MAX_FRAMES_IN_FLIGHT];
 
     int currentFrame;
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexBufferMemory;
-    VkBuffer instanceBuffer;
-    VkDeviceMemory instanceBufferMemory;
-    void* mappedInstanceMemory;
-    size_t instanceCount;
-    VkBuffer uniformBuffer;
-    VkDeviceMemory uniformBufferMemory;
+    size_t instanceCount = 0;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSet;
 
@@ -169,10 +170,7 @@ private:
     void create_descriptor_set_layout();
     void create_picker_resources();
     void create_picker_staging();
-    void create_vertex_buffer();
-    void create_index_buffer();
-    void create_instance_buffer();
-    void create_uniform_buffer();
+    void create_frame_resources();
     void create_descriptor_pool();
     void create_descriptor_sets();
     void create_command_pool();

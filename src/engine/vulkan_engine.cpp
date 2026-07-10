@@ -155,16 +155,7 @@ VulkanEngine::VulkanEngine()
     , commandPool(VK_NULL_HANDLE)
     , inFlightFrames{}
     , currentFrame(0)
-    , vertexBuffer(VK_NULL_HANDLE)
-    , vertexBufferMemory(VK_NULL_HANDLE)
-    , indexBuffer(VK_NULL_HANDLE)
-    , indexBufferMemory(VK_NULL_HANDLE)
-    , instanceBuffer(VK_NULL_HANDLE)
-    , instanceBufferMemory(VK_NULL_HANDLE)
-    , mappedInstanceMemory(nullptr)
     , instanceCount(0)
-    , uniformBuffer(VK_NULL_HANDLE)
-    , uniformBufferMemory(VK_NULL_HANDLE)
     , descriptorPool(VK_NULL_HANDLE)
     , descriptorSet(VK_NULL_HANDLE)
     , running(false)
@@ -189,26 +180,69 @@ void VulkanEngine::set_camera(CameraState* camera)
     camera_ = camera;
 }
 
+void VulkanEngine::resize(uint32_t w, uint32_t h)
+{
+    if (w == 0 || h == 0)
+        return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (w == width && h == height)
+        return;
+    width = w;
+    height = h;
+    resize_internal();
+}
+
+void VulkanEngine::on_resize()
+{
+    Resize(); // reads client rect then resize_internal
+}
+
+void VulkanEngine::shutdown()
+{
+    stop();
+    cleanup();
+}
+
+void VulkanEngine::request_pick(const PickQuery& /*q*/)
+{
+    // Picks are driven from the render thread mouse path for now.
+}
+
+bool VulkanEngine::consume_pick(PickResult& out)
+{
+    out = PickResult{};
+    return false;
+}
+
 VulkanEngine::~VulkanEngine()
 {
-    Stop();
+    stop();
     cleanup();
+}
 
-}   /* ~VulkanEngine() */
-
-
-void VulkanEngine::Init(void *hInstance, void *hwnd)
+void VulkanEngine::init_platform(void* hInst, void* hwnd_)
 {
-    RECT rect;
-    GetClientRect((HWND)hwnd, &rect);
-    width = static_cast<uint32_t>(rect.right - rect.left);
-    height = static_cast<uint32_t>(rect.bottom - rect.top);
+    EngineCreateInfo info{};
+    info.platform_instance = hInst;
+    info.window = hwnd_;
+    initialize(info);
+}
 
-    this->hInstance = hInstance;
-    this->hwnd = hwnd;
+void VulkanEngine::initialize(const EngineCreateInfo& info)
+{
+    void* hInst = info.platform_instance;
+    void* hwnd_ = info.window;
+
+    RECT rect;
+    GetClientRect((HWND)hwnd_, &rect);
+    width = info.width ? info.width : static_cast<uint32_t>(rect.right - rect.left);
+    height = info.height ? info.height : static_cast<uint32_t>(rect.bottom - rect.top);
+
+    this->hInstance = hInst;
+    this->hwnd = hwnd_;
     instance = create_instance();
     create_debug_messenger(instance);
-    surface = create_win32_surface(instance, hwnd, hInstance);
+    surface = create_win32_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     create_device(instance, physicalDevice, &device, &graphicsQueue);
 
@@ -225,10 +259,7 @@ void VulkanEngine::Init(void *hInstance, void *hwnd)
     picker_pipe_.create(device, descriptorSetLayout, PICKING_FORMAT, depthFormat, width, height);
     create_picker_staging();
     create_command_pool();
-    create_vertex_buffer();
-    create_index_buffer();
-    create_instance_buffer();
-    create_uniform_buffer();
+    create_frame_resources();
     create_descriptor_pool();
     create_descriptor_sets();
     create_sync_objects();
@@ -252,29 +283,29 @@ void VulkanEngine::Init(void *hInstance, void *hwnd)
     style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f); // Slightly lighter on hover
 
     ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplVulkan_InitInfo info = {};
+    ImGui_ImplVulkan_InitInfo imgui_vk = {};
 
-    info.ApiVersion = VK_API_VERSION_1_3;
-    info.Instance = instance;
-    info.PhysicalDevice = physicalDevice;
-    info.Device = device;
-    info.QueueFamily = 0; // Assume graphics queue at index 0
-    info.Queue = graphicsQueue;
-    info.DescriptorPool = descriptorPool;
-    info.PipelineCache = VK_NULL_HANDLE;
-    info.RenderPass = VK_NULL_HANDLE;
-    info.UseDynamicRendering = true;
-    info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-    info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
-    info.PipelineRenderingCreateInfo.depthAttachmentFormat = depthFormat;
-    info.Subpass = 0;
-    info.MinImageCount = 2;
-    info.ImageCount = MAX_FRAMES_IN_FLIGHT;
-    info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    info.Allocator = NULL;
-    info.CheckVkResultFn = check_vk_result;
-    ImGui_ImplVulkan_Init( &info );
+    imgui_vk.ApiVersion = VK_API_VERSION_1_3;
+    imgui_vk.Instance = instance;
+    imgui_vk.PhysicalDevice = physicalDevice;
+    imgui_vk.Device = device;
+    imgui_vk.QueueFamily = 0;
+    imgui_vk.Queue = graphicsQueue;
+    imgui_vk.DescriptorPool = descriptorPool;
+    imgui_vk.PipelineCache = VK_NULL_HANDLE;
+    imgui_vk.RenderPass = VK_NULL_HANDLE;
+    imgui_vk.UseDynamicRendering = true;
+    imgui_vk.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    imgui_vk.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+    imgui_vk.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
+    imgui_vk.PipelineRenderingCreateInfo.depthAttachmentFormat = depthFormat;
+    imgui_vk.Subpass = 0;
+    imgui_vk.MinImageCount = 2;
+    imgui_vk.ImageCount = MAX_FRAMES_IN_FLIGHT;
+    imgui_vk.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    imgui_vk.Allocator = NULL;
+    imgui_vk.CheckVkResultFn = check_vk_result;
+    ImGui_ImplVulkan_Init(&imgui_vk);
 
 
     meshArena = new MeshArena();
@@ -393,21 +424,18 @@ void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
 }
 
 
-void VulkanEngine::Start()
+void VulkanEngine::start()
 {
     running = true;
     renderThread = std::thread(&VulkanEngine::render_loop, this);
+}
 
-}   /* Start() */
-
-
-void VulkanEngine::Stop()
+void VulkanEngine::stop()
 {
     running = false;
     if (renderThread.joinable())
         renderThread.join();
-
-}   /* Stop() */
+}
 
 
 void VulkanEngine::render_loop()
@@ -513,7 +541,7 @@ void VulkanEngine::render_loop()
             submit.instance_count = gpu_instances.size();
             submit.camera = camera;
             submit.client_seq = ++submit_seq_;
-            submit_frame(submit, frame_pick_map);
+            publish_frame(submit, frame_pick_map);
 
             // Dependency arrows (render-thread debug meshes; domain still locked)
             {
@@ -637,7 +665,7 @@ void VulkanEngine::render_loop()
             FrameSubmit submit{};
             submit.camera = build_camera_ubo();
             submit.client_seq = ++submit_seq_;
-            submit_frame(submit, frame_pick_map);
+            publish_frame(submit, frame_pick_map);
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
@@ -696,7 +724,7 @@ void VulkanEngine::render()
 
     if (resizing)
     {
-        resize();
+        resize_internal();
         resizing = false;
     }
 
@@ -808,12 +836,12 @@ void VulkanEngine::Resize()
     width = new_width;
     height = new_height;
 
-    resize();
+    resize_internal();
 
 }   /* Resize() */
 
 
-void VulkanEngine::resize()
+void VulkanEngine::resize_internal()
 {
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -935,62 +963,19 @@ void VulkanEngine::create_picker_staging()
 }
 
 
-void VulkanEngine::create_vertex_buffer()
+void VulkanEngine::create_frame_resources()
 {
-    VkDeviceSize bufferSize = sizeof(CUBE_VERTICES);
-    create_buffer(device, &deviceMemProps, 
-        bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        vertexBuffer, vertexBufferMemory);
-
-    void* data;
-    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, CUBE_VERTICES, bufferSize);
-    vkUnmapMemory(device, vertexBufferMemory);
-
-
-}   /* create_vertex_buffer() */
-
-
-void VulkanEngine::create_index_buffer()
-{
-    VkDeviceSize bufferSize = sizeof(CUBE_INDICES);
-    create_buffer(device, &deviceMemProps, 
-        bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        indexBuffer, indexBufferMemory);
-
-    void* data;
-    vkMapMemory(device, indexBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, CUBE_INDICES, bufferSize);
-    vkUnmapMemory(device, indexBufferMemory);
-
-}   /* create_index_buffer() */
-
-
-void VulkanEngine::create_instance_buffer()
-{
-    VkDeviceSize bufferSize = sizeof(InstanceData) * MAX_INSTANCES;
-    create_buffer(device, &deviceMemProps, 
-        bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        instanceBuffer, instanceBufferMemory);
-
-    vkMapMemory(device, instanceBufferMemory, 0, bufferSize, 0, &mappedInstanceMemory);
+    FrameResourcesCreateInfo info{};
+    info.device = device;
+    info.mem_props = &deviceMemProps;
+    info.cube_vertices = CUBE_VERTICES;
+    info.cube_vertex_bytes = sizeof(CUBE_VERTICES);
+    info.cube_indices = CUBE_INDICES;
+    info.cube_index_bytes = sizeof(CUBE_INDICES);
+    info.max_instances = static_cast<uint32_t>(MAX_INSTANCES);
+    frame_resources_.create(info);
     instanceCount = 0;
-
-}   /* create_instance_buffer() */
-
-
-void VulkanEngine::create_uniform_buffer()
-{
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-    create_buffer(device, &deviceMemProps, 
-        bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        uniformBuffer, uniformBufferMemory);
-
-}   /* create_uniform_buffer() */
+}
 
 
 void VulkanEngine::create_descriptor_pool()
@@ -1030,7 +1015,7 @@ void VulkanEngine::create_descriptor_sets()
     }
 
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = uniformBuffer;
+    bufferInfo.buffer = frame_resources_.uniform_buffer();
     bufferInfo.offset = 0;
     bufferInfo.range = sizeof(UniformBufferObject);
 
@@ -1208,7 +1193,12 @@ int VulkanEngine::find_free_gpu_slot_unlocked() const
     return (pending_slot_ >= 0) ? pending_slot_ : 0;
 }
 
-void VulkanEngine::submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
+void VulkanEngine::submit_frame(const FrameSubmit& frame)
+{
+    publish_frame(frame, {});
+}
+
+void VulkanEngine::publish_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1228,7 +1218,6 @@ void VulkanEngine::submit_frame(const FrameSubmit& frame, const std::vector<std:
 
 bool VulkanEngine::apply_published_frame()
 {
-    // Render thread: swap pending → reading and upload to GPU buffers.
     int slot_idx = -1;
     {
         std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1240,33 +1229,10 @@ bool VulkanEngine::apply_published_frame()
     }
 
     const GpuFrameSlot& slot = gpu_slots_[slot_idx];
-
-    instanceCount = 0;
-    const size_t n = std::min(slot.instances.size(), static_cast<size_t>(MAX_INSTANCES));
-    if (mappedInstanceMemory && n > 0)
-    {
-        static_assert(sizeof(GpuInstance) == sizeof(InstanceData), "GpuInstance/InstanceData layout mismatch");
-        std::memcpy(mappedInstanceMemory, slot.instances.data(), n * sizeof(GpuInstance));
-        instanceCount = n;
-    }
-
-    {
-        UniformBufferObject ubo{};
-        ubo.view = slot.camera.view;
-        ubo.proj = slot.camera.proj;
-        ubo.lightPos = slot.camera.light_pos;
-        ubo.viewPos = slot.camera.view_pos;
-        ubo.meters = slot.camera.meters;
-        viewProj = ubo.proj * ubo.view;
-
-        void* data = nullptr;
-        vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
-        if (data)
-        {
-            std::memcpy(data, &ubo, sizeof(ubo));
-            vkUnmapMemory(device, uniformBufferMemory);
-        }
-    }
+    instanceCount = frame_resources_.upload_instances(
+        slot.instances.empty() ? nullptr : slot.instances.data(),
+        slot.instances.size());
+    frame_resources_.upload_camera(slot.camera, &viewProj);
 
     pick_id_to_hash_ = slot.pick_map;
     gpu_frame_seq_ = slot.client_seq;
@@ -1291,23 +1257,9 @@ UiSnapshot VulkanEngine::copy_ui_snapshot() const
 
 void VulkanEngine::update_uniform_buffer()
 {
-    // Legacy camera-only refresh (keeps current instance buffer)
     CameraUBO cam = build_camera_ubo();
-    UniformBufferObject ubo{};
-    ubo.view = cam.view;
-    ubo.proj = cam.proj;
-    ubo.lightPos = cam.light_pos;
-    ubo.viewPos = cam.view_pos;
-    ubo.meters = cam.meters;
-    viewProj = ubo.proj * ubo.view;
-    void* data = nullptr;
-    vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
-    if (data)
-    {
-        std::memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(device, uniformBufferMemory);
-    }
-}   /* update_uniform_buffer() */
+    frame_resources_.upload_camera(cam, &viewProj);
+}
 
 
 uint32_t VulkanEngine::read_picker_obj_id(VkDevice device)
@@ -1405,11 +1357,11 @@ void VulkanEngine::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, u
         VK_SHADER_STAGE_FRAGMENT_BIT,
         0, sizeof(PickerPushConstants), &pc);
 
-    VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
+    VkBuffer buffers[] = { frame_resources_.vertex_buffer(), frame_resources_.instance_buffer() };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(buffer, frame_resources_.index_buffer(), 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
     //vkCmdEndRenderPass(buffer);
@@ -1507,11 +1459,11 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     scissor.extent = swapchainExtent;
     vkCmdSetScissor(buffer, 0, 1, &scissor);
 
-    VkBuffer buffers[] = { vertexBuffer, instanceBuffer };
+    VkBuffer buffers[] = { frame_resources_.vertex_buffer(), frame_resources_.instance_buffer() };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(buffer, frame_resources_.index_buffer(), 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
     // Debug meshes share the main pass (depth LOAD) — single batched draw of frame stream
@@ -1622,18 +1574,10 @@ void VulkanEngine::cleanup()
         meshArena = nullptr;
     }
 
-    if (mappedInstanceMemory)
-    {
-        vkUnmapMemory(device, instanceBufferMemory);
-    }
     destroy_image_view(device, depthImageView);
     destroy_image(device, depthImage, depthImageMemory);
 
-    destroy_buffer(device, vertexBuffer, vertexBufferMemory);
-    destroy_buffer(device, indexBuffer, indexBufferMemory);
-    destroy_buffer(device, instanceBuffer, instanceBufferMemory);
-    destroy_buffer(device, uniformBuffer, uniformBufferMemory);
-
+    frame_resources_.destroy(device);
     destroy_buffer(device, stagingBuffer, stagingMemory);
 
 
@@ -1661,5 +1605,24 @@ void VulkanEngine::cleanup()
     destroy_debug_messenger(instance);
 
     destroy_instance(instance);
+}
 
-}   /* cleanup() */
+IBlockvizEngine* create_blockviz_engine()
+{
+    return new VulkanEngine();
+}
+
+void destroy_blockviz_engine(IBlockvizEngine* engine)
+{
+    delete engine;
+}
+
+IRenderEngine* create_vulkan_engine()
+{
+    return create_blockviz_engine();
+}
+
+void destroy_render_engine(IRenderEngine* engine)
+{
+    delete engine;
+}

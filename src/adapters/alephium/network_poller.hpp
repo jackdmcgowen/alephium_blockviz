@@ -3,7 +3,7 @@
 // Thin network thread: owns curl + loop; delegates policy to AlephiumAdapter (PR5/PR6b).
 #include "adapters/alephium/alephium_adapter.hpp"
 #include "domain/block_scene.hpp"
-#include "engine/vulkan_engine.hpp"
+#include "engine/blockviz_engine_api.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -20,7 +20,7 @@ public:
         int64_t     poll_interval_ms = 8000;
     };
 
-    NetworkPoller(BlockScene& scene, VulkanEngine& engine);
+    NetworkPoller(BlockScene& scene, IBlockvizEngine& engine);
     ~NetworkPoller();
 
     NetworkPoller(const NetworkPoller&) = delete;

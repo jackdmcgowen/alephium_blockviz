@@ -7,7 +7,7 @@
 #include "alph_block.hpp"
 #include "commands.h"
 
-AlephiumAdapter::AlephiumAdapter(BlockScene& scene, VulkanEngine& engine)
+AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
     : scene_(scene)
     , engine_(engine)
 {
