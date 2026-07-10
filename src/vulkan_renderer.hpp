@@ -116,8 +116,10 @@ private:
     {
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
-        bool            pendingPick;
-        uint64_t        value;
+        bool            pendingPick = false;
+        uint64_t        value = 0;
+        // Instance index → block hash for the GPU instance list submitted this frame
+        std::vector<std::string> pick_map;
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
     VkSemaphore     timeline;
@@ -150,8 +152,14 @@ private:
     PolarShardLayout polar_layout_;
     bool dual_write_validate_ = false; // set true to assert live hash-set parity each Add_Block
 
-    AlphBlock selected_block;
+    // Selection is hash-keyed (stable). full AlphBlock only refreshed when hash changes.
+    std::string selected_hash_;
+    AlphBlock   selected_block;
+    // Built each layout pass; snapshotted into inFlightFrames[i].pick_map for pick resolve
+    std::vector<std::string> pick_id_to_hash_;
 
+    void set_selection(const std::string& hash);
+    void clear_selection();
 
     std::deque<AlphBlock> blockQueue;
     int total_blocks;

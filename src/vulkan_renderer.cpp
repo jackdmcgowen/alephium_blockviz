@@ -38,7 +38,6 @@ static void check_vk_result(VkResult err)
 }   /* check_vk_result() */
 
 
-static uint32_t lastPickedID = ~0u;
 const VkFormat PICKING_FORMAT = VK_FORMAT_R32_UINT;
 const uint32_t INVALID_ID = ~0u;
 const VkExtent2D PICKING_EXT = { 1, 1 }; //smallest pow2 most drivers like
@@ -413,12 +412,55 @@ void VulkanRenderer::Remove_Block(const std::string& hash)
                        [&](const AlphBlock& b) { return b.hash == hash; }),
         blockQueue.end());
 
-    if (selected_block.hash == hash)
-        selected_block = AlphBlock{};
+    if (selected_hash_ == hash)
+        clear_selection();
 
     dataCond.notify_one();
 
 }   /* Remove_Block() */
+
+
+void VulkanRenderer::clear_selection()
+{
+    selected_hash_.clear();
+    selected_block = AlphBlock{};
+}
+
+void VulkanRenderer::set_selection(const std::string& hash)
+{
+    if (hash.empty())
+    {
+        clear_selection();
+        return;
+    }
+    if (hash == selected_hash_ && !selected_block.hash.empty())
+        return; // already resolved; skip heavy copy
+
+    selected_hash_ = hash;
+
+    if (auto detail = detail_store_.get(hash))
+    {
+        selected_block = std::move(*detail);
+        return;
+    }
+
+    // Fallback: scan chains once (e.g. race before dual-write)
+    for (auto& heightMap : chains)
+    {
+        for (auto& height_entry : heightMap)
+        {
+            auto it = height_entry.second.find(hash);
+            if (it != height_entry.second.end())
+            {
+                selected_block = it->second;
+                return;
+            }
+        }
+    }
+
+    selected_block = AlphBlock{};
+    selected_block.hash = hash; // show hash even if detail missing
+}
 
 
 void VulkanRenderer::Start()
@@ -467,6 +509,7 @@ void VulkanRenderer::render_loop()
 
         instanceCount = 0;
         debugDrawer.clear();
+        pick_id_to_hash_.clear();
 
         LayoutParams layout_params;
         layout_params.meters_per_height = meters_per_height;
@@ -477,24 +520,20 @@ void VulkanRenderer::render_loop()
         const auto& block_positions = layout.positions;
         const auto& block_shards = layout.lanes;
 
+        pick_id_to_hash_.reserve(layout.placements.size());
         for (const PlacedBlock& placed : layout.placements)
         {
-            InstanceData inst = { placed.pos, placed.color };
-
-            if (lastPickedID == instanceCount && placed.block)
-                selected_block = *placed.block;
-
-            if (instanceCount < MAX_INSTANCES)
-            {
-                memcpy(static_cast<uint8_t*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData),
-                       &inst, sizeof(InstanceData));
-                instanceCount++;
-            }
-            else
+            if (instanceCount >= MAX_INSTANCES)
             {
                 printf("Instance buffer full\n");
                 break;
             }
+
+            InstanceData inst = { placed.pos, placed.color };
+            memcpy(static_cast<uint8_t*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData),
+                   &inst, sizeof(InstanceData));
+            pick_id_to_hash_.push_back(placed.hash);
+            instanceCount++;
         }
 
         // Dependency arrows: only the frontier (max-height tip blocks) per chain — fresh & decluttered.
@@ -623,7 +662,10 @@ void VulkanRenderer::render_loop()
                 ImGui::SameLine();
                 if (ImGui::SmallButton(block.hash.c_str()))
                 {
-                    selected_block = block;
+                    set_selection(block.hash);
+                    // Prefer feed payload if store was empty (same hash, one assign)
+                    if (selected_block.txns.empty() && !block.txns.empty())
+                        selected_block = block;
                     ImGui::SetClipboardText(block.hash.c_str());
                 }
                 ImGui::PopID();
@@ -767,17 +809,16 @@ void VulkanRenderer::render()
     {
         inFlightFrames[currentFrame].pendingPick = false;
 
-        uint32_t picked = read_picker_obj_id(device);
+        const uint32_t picked = read_picker_obj_id(device);
+        const auto& pick_map = inFlightFrames[currentFrame].pick_map;
 
-        if (picked != INVALID_ID)  // ~0u or 0xFFFFFFFFu
-        {
-            lastPickedID = picked; //printf("Picked instance/object ID: %u\n", picked);
-        }
-        else
-        {
-            lastPickedID = ~0u; //printf("Nothing picked (background)\n");
-        }
+        if (picked != INVALID_ID && picked < pick_map.size())
+            set_selection(pick_map[picked]);
+        // background / out-of-range: leave selection unchanged (sticky)
     }
+
+    // Bind this slot's pick map to the instance list we are about to submit
+    inFlightFrames[currentFrame].pick_map = pick_id_to_hash_;
 
     imageAvailableSemaphore = inFlightFrames[currentFrame].imageAvailableSemaphore;
     result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
@@ -1789,15 +1830,15 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         ImGuiIO& io = ImGui::GetIO();
 
-        if (io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
+        // Pick only when click is on the 3D view (not ImGui chrome)
+        if (!io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
         {
-            // Mouse click happened outside ImGui UI -> trigger pick
             pickMouseX = static_cast<uint32_t>(io.MousePos.x);
             pickMouseY = static_cast<uint32_t>(io.MousePos.y);
 
+            // pick_map already snapshotted for this frame at layout time
             record_picker_pass(buffer, pickMouseX, pickMouseY);
-
-            inFlightFrames[currentFrame].pendingPick = true;  // flag to read back after submit
+            inFlightFrames[currentFrame].pendingPick = true;
         }
 
     }
