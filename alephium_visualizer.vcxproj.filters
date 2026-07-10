@@ -81,9 +81,6 @@
     <ClCompile Include="src\adapters\alephium\network_poller.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="src\engine\vulkan_engine.cpp">
-      <Filter>Source Files\engine</Filter>
-    </ClCompile>
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
