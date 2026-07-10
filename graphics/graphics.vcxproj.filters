@@ -24,6 +24,9 @@
     <ClCompile Include="..\src\graphics\device.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\graphics\engine_requirements.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\graphics\validation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -54,6 +57,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\graphics\engine_requirements.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\src\graphics\mesh_arena.h">

@@ -1,4 +1,5 @@
 #include "gpu_prv_lib.h"
+#include "engine_requirements.hpp"
 
 #include <windows.h>
 #include <vulkan/vulkan_win32.h>
@@ -8,11 +9,14 @@ VkInstance create_instance()
     VkInstance   instance;
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Alephium DAG";
+    appInfo.pApplicationName = "Alephium BlockFlow";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    appInfo.pEngineName = "BlockvizEngine";
+    appInfo.engineVersion = VK_MAKE_VERSION(
+        BLOCKVIZ_ENGINE_VERSION_MAJOR,
+        BLOCKVIZ_ENGINE_VERSION_MINOR,
+        BLOCKVIZ_ENGINE_VERSION_PATCH);
+    appInfo.apiVersion = kRequiredVulkanApiVersion;
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

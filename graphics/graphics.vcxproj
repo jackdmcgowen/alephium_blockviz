@@ -171,6 +171,7 @@
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp" />
     <ClCompile Include="..\src\graphics\mesh_arena.cpp" />
     <ClCompile Include="..\src\graphics\device.cpp" />
+    <ClCompile Include="..\src\graphics\engine_requirements.cpp" />
     <ClCompile Include="..\src\graphics\image.cpp" />
     <ClCompile Include="..\src\graphics\instance.cpp" />
     <ClCompile Include="..\src\graphics\shader.cpp" />
@@ -181,6 +182,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h" />
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h" />
+    <ClInclude Include="..\src\graphics\engine_requirements.hpp" />
     <ClInclude Include="..\src\graphics\mesh_arena.h" />
     <ClInclude Include="..\src\graphics\debug\debug_drawer.h" />
   </ItemGroup>

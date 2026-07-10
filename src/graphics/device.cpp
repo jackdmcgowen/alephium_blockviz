@@ -1,61 +1,80 @@
 #include "gpu_prv_lib.h"
+#include "engine_requirements.hpp"
+
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 VkPhysicalDevice pick_physical_device(
     VkInstance instance,
     VkPhysicalDeviceProperties *device_props,
     VkPhysicalDeviceMemoryProperties *device_mem_props)
 {
-    VkPhysicalDevice physicalDevice;
     uint32_t deviceCount = 0;
-
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
     if (deviceCount == 0)
-    {
         throw std::runtime_error("No Vulkan-capable devices found");
-    }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-    VkPhysicalDeviceProperties2 deviceProps2{};
-    deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    const DeviceFeatureRequirements req{};
+    VkPhysicalDevice best = VK_NULL_HANDLE;
+    VkPhysicalDeviceProperties best_props{};
+    VkPhysicalDeviceMemoryProperties best_mem{};
+    bool best_is_discrete = false;
+    char reason[256]{};
 
-    physicalDevice = devices[0]; // Pick first device (simplified)
     for (uint32_t i = 0; i < deviceCount; ++i)
     {
-        uint32_t queueFamilyCount = 0;
-        vkGetPhysicalDeviceProperties(devices[i], device_props);
-        vkGetPhysicalDeviceMemoryProperties(devices[i], device_mem_props);
-        vkGetPhysicalDeviceProperties2(devices[i], &deviceProps2);
-        vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queueFamilyCount, nullptr);
-        std::vector<VkQueueFamilyProperties2> queueFamilyProps(queueFamilyCount);
+        VkPhysicalDeviceProperties props{};
+        VkPhysicalDeviceMemoryProperties mem{};
+        vkGetPhysicalDeviceProperties(devices[i], &props);
+        vkGetPhysicalDeviceMemoryProperties(devices[i], &mem);
 
-        for (auto &queueFamilyProp : queueFamilyProps)
+        if (!physical_device_meets_requirements(devices[i], req, reason, sizeof(reason)))
         {
-            queueFamilyProp.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+            std::printf("[engine] skip device '%s': %s\n", props.deviceName, reason);
+            continue;
         }
-        vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queueFamilyCount, queueFamilyProps.data());
 
-
-        if (device_props->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) //Pick discrete GPU (specific)
+        const bool discrete = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+        // Prefer discrete among devices that meet requirements; else first viable.
+        if (best == VK_NULL_HANDLE || (discrete && !best_is_discrete))
         {
-            physicalDevice = devices[i];
-            printf("%s\n", device_props->deviceName);
-            break;
+            best = devices[i];
+            best_props = props;
+            best_mem = mem;
+            best_is_discrete = discrete;
         }
     }
 
-    return(physicalDevice);
+    if (best == VK_NULL_HANDLE)
+    {
+        throw std::runtime_error(
+            "No Vulkan device meets engine requirements "
+            "(API 1.3+, timelineSemaphore, dynamicRendering, synchronization2, VK_KHR_swapchain)");
+    }
 
-}   /* pick_physical_device() */
+    if (device_props)
+        *device_props = best_props;
+    if (device_mem_props)
+        *device_mem_props = best_mem;
 
+    log_engine_startup(best_props);
+    return best;
+}
 
 void create_device(
-    VkInstance          instance, 
+    VkInstance          instance,
     VkPhysicalDevice    physicalDevice,
     VkDevice           *device,
     VkQueue            *queue )
 {
+    (void)instance;
+
+    // Features must stay in sync with DeviceFeatureRequirements / physical_device_meets_requirements.
     VkDeviceQueueCreateInfo queueCreateInfo{};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueCreateInfo.queueFamilyIndex = 0; // Assume graphics queue at index 0
@@ -79,45 +98,38 @@ void create_device(
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pEnabledFeatures = &deviceFeatures;
-    const char* extensions[] = 
-        { 
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
-        };
-    createInfo.enabledExtensionCount = 2;
+    // Dynamic rendering is core in 1.3; only swapchain remains as a device extension.
+    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    createInfo.enabledExtensionCount = 1;
     createInfo.ppEnabledExtensionNames = extensions;
     createInfo.pNext = &vulkan12Features;
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, device) != VK_SUCCESS)
     {
-        throw std::runtime_error("Failed to create logical device");
+        throw std::runtime_error(
+            "Failed to create logical device (features should have been validated at pick)");
     }
 
     vkGetDeviceQueue(*device, 0, 0, queue);
-
-}   /* create_device() */
-
+}
 
 void destroy_device(VkDevice device)
 {
     vkDestroyDevice(device, nullptr);
-
-}   /* destroy_device() */
-
+}
 
 uint32_t find_device_memory_type(
     VkPhysicalDeviceMemoryProperties* deviceMemProps,
     uint32_t typeFilter,
     VkMemoryPropertyFlags properties)
 {
-
     for (uint32_t i = 0; i < deviceMemProps->memoryTypeCount; i++)
     {
-        if ((typeFilter & (1 << i)) && (deviceMemProps->memoryTypes[i].propertyFlags & properties) == properties)
+        if ((typeFilter & (1 << i)) &&
+            (deviceMemProps->memoryTypes[i].propertyFlags & properties) == properties)
         {
             return i;
         }
     }
     throw std::runtime_error("Failed to find suitable memory type");
-
-}   /* find_device_memory_type() */
+}
