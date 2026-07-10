@@ -9,8 +9,8 @@
 extern "C" CURL* curl;
 extern const char* baseUrl;
 
-NetworkPoller::NetworkPoller(BlockScene& scene, VulkanRenderer& renderer)
-    : adapter_(scene, renderer)
+NetworkPoller::NetworkPoller(BlockScene& scene, VulkanEngine& engine)
+    : adapter_(scene, engine)
 {
 }
 

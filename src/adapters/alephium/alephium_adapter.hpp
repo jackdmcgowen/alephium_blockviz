@@ -2,11 +2,11 @@
 
 // Domain/network policy for Alephium BlockFlow ingest (PR5/PR6b).
 // Owns main-chain cache, verify queue, poll watermark logic.
-// Writes into BlockScene; selection helpers go through VulkanRenderer.
+// Writes into BlockScene; selection helpers go through VulkanEngine.
 // NetworkPoller only owns the curl thread lifecycle.
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
-#include "vulkan_renderer.hpp"
+#include "engine/vulkan_engine.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -23,7 +23,7 @@ public:
         int64_t poll_interval_ms = 8000;
     };
 
-    AlephiumAdapter(BlockScene& scene, VulkanRenderer& renderer);
+    AlephiumAdapter(BlockScene& scene, VulkanEngine& engine);
 
     void configure(const Config& cfg);
     void reset_stats();
@@ -59,7 +59,7 @@ private:
     void verify_one(const VerifyJob& job);
 
     BlockScene& scene_;
-    VulkanRenderer& renderer_;
+    VulkanEngine& engine_;
     Config cfg_{};
     MainChainCache main_chain_cache_;
 

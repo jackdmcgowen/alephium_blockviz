@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <string>
-#include "vulkan_renderer.hpp"
+#include "engine/vulkan_engine.hpp"
 #include "app/ui_chrome.hpp"
 #include "commands.h"
 
@@ -73,7 +73,7 @@ static const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
 
 static constexpr bool kHoverPickEnabled = true;
 
-const VulkanRenderer::VertexNormal VulkanRenderer::CUBE_VERTICES[8] = {
+const VulkanEngine::VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
     { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
     { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
     { glm::vec3(-1, -1, -1), glm::normalize(glm::vec3(-1, -1, -1)) }, // 2
@@ -84,7 +84,7 @@ const VulkanRenderer::VertexNormal VulkanRenderer::CUBE_VERTICES[8] = {
     { glm::vec3(1,  1,  1),  glm::normalize(glm::vec3(1,  1,  1)) }  // 7
 };
 
-const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
+const uint16_t VulkanEngine::CUBE_INDICES[36] = {
     6, 0, 2, 6, 1, 0,
     4, 0, 1, 0, 4, 3,
     0, 3, 2, 3, 5, 2,
@@ -131,7 +131,7 @@ static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
 
 }   /* pipeline_barrier() */
 
-VulkanRenderer::VulkanRenderer()
+VulkanEngine::VulkanEngine()
     : hInstance(nullptr)
     , hwnd(nullptr)
     , instance(VK_NULL_HANDLE)
@@ -166,32 +166,32 @@ VulkanRenderer::VulkanRenderer()
     , width(0)
     , height(0)
 {
-}   /* VulkanRenderer() */
+}   /* VulkanEngine() */
 
-void VulkanRenderer::set_scene(BlockScene* scene)
+void VulkanEngine::set_scene(BlockScene* scene)
 {
     scene_ = scene;
 }
 
-void VulkanRenderer::set_ui_overlay(IUiOverlay* overlay)
+void VulkanEngine::set_ui_overlay(IUiOverlay* overlay)
 {
     overlay_ = overlay;
 }
 
-void VulkanRenderer::set_camera(CameraState* camera)
+void VulkanEngine::set_camera(CameraState* camera)
 {
     camera_ = camera;
 }
 
-VulkanRenderer::~VulkanRenderer()
+VulkanEngine::~VulkanEngine()
 {
     Stop();
     cleanup();
 
-}   /* ~VulkanRenderer() */
+}   /* ~VulkanEngine() */
 
 
-void VulkanRenderer::Init(void *hInstance, void *hwnd)
+void VulkanEngine::Init(void *hInstance, void *hwnd)
 {
     RECT rect;
     GetClientRect((HWND)hwnd, &rect);
@@ -279,19 +279,19 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
 }   /* Init() */
 
 
-void VulkanRenderer::clear_selection_unlocked()
+void VulkanEngine::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
 }
 
-void VulkanRenderer::clear_selection()
+void VulkanEngine::clear_selection()
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     clear_selection_unlocked();
 }
 
-void VulkanRenderer::set_selection_unlocked(const std::string& hash)
+void VulkanEngine::set_selection_unlocked(const std::string& hash)
 {
     if (hash.empty())
     {
@@ -321,25 +321,25 @@ void VulkanRenderer::set_selection_unlocked(const std::string& hash)
     }
 }
 
-void VulkanRenderer::set_selection(const std::string& hash)
+void VulkanEngine::set_selection(const std::string& hash)
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     set_selection_unlocked(hash);
 }
 
-bool VulkanRenderer::is_selected(const std::string& hash) const
+bool VulkanEngine::is_selected(const std::string& hash) const
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     return !hash.empty() && selected_hash_ == hash;
 }
 
-AlphBlock VulkanRenderer::copy_selected_block() const
+AlphBlock VulkanEngine::copy_selected_block() const
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     return selected_block;
 }
 
-void VulkanRenderer::refresh_selection_if_needed(BlockScene& scene)
+void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
 {
     // Caller holds scene.mutex() and selection_mutex_.
     if (selected_hash_.empty())
@@ -349,15 +349,15 @@ void VulkanRenderer::refresh_selection_if_needed(BlockScene& scene)
 }
 
 
-void VulkanRenderer::Start()
+void VulkanEngine::Start()
 {
     running = true;
-    renderThread = std::thread(&VulkanRenderer::render_loop, this);
+    renderThread = std::thread(&VulkanEngine::render_loop, this);
 
 }   /* Start() */
 
 
-void VulkanRenderer::Stop()
+void VulkanEngine::Stop()
 {
     running = false;
     if (renderThread.joinable())
@@ -366,7 +366,7 @@ void VulkanRenderer::Stop()
 }   /* Stop() */
 
 
-void VulkanRenderer::render_loop()
+void VulkanEngine::render_loop()
 {
     const double frameTimeMin = 1000.0 / 60; // ~16.67ms for 60Hz
     LARGE_INTEGER freq, t1, t2;
@@ -616,7 +616,7 @@ void VulkanRenderer::render_loop()
 }   /* render_loop() */
 
 
-void VulkanRenderer::render()
+void VulkanEngine::render()
 {
     static uint64_t s_frameCounter;
     static uint32_t imageIndex;
@@ -746,7 +746,7 @@ void VulkanRenderer::render()
 }   /* render() */
 
 
-void VulkanRenderer::Resize()
+void VulkanEngine::Resize()
 {
     RECT rect;
     int new_width;
@@ -773,7 +773,7 @@ void VulkanRenderer::Resize()
 }   /* Resize() */
 
 
-void VulkanRenderer::resize()
+void VulkanEngine::resize()
 {
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -812,7 +812,7 @@ void VulkanRenderer::resize()
 }   /* resize() */
 
 
-void VulkanRenderer::create_depth_resources()
+void VulkanEngine::create_depth_resources()
 {
     depthFormat = find_depth_format();
     create_image(
@@ -831,7 +831,7 @@ void VulkanRenderer::create_depth_resources()
 }   /* create_depth_resources() */
 
 
-void VulkanRenderer::create_image_views()
+void VulkanEngine::create_image_views()
 {
     swapchainImageViews.resize(swapchainImages.size());
     for (size_t i = 0; i < swapchainImages.size(); i++)
@@ -841,7 +841,7 @@ void VulkanRenderer::create_image_views()
 }   /* create_image_views() */
 
 
-void VulkanRenderer::create_descriptor_set_layout()
+void VulkanEngine::create_descriptor_set_layout()
 {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
@@ -862,7 +862,7 @@ void VulkanRenderer::create_descriptor_set_layout()
 }   /* create_descriptor_set_layout() */
 
 
-void VulkanRenderer::create_picker_resources()
+void VulkanEngine::create_picker_resources()
 {
     // 1. Picking image
     create_image(
@@ -882,7 +882,7 @@ void VulkanRenderer::create_picker_resources()
 }   /* create_picker_resources() */
 
 
-void VulkanRenderer::create_picker_pipeline()
+void VulkanEngine::create_picker_pipeline()
 {
     // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
     std::vector<uint8_t> vertShaderCode;
@@ -1078,7 +1078,7 @@ void VulkanRenderer::create_picker_pipeline()
 }   /* create_picker_pipeline() */
 
 
-void VulkanRenderer::create_graphics_pipeline()
+void VulkanEngine::create_graphics_pipeline()
 {
     // Simplified shader loading (assume SPIR-V shaders: vert.spv, frag.spv)
     std::vector<uint8_t> vertShaderCode;
@@ -1263,7 +1263,7 @@ void VulkanRenderer::create_graphics_pipeline()
 }   /* create_graphics_pipeline() */
 
 
-void VulkanRenderer::create_vertex_buffer()
+void VulkanEngine::create_vertex_buffer()
 {
     VkDeviceSize bufferSize = sizeof(CUBE_VERTICES);
     create_buffer(device, &deviceMemProps, 
@@ -1280,7 +1280,7 @@ void VulkanRenderer::create_vertex_buffer()
 }   /* create_vertex_buffer() */
 
 
-void VulkanRenderer::create_index_buffer()
+void VulkanEngine::create_index_buffer()
 {
     VkDeviceSize bufferSize = sizeof(CUBE_INDICES);
     create_buffer(device, &deviceMemProps, 
@@ -1296,7 +1296,7 @@ void VulkanRenderer::create_index_buffer()
 }   /* create_index_buffer() */
 
 
-void VulkanRenderer::create_instance_buffer()
+void VulkanEngine::create_instance_buffer()
 {
     VkDeviceSize bufferSize = sizeof(InstanceData) * MAX_INSTANCES;
     create_buffer(device, &deviceMemProps, 
@@ -1310,7 +1310,7 @@ void VulkanRenderer::create_instance_buffer()
 }   /* create_instance_buffer() */
 
 
-void VulkanRenderer::create_uniform_buffer()
+void VulkanEngine::create_uniform_buffer()
 {
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
     create_buffer(device, &deviceMemProps, 
@@ -1321,7 +1321,7 @@ void VulkanRenderer::create_uniform_buffer()
 }   /* create_uniform_buffer() */
 
 
-void VulkanRenderer::create_descriptor_pool()
+void VulkanEngine::create_descriptor_pool()
 {
     VkDescriptorPoolSize pool_sizes[] = 
     {
@@ -1344,7 +1344,7 @@ void VulkanRenderer::create_descriptor_pool()
 }   /* create_descriptor_pool() */
 
 
-void VulkanRenderer::create_descriptor_sets()
+void VulkanEngine::create_descriptor_sets()
 {
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1376,7 +1376,7 @@ void VulkanRenderer::create_descriptor_sets()
 }   /* create_descriptor_sets() */
 
 
-void VulkanRenderer::create_command_pool()
+void VulkanEngine::create_command_pool()
 {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1404,7 +1404,7 @@ void VulkanRenderer::create_command_pool()
 }   /* create_command_pool() */
 
 
-void VulkanRenderer::create_sync_objects()
+void VulkanEngine::create_sync_objects()
 {
 
     VkSemaphoreTypeCreateInfo semaphoreTypeCI{};
@@ -1437,7 +1437,7 @@ void VulkanRenderer::create_sync_objects()
 }   /* create_sync_objects() */
 
 
-CameraUBO VulkanRenderer::build_camera_ubo() const
+CameraUBO VulkanEngine::build_camera_ubo() const
 {
     CameraUBO cam{};
 
@@ -1471,7 +1471,7 @@ CameraUBO VulkanRenderer::build_camera_ubo() const
     return cam;
 }
 
-int VulkanRenderer::find_free_gpu_slot_unlocked() const
+int VulkanEngine::find_free_gpu_slot_unlocked() const
 {
     // Triple buffer: always one free among {0,1,2} when reading and pending are distinct.
     for (int i = 0; i < kGpuSlots; ++i)
@@ -1483,7 +1483,7 @@ int VulkanRenderer::find_free_gpu_slot_unlocked() const
     return (pending_slot_ >= 0) ? pending_slot_ : 0;
 }
 
-void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
+void VulkanEngine::submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1501,7 +1501,7 @@ void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<st
     pending_slot_ = write;
 }
 
-bool VulkanRenderer::apply_published_frame()
+bool VulkanEngine::apply_published_frame()
 {
     // Render thread: swap pending → reading and upload to GPU buffers.
     int slot_idx = -1;
@@ -1548,7 +1548,7 @@ bool VulkanRenderer::apply_published_frame()
     return true;
 }
 
-void VulkanRenderer::publish_ui_snapshot(UiSnapshot snap)
+void VulkanEngine::publish_ui_snapshot(UiSnapshot snap)
 {
     std::lock_guard<std::mutex> lock(ui_snap_mutex_);
     if (snap.seq == 0)
@@ -1558,13 +1558,13 @@ void VulkanRenderer::publish_ui_snapshot(UiSnapshot snap)
     ui_snap_ = std::move(snap);
 }
 
-UiSnapshot VulkanRenderer::copy_ui_snapshot() const
+UiSnapshot VulkanEngine::copy_ui_snapshot() const
 {
     std::lock_guard<std::mutex> lock(ui_snap_mutex_);
     return ui_snap_;
 }
 
-void VulkanRenderer::update_uniform_buffer()
+void VulkanEngine::update_uniform_buffer()
 {
     // Legacy camera-only refresh (keeps current instance buffer)
     CameraUBO cam = build_camera_ubo();
@@ -1585,7 +1585,7 @@ void VulkanRenderer::update_uniform_buffer()
 }   /* update_uniform_buffer() */
 
 
-uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
+uint32_t VulkanEngine::read_picker_obj_id(VkDevice device)
 {
     uint32_t* ptr;
     std::vector<uint32_t> id(PICKING_EXT.width * PICKING_EXT.height);
@@ -1599,7 +1599,7 @@ uint32_t VulkanRenderer::read_picker_obj_id(VkDevice device)
 }   /* read_picker_obj_id() */
 
 
-void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
+void VulkanEngine::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
 {
     VkImageSubresourceRange         subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
 
@@ -1715,7 +1715,7 @@ void VulkanRenderer::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX,
 }   /* record_picker_pass() */
 
 
-void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
+void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1855,7 +1855,7 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 }   /* record_command_buffer() */
 
 
-VkFormat VulkanRenderer::find_depth_format()
+VkFormat VulkanEngine::find_depth_format()
 {
     VkFormat candidates[] = 
         {
@@ -1878,7 +1878,7 @@ VkFormat VulkanRenderer::find_depth_format()
 }   /* find_depth_format() */
 
 
-void VulkanRenderer::cleanup()
+void VulkanEngine::cleanup()
 {
     vkDeviceWaitIdle(device);
 

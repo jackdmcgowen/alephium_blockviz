@@ -36,7 +36,7 @@
     <ClCompile Include="src\domain\layout.cpp" />
     <ClCompile Include="src\app\blockflow_overlay.cpp" />
     <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="src\vulkan_renderer.cpp" />
+    <ClCompile Include="src\engine\vulkan_engine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\alph_block.hpp" />
@@ -53,7 +53,7 @@
     <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp" />
     <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp" />
     <ClInclude Include="src\adapters\alephium\network_poller.hpp" />
-    <ClInclude Include="src\vulkan_renderer.hpp" />
+    <ClInclude Include="src\engine\vulkan_engine.hpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Alephium-Logo-round.ico" />

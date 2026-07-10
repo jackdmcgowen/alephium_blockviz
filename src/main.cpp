@@ -7,7 +7,7 @@
 #include "app/blockflow_overlay.hpp"
 #include "app/camera_state.hpp"
 #include "domain/block_scene.hpp"
-#include "vulkan_renderer.hpp"
+#include "engine/vulkan_engine.hpp"
 #include "adapters/alephium/network_poller.hpp"
 #include "alph_block.hpp"
 #include <windows.h>
@@ -19,8 +19,8 @@ const char* baseUrl;
 static volatile bool keepRunning = true;
 static BlockScene scene;
 static CameraState camera;
-static VulkanRenderer renderer;
-static BlockflowOverlay overlay(camera, renderer);
+static VulkanEngine engine;
+static BlockflowOverlay overlay(camera, engine);
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -30,7 +30,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (msg)
     {
     case WM_SIZE:
-        renderer.Resize();
+        engine.Resize();
         break;
 
     case WM_DESTROY:
@@ -71,11 +71,11 @@ int main()
     // curl_global_* is process-wide; easy handle is created on the network thread
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    renderer.Init(hInstance, hwnd);
-    renderer.set_scene(&scene);
-    renderer.set_camera(&camera);
-    renderer.set_ui_overlay(&overlay);
-    renderer.Start();
+    engine.Init(hInstance, hwnd);
+    engine.set_scene(&scene);
+    engine.set_camera(&camera);
+    engine.set_ui_overlay(&overlay);
+    engine.Start();
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
@@ -84,14 +84,14 @@ int main()
     if (config_array.count == 0 || !config_array.configs[0].url)
     {
         printf("Failed to load config\n");
-        renderer.Stop();
+        engine.Stop();
         curl_global_cleanup();
         return -1;
     }
 
     printf("Using config url: %s\n", config_array.configs[0].url);
 
-    NetworkPoller poller(scene, renderer);
+    NetworkPoller poller(scene, engine);
     NetworkPoller::Config net_cfg;
     net_cfg.base_url = config_array.configs[0].url;
     net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
@@ -117,7 +117,7 @@ int main()
     }
 
     poller.stop();
-    renderer.Stop();
+    engine.Stop();
     free_configs(&config_array);
     curl_global_cleanup();
     return 0;

@@ -1,7 +1,7 @@
 #pragma once
 
 // Public graphics-engine surface (no Vulkan types).
-// Stubs for modularization PR1 — not yet wired to VulkanRenderer.
+// Stubs for modularization PR1 — not yet wired to VulkanEngine.
 // See docs/graphics-modularization-design.md
 
 #include <cstddef>
@@ -87,6 +87,6 @@ public:
     virtual bool consume_pick(PickResult& out) = 0; // true if a new result is available
 };
 
-// Factory (declared only in PR1; implement when engine is peeled from VulkanRenderer)
+// Factory (declared only in PR1; implement when engine is peeled from VulkanEngine)
 IRenderEngine* create_vulkan_engine();
 void destroy_render_engine(IRenderEngine* engine);

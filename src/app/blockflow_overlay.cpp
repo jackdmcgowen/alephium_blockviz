@@ -1,6 +1,6 @@
 #include "app/blockflow_overlay.hpp"
 #include "app/ui_chrome.hpp"
-#include "vulkan_renderer.hpp"
+#include "engine/vulkan_engine.hpp"
 
 #include "imgui.h"
 
@@ -31,9 +31,9 @@ static const glm::vec3 kShardColors[16] = {
     glm::vec3(0.00f, 1.00f, 0.00f)
 };
 
-BlockflowOverlay::BlockflowOverlay(CameraState& camera, VulkanRenderer& renderer)
+BlockflowOverlay::BlockflowOverlay(CameraState& camera, VulkanEngine& engine)
     : camera_(camera)
-    , renderer_(renderer)
+    , engine_(engine)
 {
     session_start_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
 }
@@ -52,7 +52,7 @@ void BlockflowOverlay::draw()
             camera_.nudge_eye_z(-CameraState::kEyeZStep * dt_sec);
     }
 
-    const UiSnapshot ui = renderer_.copy_ui_snapshot();
+    const UiSnapshot ui = engine_.copy_ui_snapshot();
     const float ui_w = io.DisplaySize.x;
     const float ui_h = io.DisplaySize.y;
 
@@ -106,7 +106,7 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::SameLine();
         if (ImGui::Button(entry.hash.c_str()))
         {
-            renderer_.set_selection(entry.hash);
+            engine_.set_selection(entry.hash);
             ImGui::SetClipboardText(entry.hash.c_str());
         }
         ImGui::PopID();
@@ -123,7 +123,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
     // Prefer live selection detail if feed click updated selection this frame
     AlphBlock inspector = ui.selected_detail;
     {
-        AlphBlock live = renderer_.copy_selected_block();
+        AlphBlock live = engine_.copy_selected_block();
         if (!live.hash.empty() &&
             (inspector.hash != live.hash || inspector.txns.empty()))
             inspector = std::move(live);

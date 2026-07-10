@@ -1,5 +1,5 @@
-#ifndef VULKAN_RENDERER_HPP
-#define VULKAN_RENDERER_HPP
+#ifndef VULKAN_ENGINE_HPP
+#define VULKAN_ENGINE_HPP
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -29,7 +29,7 @@
 // PR6b: engine has no cJSON ingest. Domain lives in BlockScene (adapter writes, renderer reads).
 // PR7: triple-buffer FrameSubmit + UiSnapshot for race-free ImGui.
 // PR8: engine hosts ImGui; chrome via IUiOverlay; camera via CameraState (no explorer URLs).
-class VulkanRenderer
+class VulkanEngine
 {
 public:
     struct VertexNormal
@@ -61,8 +61,8 @@ public:
         uint32_t instanceOffset;
     };
 
-    VulkanRenderer();
-    ~VulkanRenderer();
+    VulkanEngine();
+    ~VulkanEngine();
     void Init(void *hInstance, void *hwnd);
 
     // Domain scene (owned by app; set before Start / network). Not owned.
@@ -238,4 +238,4 @@ private:
     void cleanup();
 };
 
-#endif /* VULKAN_RENDERER_HPP */
+#endif /* VULKAN_ENGINE_HPP */
