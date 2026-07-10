@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 #include "commands.h"
 
+/* Easy handle: owned by the network poller thread only. Do not use from UI/render. */
 CURL            *curl;
 
 #define CHECK_CURL( x )                                                      \

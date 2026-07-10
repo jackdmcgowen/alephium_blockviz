@@ -45,6 +45,12 @@
     <ClCompile Include="src\adapters\alephium\main_chain_cache.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
+    <ClCompile Include="src\adapters\alephium\network_poller.cpp">
+      <Filter>Source Files\adapters</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\layout.cpp">
+      <Filter>Source Files\domain</Filter>
+    </ClCompile>
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
@@ -84,6 +90,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\network_poller.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\layout.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
