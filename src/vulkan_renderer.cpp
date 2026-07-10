@@ -64,6 +64,15 @@ static bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clea
     return true;
 }
 
+// Active frontier BlockFlow edges (not per-shard muted colors)
+static const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);
+// Selection dependency edges
+static const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
+// Hover preview deps (dimmer gold)
+static const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
+
+static constexpr bool kHoverPickEnabled = true;
+
 const glm::vec3 SHARD_COLORS[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
     glm::vec3(0.20f, 1.00f, 0.34f),  // #33FF57 Green
@@ -413,28 +422,37 @@ void VulkanRenderer::Remove_Block(const std::string& hash)
         blockQueue.end());
 
     if (selected_hash_ == hash)
-        clear_selection();
+        clear_selection_unlocked();
+    if (hovered_hash_ == hash)
+        hovered_hash_.clear();
 
     dataCond.notify_one();
 
 }   /* Remove_Block() */
 
 
-void VulkanRenderer::clear_selection()
+void VulkanRenderer::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
 }
 
-void VulkanRenderer::set_selection(const std::string& hash)
+void VulkanRenderer::clear_selection()
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    clear_selection_unlocked();
+}
+
+void VulkanRenderer::set_selection_unlocked(const std::string& hash)
 {
     if (hash.empty())
     {
-        clear_selection();
+        clear_selection_unlocked();
         return;
     }
-    if (hash == selected_hash_ && !selected_block.hash.empty())
-        return; // already resolved; skip heavy copy
+    // Skip heavy copy if already fully resolved for this hash
+    if (hash == selected_hash_ && selected_block.hash == hash && !selected_block.txns.empty())
+        return;
 
     selected_hash_ = hash;
 
@@ -444,7 +462,6 @@ void VulkanRenderer::set_selection(const std::string& hash)
         return;
     }
 
-    // Fallback: scan chains once (e.g. race before dual-write)
     for (auto& heightMap : chains)
     {
         for (auto& height_entry : heightMap)
@@ -459,7 +476,28 @@ void VulkanRenderer::set_selection(const std::string& hash)
     }
 
     selected_block = AlphBlock{};
-    selected_block.hash = hash; // show hash even if detail missing
+    selected_block.hash = hash;
+}
+
+void VulkanRenderer::set_selection(const std::string& hash)
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    set_selection_unlocked(hash);
+}
+
+bool VulkanRenderer::is_selected(const std::string& hash) const
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    return !hash.empty() && selected_hash_ == hash;
+}
+
+void VulkanRenderer::refresh_selection_if_needed()
+{
+    // Caller holds dataMutex
+    if (selected_hash_.empty())
+        return;
+    if (selected_block.hash != selected_hash_ || selected_block.txns.empty())
+        set_selection_unlocked(selected_hash_);
 }
 
 
@@ -520,6 +558,8 @@ void VulkanRenderer::render_loop()
         const auto& block_positions = layout.positions;
         const auto& block_shards = layout.lanes;
 
+        refresh_selection_if_needed();
+
         pick_id_to_hash_.reserve(layout.placements.size());
         for (const PlacedBlock& placed : layout.placements)
         {
@@ -529,15 +569,20 @@ void VulkanRenderer::render_loop()
                 break;
             }
 
-            InstanceData inst = { placed.pos, placed.color };
+            glm::vec3 color = placed.color;
+            if (!selected_hash_.empty() && placed.hash == selected_hash_)
+                color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
+            else if (!hovered_hash_.empty() && placed.hash == hovered_hash_)
+                color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
+
+            InstanceData inst = { placed.pos, color };
             memcpy(static_cast<uint8_t*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData),
                    &inst, sizeof(InstanceData));
             pick_id_to_hash_.push_back(placed.hash);
             instanceCount++;
         }
 
-        // Dependency arrows: only the frontier (max-height tip blocks) per chain — fresh & decluttered.
-        // Smaller heads; endpoints inset so cones don't sit inside cube geometry.
+        // Dependency arrows: active tip frontier + selection/hover confirmed deps
         {
             const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
             const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
@@ -547,6 +592,37 @@ void VulkanRenderer::render_loop()
             constexpr uint32_t kMaxDepArrows = 512;
             uint32_t arrow_count = 0;
 
+            auto add_dep_arrow = [&](const glm::vec3& from, const glm::vec3& to,
+                                     const glm::vec4& color, float tip_scale = 1.f)
+            {
+                if (arrow_count >= kMaxDepArrows)
+                    return;
+                glm::vec3 from_inset, to_inset;
+                if (!inset_segment(from, to, clearance, from_inset, to_inset))
+                    return;
+                debugDrawer.add_arrow(from_inset, to_inset, color,
+                                      tip_len * tip_scale, tip_rad * tip_scale,
+                                      shaft_r * tip_scale, kDepRadial);
+                ++arrow_count;
+            };
+
+            auto draw_deps_of = [&](const AlphBlock& block, const glm::vec4& color, float tip_scale)
+            {
+                auto to_it = block_positions.find(block.hash);
+                if (to_it == block_positions.end())
+                    return;
+                for (const std::string& dep_hash : block.deps)
+                {
+                    if (arrow_count >= kMaxDepArrows)
+                        break;
+                    auto from_it = block_positions.find(dep_hash);
+                    if (from_it == block_positions.end())
+                        continue; // only confirmed / laid-out deps
+                    add_dep_arrow(from_it->second, to_it->second, color, tip_scale);
+                }
+            };
+
+            // A) Active tip BlockFlow edges (cyan)
             for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
             {
                 for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
@@ -559,50 +635,46 @@ void VulkanRenderer::render_loop()
                     if (heightMap.empty())
                         continue;
 
-                    // map is ordered by height; last key is the tip height for this chain
                     const auto tip_it = std::prev(heightMap.end());
-                    const HashToBlocks& tips_at_height = tip_it->second;
-
-                    const glm::vec3& dest_c = SHARD_COLORS[shard_id % 16];
-
-                    for (const auto& hash_and_block : tips_at_height)
-                    {
-                        if (arrow_count >= kMaxDepArrows)
-                            break;
-
-                        const AlphBlock& block = hash_and_block.second;
-                        auto to_it = block_positions.find(block.hash);
-                        if (to_it == block_positions.end())
-                            continue;
-
-                        const glm::vec3& to_pos = to_it->second;
-
-                        for (const std::string& dep_hash : block.deps)
-                        {
-                            if (arrow_count >= kMaxDepArrows)
-                                break;
-
-                            auto from_it = block_positions.find(dep_hash);
-                            if (from_it == block_positions.end())
-                                continue;
-
-                            glm::vec3 from_inset, to_inset;
-                            if (!inset_segment(from_it->second, to_pos, clearance, from_inset, to_inset))
-                                continue;
-
-                            auto from_shard_it = block_shards.find(dep_hash);
-                            const bool cross_chain =
-                                (from_shard_it != block_shards.end() && from_shard_it->second != shard_id);
-
-                            const float alpha = cross_chain ? 0.90f : 0.55f;
-                            const glm::vec4 color(dest_c.r, dest_c.g, dest_c.b, alpha);
-
-                            debugDrawer.add_arrow(from_inset, to_inset, color, tip_len, tip_rad, shaft_r, kDepRadial);
-                            ++arrow_count;
-                        }
-                    }
+                    for (const auto& hash_and_block : tip_it->second)
+                        draw_deps_of(hash_and_block.second, kActiveArrowColor, 1.f);
                 }
             }
+
+            // B) Selection deps (gold, slightly larger tips) — drawn last so they read on top
+            if (!selected_hash_.empty() && selected_block.hash == selected_hash_)
+                draw_deps_of(selected_block, kSelectionArrowColor, 1.15f);
+            else if (!selected_hash_.empty())
+            {
+                // Hash sticky but body missing: try store/chains without full set_selection churn
+                if (auto d = detail_store_.get(selected_hash_))
+                    draw_deps_of(*d, kSelectionArrowColor, 1.15f);
+            }
+
+            // C) Hover preview deps (dim gold) if different from selection
+            if (!hovered_hash_.empty() && hovered_hash_ != selected_hash_)
+            {
+                if (auto d = detail_store_.get(hovered_hash_))
+                    draw_deps_of(*d, kHoverArrowColor, 1.05f);
+                else
+                {
+                    for (auto& heightMap : chains)
+                    {
+                        for (auto& he : heightMap)
+                        {
+                            auto it = he.second.find(hovered_hash_);
+                            if (it != he.second.end())
+                            {
+                                draw_deps_of(it->second, kHoverArrowColor, 1.05f);
+                                goto hover_deps_done;
+                            }
+                        }
+                    }
+                hover_deps_done:;
+                }
+            }
+
+            (void)block_shards;
         }
 
         //blockQueue.em
@@ -807,14 +879,27 @@ void VulkanRenderer::render()
 
     if (inFlightFrames[currentFrame].pendingPick)
     {
+        const PickKind kind = inFlightFrames[currentFrame].pickKind;
         inFlightFrames[currentFrame].pendingPick = false;
+        inFlightFrames[currentFrame].pickKind = PickKind::None;
 
         const uint32_t picked = read_picker_obj_id(device);
         const auto& pick_map = inFlightFrames[currentFrame].pick_map;
 
+        std::string resolved;
         if (picked != INVALID_ID && picked < pick_map.size())
-            set_selection(pick_map[picked]);
-        // background / out-of-range: leave selection unchanged (sticky)
+            resolved = pick_map[picked];
+
+        if (kind == PickKind::Click)
+        {
+            if (!resolved.empty())
+                set_selection(resolved);
+            // miss: keep sticky selection
+        }
+        else if (kind == PickKind::Hover)
+        {
+            hovered_hash_ = resolved; // empty clears hover highlight
+        }
     }
 
     // Bind this slot's pick map to the instance list we are about to submit
@@ -1830,15 +1915,34 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         ImGuiIO& io = ImGui::GetIO();
 
-        // Pick only when click is on the 3D view (not ImGui chrome)
-        if (!io.WantCaptureMouse && io.MouseClicked[ImGuiMouseButton_Left])
-        {
-            pickMouseX = static_cast<uint32_t>(io.MousePos.x);
-            pickMouseY = static_cast<uint32_t>(io.MousePos.y);
+        // Scene rect: exclude right inspector + bottom toolbar
+        const float inspector_w = std::min(kInspectorWidth, static_cast<float>(width) * 0.35f);
+        const float toolbar_h = kToolbarHeight;
+        const float mx = io.MousePos.x;
+        const float my = io.MousePos.y;
+        const bool over_scene =
+            !io.WantCaptureMouse &&
+            mx >= 0.f && my >= 0.f &&
+            mx < static_cast<float>(width) - inspector_w &&
+            my < static_cast<float>(height) - toolbar_h;
 
-            // pick_map already snapshotted for this frame at layout time
+        PickKind request = PickKind::None;
+        if (over_scene && io.MouseClicked[ImGuiMouseButton_Left])
+            request = PickKind::Click;
+        else if (kHoverPickEnabled && over_scene)
+            request = PickKind::Hover; // continuous readback each frame while over scene
+
+        if (request != PickKind::None)
+        {
+            pickMouseX = static_cast<uint32_t>(mx);
+            pickMouseY = static_cast<uint32_t>(my);
             record_picker_pass(buffer, pickMouseX, pickMouseY);
             inFlightFrames[currentFrame].pendingPick = true;
+            inFlightFrames[currentFrame].pickKind = request;
+        }
+        else if (!over_scene)
+        {
+            hovered_hash_.clear();
         }
 
     }

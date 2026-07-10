@@ -105,6 +105,7 @@ void NetworkPoller::verify_one(const VerifyJob& job)
     // Not main chain — remove and try to install the real main block at this height
     std::printf("[net] verify NOT main %s [%d->%d] h=%d — remove\n",
                 job.hash.c_str(), job.from, job.to, job.height);
+    const bool reselect = renderer_.is_selected(job.hash);
     renderer_.Remove_Block(job.hash);
     ++stats_removed_;
     verify_done_.insert(job.hash); // don't re-verify this uncle
@@ -172,8 +173,11 @@ void NetworkPoller::verify_one(const VerifyJob& job)
 
     renderer_.Add_Block(block);
     ++stats_replaced_;
-    std::printf("[net] replaced with main %s [%d->%d] h=%d\n",
-                main_hash.c_str(), job.from, job.to, job.height);
+    if (reselect)
+        renderer_.set_selection(main_hash);
+    std::printf("[net] replaced with main %s [%d->%d] h=%d%s\n",
+                main_hash.c_str(), job.from, job.to, job.height,
+                reselect ? " (reselected)" : "");
 
     cJSON_Delete(block_obj);
 }

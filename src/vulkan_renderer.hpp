@@ -64,6 +64,11 @@ public:
     void Add_Block(cJSON* block);
     // Remove a block by hash (main-chain verify failure). Thread-safe via dataMutex.
     void Remove_Block(const std::string& hash);
+    // Thread-safe selection (network may call after replace).
+    void set_selection(const std::string& hash);
+    void clear_selection();
+    bool is_selected(const std::string& hash) const;
+
     void Resize();
     void Start();
     void Stop();
@@ -112,11 +117,14 @@ private:
 
     VkCommandPool commandPool;
 
+    enum class PickKind : uint8_t { None = 0, Click, Hover };
+
     struct FramesInFlight
     {
         VkSemaphore     imageAvailableSemaphore;
         VkCommandBuffer commandBuffer;
         bool            pendingPick = false;
+        PickKind        pickKind = PickKind::None;
         uint64_t        value = 0;
         // Instance index → block hash for the GPU instance list submitted this frame
         std::vector<std::string> pick_map;
@@ -139,7 +147,7 @@ private:
 
     std::thread renderThread;
     std::mutex  renderMutex;
-    std::mutex  dataMutex;
+    mutable std::mutex  dataMutex;
     std::condition_variable dataCond;
 
     using HashToBlocks = std::map<std::string, AlphBlock>;
@@ -155,11 +163,14 @@ private:
     // Selection is hash-keyed (stable). full AlphBlock only refreshed when hash changes.
     std::string selected_hash_;
     AlphBlock   selected_block;
+    // Ephemeral hover (render thread); not sticky
+    std::string hovered_hash_;
     // Built each layout pass; snapshotted into inFlightFrames[i].pick_map for pick resolve
     std::vector<std::string> pick_id_to_hash_;
 
-    void set_selection(const std::string& hash);
-    void clear_selection();
+    void set_selection_unlocked(const std::string& hash);
+    void clear_selection_unlocked();
+    void refresh_selection_if_needed(); // under dataMutex: refill detail if store caught up
 
     std::deque<AlphBlock> blockQueue;
     int total_blocks;
