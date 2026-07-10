@@ -2,7 +2,6 @@
 
 #include <cjson/cJSON.h>
 #include <cstdio>
-#include <cstring>
 
 #include "commands.h"
 
@@ -24,19 +23,38 @@ int MainChainCache::tip(int from_group, int to_group) const
     return tips_[from_group][to_group];
 }
 
+bool MainChainCache::is_hot_zone(int from_group, int to_group, int height) const
+{
+    if (!tips_valid_)
+        return true;
+    const int t = tip(from_group, to_group);
+    if (t < 0)
+        return true;
+    // height + D > tip  => near tip
+    return height + ALPH_MAIN_CHAIN_CONFIRM_DEPTH > t;
+}
+
 bool MainChainCache::is_cached_main(const std::string& hash) const
 {
     return main_yes_.find(hash) != main_yes_.end();
 }
 
-bool MainChainCache::query_is_main(const std::string& hash)
+void MainChainCache::mark_main(const std::string& hash)
 {
-    int transport_ok = 0;
-    const int is_main = get_blockflow_is_block_in_main_chain(hash.c_str(), &transport_ok);
-    if (!transport_ok)
+    if (!hash.empty())
+        main_yes_.insert(hash);
+}
+
+bool MainChainCache::query_is_main(const std::string& hash, bool* transport_ok)
+{
+    int ok = 0;
+    const int is_main = get_blockflow_is_block_in_main_chain(hash.c_str(), &ok);
+    if (transport_ok)
+        *transport_ok = (ok != 0);
+    if (!ok)
         return false;
     if (is_main)
-        main_yes_.insert(hash);
+        mark_main(hash);
     return is_main != 0;
 }
 
@@ -55,8 +73,7 @@ bool MainChainCache::try_hashes_singleton(const std::string& hash, int from_grou
         cJSON* item = cJSON_GetArrayItem(arr, 0);
         if (item && cJSON_IsString(item) && item->valuestring && hash == item->valuestring)
         {
-            // Sole hash at height — treat as main (cheap bulk path)
-            main_yes_.insert(hash);
+            mark_main(hash);
             accepted = true;
         }
     }
@@ -68,14 +85,9 @@ bool MainChainCache::ensure(const std::string& hash, int from_group, int to_grou
 {
     if (hash.empty())
         return false;
-
-    if (main_yes_.count(hash))
+    if (is_cached_main(hash))
         return true;
-
-    // Deep-zone cheap path: single hash at height → accept without is-main RTT
     if (try_hashes_singleton(hash, from_group, to_group, height))
         return true;
-
-    // Hot zone / multi-hash heights / singleton miss: definitive check
     return query_is_main(hash);
 }

@@ -369,6 +369,53 @@ void VulkanRenderer::Add_Block(cJSON* block)
 }   /* Add_Block() */
 
 
+void VulkanRenderer::Remove_Block(const std::string& hash)
+{
+    if (hash.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(dataMutex);
+
+    bool erased = false;
+    for (auto& heightMap : chains)
+    {
+        for (auto hit = heightMap.begin(); hit != heightMap.end(); )
+        {
+            auto& blocks = hit->second;
+            auto fit = blocks.find(hash);
+            if (fit != blocks.end())
+            {
+                blocks.erase(fit);
+                erased = true;
+            }
+            if (blocks.empty())
+                hit = heightMap.erase(hit);
+            else
+                ++hit;
+        }
+    }
+
+    if (!erased)
+        return;
+
+    GraphDelta delta;
+    delta.remove_nodes.push_back(hash);
+    block_graph_.apply(delta);
+    detail_store_.remove(hash);
+
+    blockQueue.erase(
+        std::remove_if(blockQueue.begin(), blockQueue.end(),
+                       [&](const AlphBlock& b) { return b.hash == hash; }),
+        blockQueue.end());
+
+    if (selected_block.hash == hash)
+        selected_block = AlphBlock{};
+
+    dataCond.notify_one();
+
+}   /* Remove_Block() */
+
+
 void VulkanRenderer::Start()
 {
     running = true;

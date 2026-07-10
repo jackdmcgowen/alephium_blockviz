@@ -62,6 +62,8 @@ public:
     ~VulkanRenderer();
     void Init(void *hInstance, void *hwnd);
     void Add_Block(cJSON* block);
+    // Remove a block by hash (main-chain verify failure). Thread-safe via dataMutex.
+    void Remove_Block(const std::string& hash);
     void Resize();
     void Start();
     void Stop();
