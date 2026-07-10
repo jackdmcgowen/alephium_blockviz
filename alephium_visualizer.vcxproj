@@ -28,6 +28,7 @@
     <ClCompile Include="src\commands.c" />
     <ClCompile Include="src\config.c" />
     <ClCompile Include="src\domain\block_graph.cpp" />
+    <ClCompile Include="src\domain\block_scene.cpp" />
     <ClCompile Include="src\adapters\alephium\alph_detail_store.cpp" />
     <ClCompile Include="src\adapters\alephium\main_chain_cache.cpp" />
     <ClCompile Include="src\adapters\alephium\alephium_adapter.cpp" />
@@ -41,6 +42,7 @@
     <ClInclude Include="src\commands.h" />
     <ClInclude Include="src\config.h" />
     <ClInclude Include="src\domain\block_graph.hpp" />
+    <ClInclude Include="src\domain\block_scene.hpp" />
     <ClInclude Include="src\domain\layout.hpp" />
     <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp" />
     <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp" />

@@ -1,7 +1,8 @@
 #pragma once
 
-// Thin network thread: owns curl + loop; delegates policy to AlephiumAdapter (PR5).
+// Thin network thread: owns curl + loop; delegates policy to AlephiumAdapter (PR5/PR6b).
 #include "adapters/alephium/alephium_adapter.hpp"
+#include "domain/block_scene.hpp"
 #include "vulkan_renderer.hpp"
 
 #include <atomic>
@@ -19,7 +20,7 @@ public:
         int64_t     poll_interval_ms = 8000;
     };
 
-    explicit NetworkPoller(VulkanRenderer& renderer);
+    NetworkPoller(BlockScene& scene, VulkanRenderer& renderer);
     ~NetworkPoller();
 
     NetworkPoller(const NetworkPoller&) = delete;
@@ -31,7 +32,6 @@ public:
 private:
     void thread_main();
 
-    VulkanRenderer&   renderer_;
     AlephiumAdapter   adapter_;
     Config            cfg_{};
     std::thread       thread_;

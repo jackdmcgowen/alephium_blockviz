@@ -7,8 +7,9 @@
 #include "alph_block.hpp"
 #include "commands.h"
 
-AlephiumAdapter::AlephiumAdapter(VulkanRenderer& renderer)
-    : renderer_(renderer)
+AlephiumAdapter::AlephiumAdapter(BlockScene& scene, VulkanRenderer& renderer)
+    : scene_(scene)
+    , renderer_(renderer)
 {
 }
 
@@ -95,7 +96,9 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
     std::printf("[adapter] verify NOT main %s [%d->%d] h=%d — remove\n",
                 job.hash.c_str(), job.from, job.to, job.height);
     const bool reselect = renderer_.is_selected(job.hash);
-    renderer_.Remove_Block(job.hash);
+    scene_.remove_block(job.hash);
+    if (reselect)
+        renderer_.clear_selection();
     ++stats_removed_;
     verify_done_.insert(job.hash);
 
@@ -153,7 +156,7 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
             block = inner;
     }
 
-    renderer_.Add_Block(block);
+    scene_.add_block(block);
     ++stats_replaced_;
     if (reselect)
         renderer_.set_selection(main_hash);
@@ -230,7 +233,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
-                renderer_.Add_Block(block);
+                scene_.add_block(block);
                 ++added;
 
                 if (!main_chain_cache_.is_cached_main(block_hash) &&

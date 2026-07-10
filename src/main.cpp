@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include "commands.h"
 #include "config.h"
+#include "domain/block_scene.hpp"
 #include "vulkan_renderer.hpp"
 #include "adapters/alephium/network_poller.hpp"
 #include "alph_block.hpp"
@@ -14,6 +15,7 @@ extern "C" CURL* curl;
 const char* baseUrl;
 
 static volatile bool keepRunning = true;
+static BlockScene scene;
 static VulkanRenderer renderer;
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -66,6 +68,7 @@ int main()
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     renderer.Init(hInstance, hwnd);
+    renderer.set_scene(&scene);
     renderer.Start();
 
     ShowWindow(hwnd, SW_SHOW);
@@ -82,7 +85,7 @@ int main()
 
     printf("Using config url: %s\n", config_array.configs[0].url);
 
-    NetworkPoller poller(renderer);
+    NetworkPoller poller(scene, renderer);
     NetworkPoller::Config net_cfg;
     net_cfg.base_url = config_array.configs[0].url;
     net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;

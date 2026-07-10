@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <string>
-#include <cjson/cJSON.h>
+#include <deque>
 #include "vulkan_renderer.hpp"
 #include "commands.h"
 
@@ -190,9 +190,15 @@ VulkanRenderer::VulkanRenderer()
     , descriptorSet(VK_NULL_HANDLE)
     , running(false)
     , elapsedSeconds(0.0f)
-    , chains(16)
+    , width(0)
+    , height(0)
 {
 }   /* VulkanRenderer() */
+
+void VulkanRenderer::set_scene(BlockScene* scene)
+{
+    scene_ = scene;
+}
 
 VulkanRenderer::~VulkanRenderer()
 {
@@ -290,147 +296,6 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
 }   /* Init() */
 
 
-void VulkanRenderer::Add_Block(cJSON* block)
-{
-    AlphBlock alph_block(block);
-
-    std::lock_guard<std::mutex> lock(dataMutex);
-
-
-    uint8_t chainIndex = alph_block.chain_idx();
-
-    auto& heightMap = chains[chainIndex];
-    auto& blocksAtHeight = heightMap[alph_block.height];
-
-    auto result = blocksAtHeight.emplace(alph_block.hash, alph_block);
-    if (result.second)
-        blockQueue.push_back(alph_block);
-    else
-        printf("duplicate\n");
-
-    // Collect uncle removals for dual-write (same scan as chains eviction)
-    std::vector<NodeId> removed_uncles;
-    for (auto& bh : heightMap)
-    {
-        for (auto unc : alph_block.uncles)
-        {
-            auto uncle_find = bh.second.find(unc);
-            if (uncle_find != bh.second.end())
-            {
-                removed_uncles.push_back(unc);
-                bh.second.erase(unc);
-            }
-        }
-    }
-
-    // Dual-write: BlockGraph (slim node) + AlphDetailStore (full block for inspector)
-    {
-        GraphDelta delta;
-        if (result.second)
-        {
-            GraphNode node;
-            node.id = alph_block.hash;
-            node.timestamp_ms = alph_block.timestamp;
-            node.height = alph_block.height;
-            node.group_from = alph_block.chainFrom;
-            node.group_to = alph_block.chainTo;
-            node.lane = alph_block.chain_idx();
-            node.lane_count_hint = 16;
-            node.chain_label = std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
-            delta.upsert_nodes.push_back(std::move(node));
-            // edges optional v1 — leave empty until edge viz (OQ3)
-            detail_store_.upsert(alph_block);
-        }
-        if (!removed_uncles.empty())
-        {
-            delta.remove_nodes = removed_uncles;
-            detail_store_.remove_many(removed_uncles);
-        }
-        if (!delta.upsert_nodes.empty() || !delta.remove_nodes.empty())
-            block_graph_.apply(delta);
-    }
-
-    if (dual_write_validate_)
-    {
-        std::vector<NodeId> chains_ids;
-        chains_ids.reserve(4096);
-        for (const auto& hm : chains)
-        {
-            for (const auto& height_entry : hm)
-            {
-                for (const auto& hash_entry : height_entry.second)
-                    chains_ids.push_back(hash_entry.first);
-            }
-        }
-        std::sort(chains_ids.begin(), chains_ids.end());
-        chains_ids.erase(std::unique(chains_ids.begin(), chains_ids.end()), chains_ids.end());
-        const std::vector<NodeId> graph_ids = block_graph_.live_ids_sorted();
-        if (chains_ids != graph_ids)
-        {
-            printf("[dual-write] hash-set mismatch: chains=%zu graph=%zu\n",
-                   chains_ids.size(), graph_ids.size());
-        }
-    }
-
-    total_blocks++;
-
-    if (blockQueue.size() > 120)
-        blockQueue.pop_back();
-
-    dataCond.notify_one();
-
-}   /* Add_Block() */
-
-
-void VulkanRenderer::Remove_Block(const std::string& hash)
-{
-    if (hash.empty())
-        return;
-
-    std::lock_guard<std::mutex> lock(dataMutex);
-
-    bool erased = false;
-    for (auto& heightMap : chains)
-    {
-        for (auto hit = heightMap.begin(); hit != heightMap.end(); )
-        {
-            auto& blocks = hit->second;
-            auto fit = blocks.find(hash);
-            if (fit != blocks.end())
-            {
-                blocks.erase(fit);
-                erased = true;
-            }
-            if (blocks.empty())
-                hit = heightMap.erase(hit);
-            else
-                ++hit;
-        }
-    }
-
-    if (!erased)
-        return;
-
-    GraphDelta delta;
-    delta.remove_nodes.push_back(hash);
-    block_graph_.apply(delta);
-    detail_store_.remove(hash);
-
-    blockQueue.erase(
-        std::remove_if(blockQueue.begin(), blockQueue.end(),
-                       [&](const AlphBlock& b) { return b.hash == hash; }),
-        blockQueue.end());
-
-    if (selected_hash_ == hash)
-        clear_selection_unlocked();
-    if (hovered_hash_ == hash)
-        hovered_hash_.clear();
-
-    dataCond.notify_one();
-
-}   /* Remove_Block() */
-
-
 void VulkanRenderer::clear_selection_unlocked()
 {
     selected_hash_.clear();
@@ -439,7 +304,7 @@ void VulkanRenderer::clear_selection_unlocked()
 
 void VulkanRenderer::clear_selection()
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
+    std::lock_guard<std::mutex> lock(selection_mutex_);
     clear_selection_unlocked();
 }
 
@@ -450,54 +315,48 @@ void VulkanRenderer::set_selection_unlocked(const std::string& hash)
         clear_selection_unlocked();
         return;
     }
-    // Skip heavy copy if already fully resolved for this hash
     if (hash == selected_hash_ && selected_block.hash == hash && !selected_block.txns.empty())
         return;
 
     selected_hash_ = hash;
-
-    if (auto detail = detail_store_.get(hash))
+    // Prefer detail store only (own mutex) — never lock scene from selection path
+    // to avoid ABBA deadlock with render_loop (scene then selection).
+    if (scene_)
     {
-        selected_block = std::move(*detail);
-        return;
-    }
-
-    for (auto& heightMap : chains)
-    {
-        for (auto& height_entry : heightMap)
+        if (auto d = scene_->detail_store().get(hash))
+            selected_block = std::move(*d);
+        else
         {
-            auto it = height_entry.second.find(hash);
-            if (it != height_entry.second.end())
-            {
-                selected_block = it->second;
-                return;
-            }
+            selected_block = AlphBlock{};
+            selected_block.hash = hash;
         }
     }
-
-    selected_block = AlphBlock{};
-    selected_block.hash = hash;
+    else
+    {
+        selected_block = AlphBlock{};
+        selected_block.hash = hash;
+    }
 }
 
 void VulkanRenderer::set_selection(const std::string& hash)
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
+    std::lock_guard<std::mutex> lock(selection_mutex_);
     set_selection_unlocked(hash);
 }
 
 bool VulkanRenderer::is_selected(const std::string& hash) const
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
+    std::lock_guard<std::mutex> lock(selection_mutex_);
     return !hash.empty() && selected_hash_ == hash;
 }
 
-void VulkanRenderer::refresh_selection_if_needed()
+void VulkanRenderer::refresh_selection_if_needed(BlockScene& scene)
 {
-    // Caller holds dataMutex
+    // Caller holds scene.mutex() and selection_mutex_.
     if (selected_hash_.empty())
         return;
     if (selected_block.hash != selected_hash_ || selected_block.txns.empty())
-        set_selection_unlocked(selected_hash_);
+        selected_block = scene.resolve_detail_under_lock(selected_hash_);
 }
 
 
@@ -511,15 +370,9 @@ void VulkanRenderer::Start()
 
 void VulkanRenderer::Stop()
 {
-    {
-        std::lock_guard<std::mutex> lock(dataMutex);
-        running = false;
-    }
-    dataCond.notify_one();
+    running = false;
     if (renderThread.joinable())
-    {
         renderThread.join();
-    }
 
 }   /* Stop() */
 
@@ -543,205 +396,229 @@ void VulkanRenderer::render_loop()
 
         //start frame
         QueryPerformanceCounter(&t1);
-        std::unique_lock<std::mutex> lock(dataMutex);
 
         instanceCount = 0;
         debugDrawer.clear();
         pick_id_to_hash_.clear();
 
-        LayoutParams layout_params;
-        layout_params.meters_per_height = meters_per_height;
-        layout_params.base_radius = 20.0f;
-        layout_params.lane_count = 16;
+        // Snapshots for ImGui after domain lock is released
+        std::deque<AlphBlock> feed_snap;
+        int total_blocks_snap = 0;
+        AlphBlock selected_ui;
+        std::string selected_hash_local;
+        std::string hovered_hash_local;
 
-        LayoutResult layout = polar_layout_.build(chains, layout_params);
-        const auto& block_positions = layout.positions;
-        const auto& block_shards = layout.lanes;
-
-        refresh_selection_if_needed();
-
-        // Look-at: aim at selected cube, keep eye on Z track (eye_z unchanged here)
-        has_look_target_ = false;
-        if (!selected_hash_.empty())
         {
-            auto lit = block_positions.find(selected_hash_);
-            if (lit != block_positions.end())
-            {
-                selected_look_pos_ = lit->second;
-                has_look_target_ = true;
-            }
+            std::lock_guard<std::mutex> slock(selection_mutex_);
+            selected_hash_local = selected_hash_;
+            hovered_hash_local = hovered_hash_;
+            selected_ui = selected_block;
         }
 
-        // Build GPU instances + pick map, then publish via submit_frame (PR6a dual path)
-        std::vector<GpuInstance> gpu_instances;
-        gpu_instances.reserve(layout.placements.size());
-        pick_id_to_hash_.reserve(layout.placements.size());
-        for (const PlacedBlock& placed : layout.placements)
+        if (scene_)
         {
-            if (gpu_instances.size() >= static_cast<size_t>(MAX_INSTANCES))
+            std::unique_lock<std::mutex> lock(scene_->mutex());
+
+            LayoutParams layout_params;
+            layout_params.meters_per_height = meters_per_height;
+            layout_params.base_radius = 20.0f;
+            layout_params.lane_count = 16;
+
+            LayoutResult layout = polar_layout_.build(scene_->chains(), layout_params);
+            const auto& block_positions = layout.positions;
+
             {
-                printf("Instance buffer full\n");
-                break;
+                std::lock_guard<std::mutex> slock(selection_mutex_);
+                refresh_selection_if_needed(*scene_);
+                selected_hash_local = selected_hash_;
+                hovered_hash_local = hovered_hash_;
+                selected_ui = selected_block;
             }
 
-            glm::vec3 color = placed.color;
-            if (!selected_hash_.empty() && placed.hash == selected_hash_)
-                color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
-            else if (!hovered_hash_.empty() && placed.hash == hovered_hash_)
-                color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
-
-            gpu_instances.push_back(GpuInstance{ placed.pos, color });
-            pick_id_to_hash_.push_back(placed.hash);
-        }
-
-        // Camera uses look-at state set above; publish before unlock ends frame draw path
-        const CameraUBO camera = build_camera_ubo();
-        FrameSubmit submit{};
-        submit.instances = gpu_instances.empty() ? nullptr : gpu_instances.data();
-        submit.instance_count = gpu_instances.size();
-        submit.camera = camera;
-        submit.client_seq = ++submit_seq_;
-        submit_frame(submit, pick_id_to_hash_);
-
-        // Dependency arrows: active tip frontier + selection/hover confirmed deps
-        {
-            const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
-            const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
-            const float shaft_r    = tip_rad * 0.4f;
-            const float clearance  = std::max(0.55f, meters_per_height * 0.12f);
-            constexpr uint32_t kDepRadial    = 8;
-            constexpr uint32_t kMaxDepArrows = 512;
-            uint32_t arrow_count = 0;
-
-            auto add_dep_arrow = [&](const glm::vec3& from, const glm::vec3& to,
-                                     const glm::vec4& color, float tip_scale = 1.f)
+            // Look-at: aim at selected cube, keep eye on Z track (eye_z unchanged here)
+            has_look_target_ = false;
+            if (!selected_hash_local.empty())
             {
-                if (arrow_count >= kMaxDepArrows)
-                    return;
-                glm::vec3 from_inset, to_inset;
-                if (!inset_segment(from, to, clearance, from_inset, to_inset))
-                    return;
-                debugDrawer.add_arrow(from_inset, to_inset, color,
-                                      tip_len * tip_scale, tip_rad * tip_scale,
-                                      shaft_r * tip_scale, kDepRadial);
-                ++arrow_count;
-            };
+                auto lit = block_positions.find(selected_hash_local);
+                if (lit != block_positions.end())
+                {
+                    selected_look_pos_ = lit->second;
+                    has_look_target_ = true;
+                }
+            }
 
-            auto draw_deps_of = [&](const AlphBlock& block, const glm::vec4& color, float tip_scale)
+            // Build GPU instances + pick map, then publish via submit_frame (PR6a)
+            std::vector<GpuInstance> gpu_instances;
+            gpu_instances.reserve(layout.placements.size());
+            pick_id_to_hash_.reserve(layout.placements.size());
+            for (const PlacedBlock& placed : layout.placements)
             {
-                auto to_it = block_positions.find(block.hash);
-                if (to_it == block_positions.end())
-                    return;
-                for (const std::string& dep_hash : block.deps)
+                if (gpu_instances.size() >= static_cast<size_t>(MAX_INSTANCES))
+                {
+                    printf("Instance buffer full\n");
+                    break;
+                }
+
+                glm::vec3 color = placed.color;
+                if (!selected_hash_local.empty() && placed.hash == selected_hash_local)
+                    color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
+                else if (!hovered_hash_local.empty() && placed.hash == hovered_hash_local)
+                    color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
+
+                gpu_instances.push_back(GpuInstance{ placed.pos, color });
+                pick_id_to_hash_.push_back(placed.hash);
+            }
+
+            const CameraUBO camera = build_camera_ubo();
+            FrameSubmit submit{};
+            submit.instances = gpu_instances.empty() ? nullptr : gpu_instances.data();
+            submit.instance_count = gpu_instances.size();
+            submit.camera = camera;
+            submit.client_seq = ++submit_seq_;
+            submit_frame(submit, pick_id_to_hash_);
+
+            // Dependency arrows: active tip frontier + selection/hover confirmed deps
+            {
+                const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
+                const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
+                const float shaft_r    = tip_rad * 0.4f;
+                const float clearance  = std::max(0.55f, meters_per_height * 0.12f);
+                constexpr uint32_t kDepRadial    = 8;
+                constexpr uint32_t kMaxDepArrows = 512;
+                uint32_t arrow_count = 0;
+
+                auto add_dep_arrow = [&](const glm::vec3& from, const glm::vec3& to,
+                                         const glm::vec4& color, float tip_scale = 1.f)
                 {
                     if (arrow_count >= kMaxDepArrows)
-                        break;
-                    auto from_it = block_positions.find(dep_hash);
-                    if (from_it == block_positions.end())
-                        continue; // only confirmed / laid-out deps
-                    add_dep_arrow(from_it->second, to_it->second, color, tip_scale);
-                }
-            };
+                        return;
+                    glm::vec3 from_inset, to_inset;
+                    if (!inset_segment(from, to, clearance, from_inset, to_inset))
+                        return;
+                    debugDrawer.add_arrow(from_inset, to_inset, color,
+                                          tip_len * tip_scale, tip_rad * tip_scale,
+                                          shaft_r * tip_scale, kDepRadial);
+                    ++arrow_count;
+                };
 
-            // A) Active tip BlockFlow edges (cyan)
-            for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
-            {
-                for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
+                auto draw_deps_of = [&](const AlphBlock& block, const glm::vec4& color, float tip_scale)
                 {
-                    const uint8_t shard_id = static_cast<uint8_t>(chain_from * ALPH_NUM_GROUPS + chain_to);
-                    if (shard_id >= chains.size())
-                        continue;
-
-                    const HeightToHash& heightMap = chains[shard_id];
-                    if (heightMap.empty())
-                        continue;
-
-                    const auto tip_it = std::prev(heightMap.end());
-                    for (const auto& hash_and_block : tip_it->second)
-                        draw_deps_of(hash_and_block.second, kActiveArrowColor, 1.f);
-                }
-            }
-
-            // B) Selection deps: present → gold arrow; missing → edge wire box + link line
-            const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
-            const float ghost_half = 1.0f; // match instance cube half-extent-ish
-
-            auto draw_selection_deps = [&](const AlphBlock& block)
-            {
-                auto to_it = block_positions.find(block.hash);
-                if (to_it == block_positions.end())
-                    return;
-                const glm::vec3& to_pos = to_it->second;
-                const int parent_lane = block.chain_idx();
-                int missing_i = 0;
-
-                for (const std::string& dep_hash : block.deps)
-                {
-                    auto from_it = block_positions.find(dep_hash);
-                    if (from_it != block_positions.end())
+                    auto to_it = block_positions.find(block.hash);
+                    if (to_it == block_positions.end())
+                        return;
+                    for (const std::string& dep_hash : block.deps)
                     {
-                        add_dep_arrow(from_it->second, to_pos, kSelectionArrowColor, 1.15f);
-                        continue;
+                        if (arrow_count >= kMaxDepArrows)
+                            break;
+                        auto from_it = block_positions.find(dep_hash);
+                        if (from_it == block_positions.end())
+                            continue;
+                        add_dep_arrow(from_it->second, to_it->second, color, tip_scale);
                     }
+                };
 
-                    // Ghost pose: same polar family as parent, one height step "back" in z
-                    const float angle =
-                        ((static_cast<float>(parent_lane) + 0.35f + 0.08f * static_cast<float>(missing_i)) /
-                         16.0f) *
-                        2.0f * 3.14159265f;
-                    const float radius = 20.0f * 0.9f;
-                    glm::vec3 ghost(
-                        radius * std::cos(angle),
-                        radius * std::sin(angle),
-                        to_pos.z + meters_per_height);
-                    debugDrawer.add_wire_box(ghost, ghost_half, kMissingOutline);
-                    debugDrawer.add_line(to_pos, ghost, kMissingOutline);
-                    ++missing_i;
-                }
-            };
+                const auto& chains = scene_->chains();
 
-            if (!selected_hash_.empty() && selected_block.hash == selected_hash_)
-                draw_selection_deps(selected_block);
-            else if (!selected_hash_.empty())
-            {
-                if (auto d = detail_store_.get(selected_hash_))
-                    draw_selection_deps(*d);
-            }
-
-            // C) Hover preview deps (dim gold) if different from selection
-            if (!hovered_hash_.empty() && hovered_hash_ != selected_hash_)
-            {
-                if (auto d = detail_store_.get(hovered_hash_))
-                    draw_deps_of(*d, kHoverArrowColor, 1.05f);
-                else
+                // A) Active tip BlockFlow edges (cyan)
+                for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
                 {
-                    for (auto& heightMap : chains)
+                    for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
                     {
-                        for (auto& he : heightMap)
+                        const uint8_t shard_id =
+                            static_cast<uint8_t>(chain_from * ALPH_NUM_GROUPS + chain_to);
+                        if (shard_id >= chains.size())
+                            continue;
+
+                        const auto& heightMap = chains[shard_id];
+                        if (heightMap.empty())
+                            continue;
+
+                        const auto tip_it = std::prev(heightMap.end());
+                        for (const auto& hash_and_block : tip_it->second)
+                            draw_deps_of(hash_and_block.second, kActiveArrowColor, 1.f);
+                    }
+                }
+
+                // B) Selection deps: present → gold arrow; missing → edge wire box + link line
+                const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
+                const float ghost_half = 1.0f;
+
+                auto draw_selection_deps = [&](const AlphBlock& block)
+                {
+                    auto to_it = block_positions.find(block.hash);
+                    if (to_it == block_positions.end())
+                        return;
+                    const glm::vec3& to_pos = to_it->second;
+                    const int parent_lane = block.chain_idx();
+                    int missing_i = 0;
+
+                    for (const std::string& dep_hash : block.deps)
+                    {
+                        auto from_it = block_positions.find(dep_hash);
+                        if (from_it != block_positions.end())
                         {
-                            auto it = he.second.find(hovered_hash_);
-                            if (it != he.second.end())
+                            add_dep_arrow(from_it->second, to_pos, kSelectionArrowColor, 1.15f);
+                            continue;
+                        }
+
+                        const float angle =
+                            ((static_cast<float>(parent_lane) + 0.35f +
+                              0.08f * static_cast<float>(missing_i)) /
+                             16.0f) *
+                            2.0f * 3.14159265f;
+                        const float radius = 20.0f * 0.9f;
+                        glm::vec3 ghost(
+                            radius * std::cos(angle),
+                            radius * std::sin(angle),
+                            to_pos.z + meters_per_height);
+                        debugDrawer.add_wire_box(ghost, ghost_half, kMissingOutline);
+                        debugDrawer.add_line(to_pos, ghost, kMissingOutline);
+                        ++missing_i;
+                    }
+                };
+
+                if (!selected_hash_local.empty() && selected_ui.hash == selected_hash_local)
+                    draw_selection_deps(selected_ui);
+                else if (!selected_hash_local.empty())
+                {
+                    if (auto d = scene_->detail_store().get(selected_hash_local))
+                        draw_selection_deps(*d);
+                }
+
+                // C) Hover preview deps (dim gold) if different from selection
+                if (!hovered_hash_local.empty() && hovered_hash_local != selected_hash_local)
+                {
+                    if (auto d = scene_->detail_store().get(hovered_hash_local))
+                        draw_deps_of(*d, kHoverArrowColor, 1.05f);
+                    else
+                    {
+                        for (const auto& heightMap : chains)
+                        {
+                            for (const auto& he : heightMap)
                             {
-                                draw_deps_of(it->second, kHoverArrowColor, 1.05f);
-                                goto hover_deps_done;
+                                auto it = he.second.find(hovered_hash_local);
+                                if (it != he.second.end())
+                                {
+                                    draw_deps_of(it->second, kHoverArrowColor, 1.05f);
+                                    goto hover_deps_done;
+                                }
                             }
                         }
+                    hover_deps_done:;
                     }
-                hover_deps_done:;
                 }
             }
 
-            (void)block_shards;
+            feed_snap = scene_->feed();
+            total_blocks_snap = scene_->total_blocks();
         }
-
-        //blockQueue.em
-
-        //if( blockQueue.size() > 120)
-        //{
-        //    blockQueue.pop_back();
-        //}
-
-        lock.unlock();
+        else
+        {
+            FrameSubmit submit{};
+            submit.camera = build_camera_ubo();
+            submit.client_seq = ++submit_seq_;
+            submit_frame(submit, pick_id_to_hash_);
+        }
 
         // Frame dt for keyboard camera (ms from last frame; first frame uses ~16ms)
         const float dt_sec = (dt > 0.0) ? static_cast<float>(dt) * 0.001f : (1.f / 60.f);
@@ -774,7 +651,7 @@ void VulkanRenderer::render_loop()
             ImGui::Begin("Blockflow", nullptr, flags);
 
             int64_t now = time(NULL) * 1000;
-            const float bps = total_blocks / (0.001f * (now - start) + 1e-3f);
+            const float bps = total_blocks_snap / (0.001f * (now - start) + 1e-3f);
 
             // Row 1: scroll speed (full-ish width)
             ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
@@ -785,13 +662,13 @@ void VulkanRenderer::render_loop()
             // Row 2: stats
             ImGui::Text("z: %.1f  (Up/Down)", eye_z);
             ImGui::SameLine(0.f, 24.f);
-            ImGui::Text("blocks: %d", total_blocks);
+            ImGui::Text("blocks: %d", total_blocks_snap);
             ImGui::SameLine(0.f, 24.f);
             ImGui::Text("rate: %1.2f/s", bps);
 
             ImGui::Separator();
             ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-            for (auto& block : blockQueue)
+            for (const auto& block : feed_snap)
             {
                 ImGui::PushID(block.hash.c_str());
                 const int shardId = block.chain_idx();
@@ -802,8 +679,9 @@ void VulkanRenderer::render_loop()
                 if (ImGui::Button(block.hash.c_str()))
                 {
                     set_selection(block.hash);
-                    if (selected_block.txns.empty() && !block.txns.empty())
-                        selected_block = block;
+                    // Immediate UI fill from feed snapshot if store is still catching up
+                    if (selected_ui.txns.empty() && !block.txns.empty())
+                        selected_ui = block;
                     ImGui::SetClipboardText(block.hash.c_str());
                 }
                 ImGui::PopID();
@@ -815,6 +693,12 @@ void VulkanRenderer::render_loop()
 
         // --- Inspector: right rail (opaque; does not cover center 3D) ---
         {
+            // Refresh selection snapshot for inspector (may have changed via feed click)
+            {
+                std::lock_guard<std::mutex> slock(selection_mutex_);
+                selected_ui = selected_block;
+            }
+
             ImGuiWindowFlags flags =
                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
                 ImGuiWindowFlags_AlwaysVerticalScrollbar;
@@ -824,29 +708,29 @@ void VulkanRenderer::render_loop()
             ImGui::Begin("Block", nullptr, flags);
 
             char url[512];
-            if (!selected_block.hash.empty())
+            if (!selected_ui.hash.empty())
             {
                 memset(url, 0, sizeof(url));
                 snprintf(url, sizeof(url), "https://explorer.alephium.org/blocks/%s",
-                         selected_block.hash.c_str());
+                         selected_ui.hash.c_str());
 
                 ImGui::Text("hash:");
                 ImGui::SameLine();
-                ImGui::TextLinkOpenURL(selected_block.hash.c_str(), url);
+                ImGui::TextLinkOpenURL(selected_ui.hash.c_str(), url);
 
-                ImGui::Text("height: %d", selected_block.height);
+                ImGui::Text("height: %d", selected_ui.height);
 
-                const int shardId = selected_block.chain_idx();
+                const int shardId = selected_ui.chain_idx();
                 ImGui::Text("chain:");
                 ImGui::SameLine();
                 ImGui::TextColored(
                     ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
-                    "[%d->%d]", selected_block.chainFrom, selected_block.chainTo);
+                    "[%d->%d]", selected_ui.chainFrom, selected_ui.chainTo);
 
                 ImGui::Separator();
-                ImGui::Text("Transactions (%d)", static_cast<int>(selected_block.txns.size()));
+                ImGui::Text("Transactions (%d)", static_cast<int>(selected_ui.txns.size()));
 
-                for (auto& tx : selected_block.txns)
+                for (auto& tx : selected_ui.txns)
                 {
                     memset(url, 0, sizeof(url));
                     snprintf(url, sizeof(url), "https://explorer.alephium.org/transactions/%s",

@@ -51,7 +51,7 @@ class PolarShardLayout
 public:
     explicit PolarShardLayout(LanePalette palette = LanePalette::default_alephium());
 
-    // chains[lane] = height -> hash -> AlphBlock (same structure as VulkanRenderer)
+    // chains[lane] = height -> hash -> AlphBlock (same structure as BlockScene)
     using HashToBlocks = std::map<std::string, AlphBlock>;
     using HeightToHash = std::map<uint64_t, HashToBlocks>;
 

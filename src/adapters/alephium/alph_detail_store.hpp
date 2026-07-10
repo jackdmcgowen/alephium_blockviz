@@ -1,7 +1,7 @@
 #pragma once
 
 // Full AlphBlock storage for inspector continuity (K14).
-// Populated at parse/Add_Block time alongside BlockGraph dual-write.
+// Populated at parse/BlockScene::add_block time alongside BlockGraph dual-write.
 #include "alph_block.hpp"
 #include "domain/block_graph.hpp"
 

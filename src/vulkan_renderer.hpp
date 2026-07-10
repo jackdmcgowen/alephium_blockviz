@@ -6,18 +6,15 @@
 #include <string>
 #include <thread>
 #include <mutex>
-#include <condition_variable>
-#include <deque>
-#include <map>
+#include <cstdint>
 
 #define GLM_FORCE_LEFT_HANDED
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
-#include "domain/block_graph.hpp"
 #include "domain/layout.hpp"
-#include "adapters/alephium/alph_detail_store.hpp"
+#include "domain/block_scene.hpp"
 #include "graphics/gpu_pub_lib.h"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
@@ -27,19 +24,20 @@
 #define NEAR_PLANE  ( 1.0f )
 #define FAR_PLANE ( 5000.0f )
 
+// PR6b: engine has no cJSON ingest. Domain lives in BlockScene (adapter writes, renderer reads).
 class VulkanRenderer
 {
 public:
     struct VertexNormal
     {
-        glm::vec3 pos;    // Vertex position
-        glm::vec3 normal; // Vertex normal
+        glm::vec3 pos;
+        glm::vec3 normal;
     };
 
     struct InstanceData
     {
-        glm::vec3 pos; // Block position
-        glm::vec3 color; //Block colors
+        glm::vec3 pos;
+        glm::vec3 color;
     };
 
     struct UniformBufferObject
@@ -62,9 +60,10 @@ public:
     VulkanRenderer();
     ~VulkanRenderer();
     void Init(void *hInstance, void *hwnd);
-    void Add_Block(cJSON* block);
-    // Remove a block by hash (main-chain verify failure). Thread-safe via dataMutex.
-    void Remove_Block(const std::string& hash);
+
+    // Domain scene (owned by app; set before Start / network). Not owned.
+    void set_scene(BlockScene* scene);
+
     // Thread-safe selection (network may call after replace).
     void set_selection(const std::string& hash);
     void clear_selection();
@@ -74,15 +73,14 @@ public:
     void Start();
     void Stop();
 
-    // PR6a: publish GPU draw data (instances + camera). Add_Block path unchanged.
-    // pick_map is frame-local instance index → block hash (not on FrameSubmit public type yet).
+    // PR6a: publish GPU draw data (instances + camera).
     void submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map);
 
 private:
     void resize();
-    static const int MAX_INSTANCES = 1024*1024; // Arbitrary large size
-    static const VertexNormal CUBE_VERTICES[8]; // 8 corners
-    static const uint16_t CUBE_INDICES[36]; // 12 triangles
+    static const int MAX_INSTANCES = 1024*1024;
+    static const VertexNormal CUBE_VERTICES[8];
+    static const uint16_t CUBE_INDICES[36];
 
     void *hInstance;
     void *hwnd;
@@ -108,7 +106,6 @@ private:
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
 
-
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingMemory;
 
@@ -116,7 +113,6 @@ private:
     VkImageView picker_imageView;
     VkDeviceMemory picker_memory;
 
-    //VkDescriptorSetLayout picker_descSetLayout;
     VkPipelineLayout picker_pipelineLayout;
     VkPipeline picker_pipeline;
 
@@ -131,7 +127,6 @@ private:
         bool            pendingPick = false;
         PickKind        pickKind = PickKind::None;
         uint64_t        value = 0;
-        // Instance index → block hash for the GPU instance list submitted this frame
         std::vector<std::string> pick_map;
     } inFlightFrames[ MAX_FRAMES_IN_FLIGHT ];
 
@@ -143,7 +138,7 @@ private:
     VkDeviceMemory indexBufferMemory;
     VkBuffer instanceBuffer;
     VkDeviceMemory instanceBufferMemory;
-    void* mappedInstanceMemory; // Persistent mapping
+    void* mappedInstanceMemory;
     size_t instanceCount;
     VkBuffer uniformBuffer;
     VkDeviceMemory uniformBufferMemory;
@@ -152,36 +147,22 @@ private:
 
     std::thread renderThread;
     std::mutex  renderMutex;
-    mutable std::mutex  dataMutex;
-    std::condition_variable dataCond;
+    mutable std::mutex  selection_mutex_; // selection only; scene has its own mutex
 
-    using HashToBlocks = std::map<std::string, AlphBlock>;
-    using HeightToHash = std::map<uint64_t, HashToBlocks>;
-    std::vector<HeightToHash> chains;
-
-    // Dual-write path (PR3): keep chains as source of truth for layout; graph/store warm up for peel
-    BlockGraph block_graph_;
-    AlphDetailStore detail_store_;
+    BlockScene* scene_ = nullptr;
     PolarShardLayout polar_layout_;
-    bool dual_write_validate_ = false; // set true to assert live hash-set parity each Add_Block
 
-    // Selection is hash-keyed (stable). full AlphBlock only refreshed when hash changes.
     std::string selected_hash_;
     AlphBlock   selected_block;
-    // Ephemeral hover (render thread); not sticky
     std::string hovered_hash_;
-    // Look-at target for selected block (Z-track camera; eye stays on axis)
     bool      has_look_target_ = false;
     glm::vec3 selected_look_pos_{ 0.f };
-    // Built each layout pass; snapshotted into inFlightFrames[i].pick_map for pick resolve
     std::vector<std::string> pick_id_to_hash_;
 
     void set_selection_unlocked(const std::string& hash);
     void clear_selection_unlocked();
-    void refresh_selection_if_needed(); // under dataMutex: refill detail if store caught up
+    void refresh_selection_if_needed(BlockScene& scene);
 
-    std::deque<AlphBlock> blockQueue;
-    int total_blocks;
     bool running;
     float elapsedSeconds;
     uint32_t width;
@@ -208,7 +189,6 @@ private:
     CameraUBO build_camera_ubo() const;
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
 
-    // PR6a double-buffer of published draw state (render thread)
     struct GpuFrameSlot
     {
         std::vector<GpuInstance> instances;
