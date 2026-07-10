@@ -107,6 +107,9 @@
     <ClInclude Include="..\src\config.h">
       <Filter>Header Files\host</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\app\app_identity.hpp">
+      <Filter>Header Files\app</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\app\blockflow_overlay.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>

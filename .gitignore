@@ -51,8 +51,10 @@ ARM64/
 alephium.a5b1eed0/
 graphics/x64/
 
-# vcpkg installed packages (manifest checkout; keep vcpkg.json)
+# vcpkg (keep vcpkg.json + vendored tool; ignore build products)
+# Manifest install root is vcpkg/installed (see install_deps.bat)
 vcpkg_installed/
+vcpkg/installed/
 vcpkg/buildtrees/
 vcpkg/packages/
 vcpkg/downloads/

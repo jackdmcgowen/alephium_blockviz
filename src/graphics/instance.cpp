@@ -4,18 +4,30 @@
 #include <windows.h>
 #include <vulkan/vulkan_win32.h>
 
-VkInstance create_instance()
+VkInstance create_instance(const SoftwareIdentity& application,
+                           const SoftwareIdentity& engine)
 {
-    VkInstance   instance;
+    VkInstance instance;
+
+    const char* app_name = (application.name && application.name[0])
+                               ? application.name
+                               : "App";
+    const char* eng_name = (engine.name && engine.name[0])
+                               ? engine.name
+                               : "Engine";
+
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Alephium BlockFlow";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "BlockvizEngine";
+    appInfo.pApplicationName = app_name;
+    appInfo.applicationVersion = VK_MAKE_VERSION(
+        application.version_major,
+        application.version_minor,
+        application.version_patch);
+    appInfo.pEngineName = eng_name;
     appInfo.engineVersion = VK_MAKE_VERSION(
-        BLOCKVIZ_ENGINE_VERSION_MAJOR,
-        BLOCKVIZ_ENGINE_VERSION_MINOR,
-        BLOCKVIZ_ENGINE_VERSION_PATCH);
+        engine.version_major,
+        engine.version_minor,
+        engine.version_patch);
     appInfo.apiVersion = kRequiredVulkanApiVersion;
 
     VkInstanceCreateInfo createInfo{};
@@ -47,14 +59,13 @@ VkInstance create_instance()
         throw std::runtime_error("Failed to create Vulkan instance");
     }
 
-    return(instance);
+    return instance;
 
 }   /* create_instance() */
 
 
 void destroy_instance(VkInstance instance)
 {
-vkDestroyInstance(instance, nullptr);
+    vkDestroyInstance(instance, nullptr);
 
 }   /* destroy_instance() */
-

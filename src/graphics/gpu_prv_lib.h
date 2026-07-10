@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gpu_pub_lib.h"
+
 #include <vulkan/vulkan.h>
 
 #include <stdexcept>
@@ -7,8 +9,9 @@
 
 #define MAX_SWAPCHAIN_IMAGES ( 3 )
 
-  //instance.cpp
-VkInstance create_instance();
+  //instance.cpp — app identity from host; engine identity from engine layer
+VkInstance create_instance(const SoftwareIdentity& application,
+                           const SoftwareIdentity& engine);
 void destroy_instance(VkInstance instance);
 
   //validation.cpp

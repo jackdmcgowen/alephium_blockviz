@@ -8,6 +8,16 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 
+// Vulkan-free name + semver (host and engine each own their identity).
+// Graphics packs with VK_MAKE_VERSION when building VkApplicationInfo.
+struct SoftwareIdentity
+{
+    const char* name          = "unknown";
+    uint32_t    version_major = 0;
+    uint32_t    version_minor = 0;
+    uint32_t    version_patch = 0;
+};
+
 struct EngineCreateInfo
 {
     void*    platform_instance = nullptr; // HINSTANCE
@@ -15,6 +25,9 @@ struct EngineCreateInfo
     uint32_t width             = 0;
     uint32_t height            = 0;
     bool     enable_validation = true;    // Debug default true
+
+    // Host-owned application identity → VkApplicationInfo application fields
+    SoftwareIdentity application{};
 };
 
 struct CameraUBO

@@ -41,6 +41,7 @@
     <ClInclude Include="..\src\alph_block.hpp" />
     <ClInclude Include="..\src\commands.h" />
     <ClInclude Include="..\src\config.h" />
+    <ClInclude Include="..\src\app\app_identity.hpp" />
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
     <ClInclude Include="..\src\app\camera_state.hpp" />
     <ClInclude Include="..\src\app\ui_chrome.hpp" />
@@ -117,16 +118,16 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg_installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg_installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <!-- Run from repo root so src/graphics/shaders/* and config.json resolve -->
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg_installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg_installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -144,7 +145,7 @@
       <AdditionalDependencies>blockviz_engine.lib;graphics.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg_installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
       <Message>Copy runtime DLLs to build output</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -167,7 +168,7 @@
       <AdditionalDependencies>blockviz_engine.lib;graphics.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg_installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
       <Message>Copy runtime DLLs to build output</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>

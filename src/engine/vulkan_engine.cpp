@@ -7,8 +7,10 @@
 #include <unordered_map>
 #include <string>
 #include "engine/vulkan_engine.hpp"
+#include "engine/engine_identity.hpp"
 #include "app/ui_chrome.hpp"
 #include "commands.h"
+#include "graphics/engine_requirements.hpp"
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
@@ -222,6 +224,7 @@ VulkanEngine::~VulkanEngine()
 
 void VulkanEngine::init_platform(void* hInst, void* hwnd_)
 {
+    // Prefer host calling initialize() with application identity filled in.
     EngineCreateInfo info{};
     info.platform_instance = hInst;
     info.window = hwnd_;
@@ -240,10 +243,13 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
 
     this->hInstance = hInst;
     this->hwnd = hwnd_;
-    instance = create_instance();
+
+    const SoftwareIdentity engine_id = blockviz_engine::identity();
+    instance = create_instance(info.application, engine_id);
     create_debug_messenger(instance);
     surface = create_win32_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
+    log_engine_startup(deviceProps, engine_id);
     create_device(instance, physicalDevice, &device, &graphicsQueue);
 
     swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;

@@ -4,12 +4,14 @@
 #include <stdlib.h>
 #include "commands.h"
 #include "config.h"
+#include "app/app_identity.hpp"
 #include "app/blockflow_overlay.hpp"
 #include "app/camera_state.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
 #include "adapters/alephium/network_poller.hpp"
 #include "alph_block.hpp"
+#include "graphics/gpu_pub_lib.h"
 #include <windows.h>
 
 // Window defaults (also defined in vulkan_engine.hpp for legacy; keep host self-contained)
@@ -78,7 +80,14 @@ int main()
 
     engine = create_blockviz_engine();
     overlay = new BlockflowOverlay(camera, *engine);
-    engine->init_platform(hInstance, hwnd);
+
+    // Host owns application identity; engine fills its own product identity.
+    EngineCreateInfo create_info{};
+    create_info.platform_instance = hInstance;
+    create_info.window = hwnd;
+    create_info.application = app_identity::make();
+    engine->initialize(create_info);
+
     engine->set_scene(&scene);
     engine->set_camera(&camera);
     engine->set_ui_overlay(overlay);

@@ -81,12 +81,15 @@ bool physical_device_meets_requirements(VkPhysicalDevice pd,
     return true;
 }
 
-void log_engine_startup(const VkPhysicalDeviceProperties& props)
+void log_engine_startup(const VkPhysicalDeviceProperties& props,
+                        const SoftwareIdentity& engine)
 {
-    std::printf("[engine] blockviz engine %d.%d.%d\n",
-                BLOCKVIZ_ENGINE_VERSION_MAJOR,
-                BLOCKVIZ_ENGINE_VERSION_MINOR,
-                BLOCKVIZ_ENGINE_VERSION_PATCH);
+    const char* eng_name = (engine.name && engine.name[0]) ? engine.name : "Engine";
+    std::printf("[engine] %s %u.%u.%u\n",
+                eng_name,
+                engine.version_major,
+                engine.version_minor,
+                engine.version_patch);
     std::printf("[engine] device: %s\n", props.deviceName);
     std::printf("[engine] apiVersion: %u.%u.%u  driverVersion: %u\n",
                 VK_VERSION_MAJOR(props.apiVersion),

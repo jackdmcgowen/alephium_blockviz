@@ -1,15 +1,13 @@
 #pragma once
 
 // Central Vulkan / engine requirements (E2). Keep in sync with create_device feature chain.
+// App/engine product names and versions live outside this TU (host / engine_identity).
+#include "gpu_pub_lib.h"
+
 #include <vulkan/vulkan.h>
 
 #include <cstddef>
 #include <cstdint>
-
-// App-facing engine semver (bump when public engine contract changes)
-#define BLOCKVIZ_ENGINE_VERSION_MAJOR 0
-#define BLOCKVIZ_ENGINE_VERSION_MINOR 2
-#define BLOCKVIZ_ENGINE_VERSION_PATCH 0
 
 inline constexpr uint32_t kRequiredVulkanApiVersion = VK_API_VERSION_1_3;
 
@@ -27,4 +25,6 @@ bool physical_device_meets_requirements(VkPhysicalDevice pd,
                                         char* fail_reason,
                                         size_t fail_reason_len);
 
-void log_engine_startup(const VkPhysicalDeviceProperties& props);
+// Logs selected GPU + engine product identity supplied by the engine layer.
+void log_engine_startup(const VkPhysicalDeviceProperties& props,
+                        const SoftwareIdentity& engine);

@@ -62,7 +62,7 @@ VkPhysicalDevice pick_physical_device(
     if (device_mem_props)
         *device_mem_props = best_mem;
 
-    log_engine_startup(best_props);
+    // Product identity is logged by the engine after pick (engine-owned version).
     return best;
 }
 
