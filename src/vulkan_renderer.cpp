@@ -560,6 +560,18 @@ void VulkanRenderer::render_loop()
 
         refresh_selection_if_needed();
 
+        // Look-at: aim at selected cube, keep eye on Z track (eye_z unchanged here)
+        has_look_target_ = false;
+        if (!selected_hash_.empty())
+        {
+            auto lit = block_positions.find(selected_hash_);
+            if (lit != block_positions.end())
+            {
+                selected_look_pos_ = lit->second;
+                has_look_target_ = true;
+            }
+        }
+
         pick_id_to_hash_.reserve(layout.placements.size());
         for (const PlacedBlock& placed : layout.placements)
         {
@@ -641,14 +653,50 @@ void VulkanRenderer::render_loop()
                 }
             }
 
-            // B) Selection deps (gold, slightly larger tips) — drawn last so they read on top
+            // B) Selection deps: present → gold arrow; missing → edge wire box + link line
+            const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
+            const float ghost_half = 1.0f; // match instance cube half-extent-ish
+
+            auto draw_selection_deps = [&](const AlphBlock& block)
+            {
+                auto to_it = block_positions.find(block.hash);
+                if (to_it == block_positions.end())
+                    return;
+                const glm::vec3& to_pos = to_it->second;
+                const int parent_lane = block.chain_idx();
+                int missing_i = 0;
+
+                for (const std::string& dep_hash : block.deps)
+                {
+                    auto from_it = block_positions.find(dep_hash);
+                    if (from_it != block_positions.end())
+                    {
+                        add_dep_arrow(from_it->second, to_pos, kSelectionArrowColor, 1.15f);
+                        continue;
+                    }
+
+                    // Ghost pose: same polar family as parent, one height step "back" in z
+                    const float angle =
+                        ((static_cast<float>(parent_lane) + 0.35f + 0.08f * static_cast<float>(missing_i)) /
+                         16.0f) *
+                        2.0f * 3.14159265f;
+                    const float radius = 20.0f * 0.9f;
+                    glm::vec3 ghost(
+                        radius * std::cos(angle),
+                        radius * std::sin(angle),
+                        to_pos.z + meters_per_height);
+                    debugDrawer.add_wire_box(ghost, ghost_half, kMissingOutline);
+                    debugDrawer.add_line(to_pos, ghost, kMissingOutline);
+                    ++missing_i;
+                }
+            };
+
             if (!selected_hash_.empty() && selected_block.hash == selected_hash_)
-                draw_deps_of(selected_block, kSelectionArrowColor, 1.15f);
+                draw_selection_deps(selected_block);
             else if (!selected_hash_.empty())
             {
-                // Hash sticky but body missing: try store/chains without full set_selection churn
                 if (auto d = detail_store_.get(selected_hash_))
-                    draw_deps_of(*d, kSelectionArrowColor, 1.15f);
+                    draw_selection_deps(*d);
             }
 
             // C) Hover preview deps (dim gold) if different from selection
@@ -1664,10 +1712,19 @@ void VulkanRenderer::update_uniform_buffer()
 
     float meters =  meters_per_second * elapsedSeconds;
 
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, eye_z - meters);
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, eye_z - meters + 1);
+    const float cam_z = eye_z - meters;
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, cam_z); // stay on Z track
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, cam_z + 1.0f);
 
     std::lock_guard<std::mutex> lk(renderMutex);
+
+    if (has_look_target_)
+    {
+        center = selected_look_pos_;
+        // Avoid degenerate lookAt if eye ≈ target
+        if (glm::length(center - eye) < 0.05f)
+            center = eye + glm::vec3(0.0f, 0.0f, 1.0f);
+    }
 
     ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, -1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );

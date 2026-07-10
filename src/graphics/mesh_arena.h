@@ -6,13 +6,13 @@
 
 class DebugDrawer;
 
-// Large persistently mapped VBO/IBO for dynamic debug (and future) meshes.
-// Frame model: upload full drawer stream each frame; one indexed draw.
+// Persistently mapped debug geometry: triangle meshes + LINE_LIST edges (wire boxes).
 class MeshArena
 {
 public:
-    static constexpr uint32_t kDefaultMaxVertices = 1u << 20; // ~1M
+    static constexpr uint32_t kDefaultMaxVertices = 1u << 20;
     static constexpr uint32_t kDefaultMaxIndices  = 1u << 21;
+    static constexpr uint32_t kDefaultMaxLineVerts = 1u << 18;
 
     MeshArena() = default;
     ~MeshArena();
@@ -25,21 +25,18 @@ public:
                 VkFormat color_format,
                 VkFormat depth_format,
                 uint32_t max_vertices = kDefaultMaxVertices,
-                uint32_t max_indices  = kDefaultMaxIndices);
+                uint32_t max_indices  = kDefaultMaxIndices,
+                uint32_t max_line_verts = kDefaultMaxLineVerts);
 
     void destroy();
 
-    // Memcpy used range from drawer into mapped buffers.
     void upload(const DebugDrawer& drawer);
 
-    // Record draw inside an existing dynamic rendering scope (does not begin/end rendering).
-    // Binds pipeline, push viewProj, draws total index_count from last upload.
+    // Draw triangles then lines inside an existing dynamic rendering scope.
     void draw(VkCommandBuffer cmd, const glm::mat4& view_proj);
 
-    uint32_t uploaded_index_count() const { return uploaded_index_count_; }
-
 private:
-    bool create_pipeline();
+    bool create_pipelines();
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties* mem_props_ = nullptr;
@@ -48,8 +45,10 @@ private:
 
     uint32_t max_vertices_ = 0;
     uint32_t max_indices_  = 0;
+    uint32_t max_line_verts_ = 0;
     uint32_t uploaded_index_count_ = 0;
     uint32_t uploaded_vertex_count_ = 0;
+    uint32_t uploaded_line_count_ = 0;
 
     VkBuffer       vertex_buffer_ = VK_NULL_HANDLE;
     VkDeviceMemory vertex_memory_ = VK_NULL_HANDLE;
@@ -59,6 +58,11 @@ private:
     VkDeviceMemory index_memory_ = VK_NULL_HANDLE;
     void*          index_mapped_ = nullptr;
 
+    VkBuffer       line_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory line_memory_ = VK_NULL_HANDLE;
+    void*          line_mapped_ = nullptr;
+
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
-    VkPipeline       pipeline_        = VK_NULL_HANDLE;
+    VkPipeline       tri_pipeline_  = VK_NULL_HANDLE;
+    VkPipeline       line_pipeline_ = VK_NULL_HANDLE;
 };

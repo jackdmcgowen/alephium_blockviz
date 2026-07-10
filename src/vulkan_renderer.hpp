@@ -165,6 +165,9 @@ private:
     AlphBlock   selected_block;
     // Ephemeral hover (render thread); not sticky
     std::string hovered_hash_;
+    // Look-at target for selected block (Z-track camera; eye stays on axis)
+    bool      has_look_target_ = false;
+    glm::vec3 selected_look_pos_{ 0.f };
     // Built each layout pass; snapshotted into inFlightFrames[i].pick_map for pick resolve
     std::vector<std::string> pick_id_to_hash_;
 

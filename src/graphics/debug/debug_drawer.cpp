@@ -11,6 +11,37 @@ void DebugDrawer::clear()
 {
     verts_.clear();
     indices_.clear();
+    line_verts_.clear();
+}
+
+void DebugDrawer::add_line(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color)
+{
+    line_verts_.push_back({ a, color });
+    line_verts_.push_back({ b, color });
+}
+
+void DebugDrawer::add_wire_box(const glm::vec3& center, float half_extent, const glm::vec4& color)
+{
+    // 8 corners of AABB; 12 edges only (no face diagonals)
+    const float s = half_extent;
+    const glm::vec3 c = center;
+    const glm::vec3 p[8] = {
+        c + glm::vec3(-s, -s, -s),
+        c + glm::vec3( s, -s, -s),
+        c + glm::vec3( s,  s, -s),
+        c + glm::vec3(-s,  s, -s),
+        c + glm::vec3(-s, -s,  s),
+        c + glm::vec3( s, -s,  s),
+        c + glm::vec3( s,  s,  s),
+        c + glm::vec3(-s,  s,  s),
+    };
+    static const int edges[12][2] = {
+        {0,1},{1,2},{2,3},{3,0}, // bottom
+        {4,5},{5,6},{6,7},{7,4}, // top
+        {0,4},{1,5},{2,6},{3,7}, // verticals
+    };
+    for (const auto& e : edges)
+        add_line(p[e[0]], p[e[1]], color);
 }
 
 void DebugDrawer::append_tri(uint32_t i0, uint32_t i1, uint32_t i2)
