@@ -27,9 +27,6 @@
     <ClCompile Include="src\config.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\dag.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\vulkan_renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -57,9 +54,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\config.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\dag.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\vulkan_renderer.hpp">

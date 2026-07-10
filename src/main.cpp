@@ -64,6 +64,7 @@ int main()
 {
     int curr_heights[4][4];
     int64_t lastPollTs;
+    // TODO(PR9): dead — never filled with live blocks; remove with dual-write cleanup
     std::vector<cJSON*> blockQueue;
     int64_t lastAddTime = 0;
 
