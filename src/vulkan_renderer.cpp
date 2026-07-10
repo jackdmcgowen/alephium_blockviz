@@ -3,9 +3,14 @@
 #include <stdexcept>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
+#include <unordered_map>
 #include <cjson/cJSON.h>
 #include "vulkan_renderer.hpp"
 #include "commands.h"
+
+#include "graphics/debug/debug_drawer.h"
+#include "graphics/mesh_arena.h"
 
 #include "gpu_prv_lib.h"
 
@@ -39,6 +44,9 @@ const VkExtent2D PICKING_EXT = { 1, 1 }; //smallest pow2 most drivers like
 static uint32_t pickMouseX;
 static uint32_t pickMouseY;
 
+static DebugDrawer debugDrawer;
+static MeshArena* meshArena = nullptr;
+glm::mat4 viewProj;
 
 static const float FOV = glm::radians(45.0f);
 
@@ -235,7 +243,7 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
-    info.PipelineRenderingCreateInfo.depthAttachmentFormat = find_depth_format();
+    info.PipelineRenderingCreateInfo.depthAttachmentFormat = depthFormat;
     info.Subpass = 0;
     info.MinImageCount = 2;
     info.ImageCount = MAX_FRAMES_IN_FLIGHT;
@@ -243,7 +251,14 @@ void VulkanRenderer::Init(void *hInstance, void *hwnd)
     info.Allocator = NULL;
     info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init( &info );
-    
+
+
+    meshArena = new MeshArena();
+    if (!meshArena->create(device, &deviceMemProps, swapchainImageFormat, depthFormat))
+    {
+        printf("Failed to create MeshArena for debug drawing\n");
+    }
+
 }   /* Init() */
 
 
@@ -335,10 +350,13 @@ void VulkanRenderer::render_loop()
 
         instanceCount = 0;
 
-        //uint8_t chainIndex = alph_block.chain_idx();
+        // hash -> world position for this frame's layout (for dep arrows)
+        std::unordered_map<std::string, glm::vec3> block_positions;
+        std::unordered_map<std::string, uint8_t>   block_shards;
+        block_positions.reserve(4096);
+        block_shards.reserve(4096);
 
-        //auto& heightMap = chains[chainIndex];
-        //auto& blocksAtHeight = heightMap[alph_block.height];
+        debugDrawer.clear();
 
         for( auto& heightMap : chains)
         {
@@ -348,7 +366,6 @@ void VulkanRenderer::render_loop()
                 for (auto& hashesAtBlocks : hashesAtHeight.second)
                 {
                     auto& block = hashesAtBlocks.second;
-                    //int64_t block_time = block.timestamp;
                     int shardId = block.chain_idx();
                     if (start_height[shardId] == 0 )
                     {
@@ -359,14 +376,16 @@ void VulkanRenderer::render_loop()
                         float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
                         float radius = 20.0f + block_index * meters_per_height;
 
-                        //float z = -static_cast<float>(block_time - start) / 1000.0f;
-                        float z = -static_cast<float>( block.height - start_height[shardId] ) * meters_per_height;// / 1000.0f;
+                        float z = -static_cast<float>( block.height - start_height[shardId] ) * meters_per_height;
                         glm::vec3 pos(
                             radius * cosf(angle),
                             radius * sinf(angle),
                             z
                         );
                         InstanceData inst = { pos, SHARD_COLORS[shardId] };
+
+                        block_positions[block.hash] = pos;
+                        block_shards[block.hash]    = static_cast<uint8_t>(shardId);
 
                         if (lastPickedID == instanceCount)
                         {
@@ -383,12 +402,70 @@ void VulkanRenderer::render_loop()
                         {
                             printf("Instance buffer full\n");
                         }
-
-                        //++total_blocks;
-                        //blockQueue.push_front(block);
-                        //blockMap.erase(it);
                     }
                     block_index++;
+                }
+            }
+        }
+
+        // Dependency arrows for every chain group [from,to] in 0..3 x 0..3 (all 16 shards).
+        // Draws every resolved dep edge (same-chain + cross-chain). uint32 indices allow full coverage.
+        {
+            const float tip_len = std::max(0.4f, meters_per_height * 0.25f);
+            const float tip_rad = std::max(0.12f, meters_per_height * 0.06f);
+            const float shaft_r = tip_rad * 0.35f;
+            // Slightly fewer segments for bulk deps (still a readable cone; saves verts).
+            constexpr uint32_t kDepRadial   = 8;
+            constexpr uint32_t kMaxDepArrows = 50000;
+            uint32_t arrow_count = 0;
+
+            for (uint8_t chain_from = 0; chain_from < ALPH_NUM_GROUPS; ++chain_from)
+            {
+                for (uint8_t chain_to = 0; chain_to < ALPH_NUM_GROUPS; ++chain_to)
+                {
+                    const uint8_t shard_id = static_cast<uint8_t>(chain_from * ALPH_NUM_GROUPS + chain_to);
+                    if (shard_id >= chains.size())
+                        continue;
+
+                    const HeightToHash& heightMap = chains[shard_id];
+                    for (const auto& hashesAtHeight : heightMap)
+                    {
+                        for (const auto& hashesAtBlocks : hashesAtHeight.second)
+                        {
+                            if (arrow_count >= kMaxDepArrows)
+                                break;
+
+                            const AlphBlock& block = hashesAtBlocks.second;
+                            auto to_it = block_positions.find(block.hash);
+                            if (to_it == block_positions.end())
+                                continue;
+
+                            const glm::vec3& to_pos = to_it->second;
+                            const glm::vec3& dest_c = SHARD_COLORS[shard_id % 16];
+
+                            for (const std::string& dep_hash : block.deps)
+                            {
+                                if (arrow_count >= kMaxDepArrows)
+                                    break;
+
+                                auto from_it = block_positions.find(dep_hash);
+                                if (from_it == block_positions.end())
+                                    continue;
+
+                                const glm::vec3& from_pos = from_it->second;
+                                auto from_shard_it = block_shards.find(dep_hash);
+                                const bool cross_chain =
+                                    (from_shard_it != block_shards.end() && from_shard_it->second != shard_id);
+
+                                // Cross-chain: solid destination color; same-chain: dimmer
+                                const float alpha = cross_chain ? 0.90f : 0.55f;
+                                const glm::vec4 color(dest_c.r, dest_c.g, dest_c.b, alpha);
+
+                                debugDrawer.add_arrow(from_pos, to_pos, color, tip_len, tip_rad, shaft_r, kDepRadial);
+                                ++arrow_count;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -594,26 +671,35 @@ void VulkanRenderer::render()
 
     uint64_t    signalValues[] = { s_frameCounter + 1, 0 };
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &imageAvailableSemaphore;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-    submitInfo.signalSemaphoreCount = 2;
-    VkSemaphore signalSemaphores[] = { timeline, renderFinishedSemaphore };
-    submitInfo.pSignalSemaphores = signalSemaphores;
+    VkCommandBufferSubmitInfo cbSubmitInfo{};
+    cbSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cbSubmitInfo.commandBuffer = commandBuffer;
 
-    VkTimelineSemaphoreSubmitInfo timelineSubmit = {};
-    timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSubmit.signalSemaphoreValueCount = 2;
-    timelineSubmit.pSignalSemaphoreValues = signalValues;
+    VkSemaphoreSubmitInfo waitInfo{};
+    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    waitInfo.semaphore = imageAvailableSemaphore;
 
-    submitInfo.pNext = &timelineSubmit;
+    VkSemaphoreSubmitInfo signalInfo[2]{};
+    signalInfo[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalInfo[0].semaphore = timeline;
+    signalInfo[0].value = signalValues[0];
+    signalInfo[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE ) != VK_SUCCESS)
+    signalInfo[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalInfo[1].semaphore = renderFinishedSemaphore;
+    signalInfo[1].value = signalValues[1];
+    signalInfo[1].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo2 submitInfo2{};
+    submitInfo2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submitInfo2.commandBufferInfoCount = 1;
+    submitInfo2.pCommandBufferInfos = &cbSubmitInfo;
+    submitInfo2.signalSemaphoreInfoCount = 2;
+    submitInfo2.pSignalSemaphoreInfos = signalInfo;
+    submitInfo2.waitSemaphoreInfoCount = 1;
+    submitInfo2.pWaitSemaphoreInfos = &waitInfo;
+
+    if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo2, VK_NULL_HANDLE) != VK_SUCCESS)
     {
         throw std::runtime_error("Failed to submit draw command buffer");
     }
@@ -625,7 +711,6 @@ void VulkanRenderer::render()
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain;
     presentInfo.pImageIndices = &imageIndex;
-
 
     vkQueuePresentKHR(graphicsQueue, &presentInfo);
 
@@ -703,7 +788,7 @@ void VulkanRenderer::resize()
 
 void VulkanRenderer::create_depth_resources()
 {
-    VkFormat depthFormat = find_depth_format();
+    depthFormat = find_depth_format();
     create_image(
         device, 
         width, height,
@@ -749,28 +834,6 @@ void VulkanRenderer::create_descriptor_set_layout()
     }
 
 }   /* create_descriptor_set_layout() */
-
-
-static void load_shader_source( const char * const   filename,
-                                std::vector<uint8_t> &src )
-{
-    char dirpath[128] = { 0 };
-
-    snprintf(dirpath, 128, "src/graphics/shaders/%s", filename);
-
-    FILE* file = fopen(dirpath, "rb");
-    if (!file) {
-        throw std::runtime_error("Failed to load shader");
-    }
-
-    fseek(file, 0, SEEK_END);
-    long sz = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    src.resize(sz);
-    fread(src.data(), 1, sz, file);
-    fclose(file);
-
-}   /* load_shader_source() */
 
 
 void VulkanRenderer::create_picker_resources()
@@ -948,7 +1011,7 @@ void VulkanRenderer::create_picker_pipeline()
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachmentFormats = &colorFormat;
-    renderingInfo.depthAttachmentFormat = find_depth_format();
+    renderingInfo.depthAttachmentFormat = depthFormat;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1144,7 +1207,7 @@ void VulkanRenderer::create_graphics_pipeline()
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachmentFormats = &swapchainImageFormat;
-    renderingInfo.depthAttachmentFormat = find_depth_format();
+    renderingInfo.depthAttachmentFormat = depthFormat;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1359,8 +1422,10 @@ void VulkanRenderer::update_uniform_buffer()
 
     std::lock_guard<std::mutex> lk(renderMutex);
 
-    ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
+    ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, -1.0f, 0.0f));
     ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );
+
+    viewProj = ubo.proj * ubo.view;
 
     ubo.viewPos = eye;
     ubo.lightPos = center;
@@ -1578,12 +1643,20 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     vkCmdBindIndexBuffer(buffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
+    // Debug meshes share the main pass (depth LOAD) — single batched draw of frame stream
+    if (meshArena)
+    {
+        meshArena->upload(debugDrawer);
+        meshArena->draw(buffer, viewProj);
+    }
+
     ImDrawData* data = ImGui::GetDrawData();
     if (data)
     {
         ImGui_ImplVulkan_RenderDrawData(data, buffer);
     }
     vkCmdEndRendering(buffer);
+
 
     //transition swapchain image to present
     pipeline_barrier(buffer, swapchainImages[imageIndex],
@@ -1646,6 +1719,13 @@ void VulkanRenderer::cleanup()
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    if (meshArena)
+    {
+        meshArena->destroy();
+        delete meshArena;
+        meshArena = nullptr;
+    }
 
     if (mappedInstanceMemory)
     {

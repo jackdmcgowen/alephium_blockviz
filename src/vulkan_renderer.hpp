@@ -86,6 +86,7 @@ private:
     std::vector<VkImageView> swapchainImageViews;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     VkImage depthImage;
+    VkFormat depthFormat;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
     VkDescriptorSetLayout descriptorSetLayout;
