@@ -102,11 +102,10 @@ static bool s_resized;
 // Layout spacing (not camera; still engine-side until layout owns params fully)
 static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 
-// One-shot look-at: full aim on select, then release to forward
-static constexpr float kLookOmega         = 10.0f;  // slerp ease rate (higher = snappier)
-static constexpr float kLookArriveDot     = 0.998f; // release glance when this close to target
+// Camera rotate-into (selection) / rotate-home (right-click clear)
+static constexpr float kLookOmega = 10.0f; // slerp ease rate (higher = snappier)
 static const glm::vec3 kCamUp(0.0f, -1.0f, 0.0f);
-static const glm::vec3 kCamForward(0.0f, 0.0f, 1.0f);
+static const glm::vec3 kCamForward(0.0f, 0.0f, 1.0f); // original free view
 
 static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
     VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
@@ -311,7 +310,7 @@ void VulkanEngine::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
-    cancel_look_glance();
+    end_look_aim();
     if (scene_)
         scene_->detail_store().set_full_detail_pin({});
 }
@@ -470,7 +469,7 @@ void VulkanEngine::render_loop()
                 selected_detail_local = selected_block;
             }
 
-            // Selection world pos for one-shot glance (not continuous lock)
+            // Selection world pos → rotate-into aim (frozen dir, held until right-click)
             has_look_target_ = false;
             if (!selected_hash_local.empty())
             {
@@ -505,11 +504,10 @@ void VulkanEngine::render_loop()
             }
 
             const glm::vec3 eye = camera_eye();
-            // New selection with a layout pos → one-shot full lookAt angle, then release
-            if (has_look_target_ && selected_hash_local != look_glance_hash_)
-                begin_look_glance(eye, selected_look_pos_, selected_hash_local);
-            else if (selected_hash_local.empty() && !look_glance_hash_.empty())
-                cancel_look_glance();
+            if (has_look_target_ && selected_hash_local != look_aim_hash_)
+                begin_look_aim(eye, selected_look_pos_, selected_hash_local);
+            else if (selected_hash_local.empty() && look_engaged_)
+                end_look_aim();
             update_look_direction(last_frame_dt_sec_, eye);
             const CameraUBO camera = build_camera_ubo();
             FrameSubmit submit{};
@@ -1513,8 +1511,8 @@ glm::vec3 VulkanEngine::camera_eye() const
     return glm::vec3(0.0f, 0.0f, cam_z);
 }
 
-void VulkanEngine::begin_look_glance(const glm::vec3& eye, const glm::vec3& target_pos,
-                                     const std::string& hash)
+void VulkanEngine::begin_look_aim(const glm::vec3& eye, const glm::vec3& target_pos,
+                                  const std::string& hash)
 {
     if (hash.empty())
         return;
@@ -1526,24 +1524,25 @@ void VulkanEngine::begin_look_glance(const glm::vec3& eye, const glm::vec3& targ
     else
         dir /= len;
 
-    // Full hard-lookAt angle, frozen at start (do not track cube afterward)
-    look_glance_dir_ = dir;
-    look_glance_hash_ = hash;
-    look_glance_active_ = true;
+    // Full hard-lookAt angle, frozen at click (hold until right-click / clear)
+    look_aim_dir_ = dir;
+    look_aim_hash_ = hash;
+    look_engaged_ = true;
 }
 
-void VulkanEngine::cancel_look_glance()
+void VulkanEngine::end_look_aim()
 {
-    look_glance_active_ = false;
-    look_glance_hash_.clear();
+    look_engaged_ = false;
+    look_aim_hash_.clear();
+    // look_dir_ slerps toward kCamForward in update_look_direction
 }
 
 void VulkanEngine::update_look_direction(float dt, const glm::vec3& eye)
 {
     (void)eye;
 
-    // While glancing: desired = full lock angle; after release: free forward
-    glm::vec3 desired_dir = look_glance_active_ ? look_glance_dir_ : kCamForward;
+    // Engaged: hold full rotate-into aim. Disengaged: rotate home to original +Z.
+    glm::vec3 desired_dir = look_engaged_ ? look_aim_dir_ : kCamForward;
     const float dlen = glm::length(desired_dir);
     if (dlen < 1e-4f)
         desired_dir = kCamForward;
@@ -1571,22 +1570,12 @@ void VulkanEngine::update_look_direction(float dt, const glm::vec3& eye)
     if (dot > 0.9995f)
     {
         look_dir_ = desired_dir;
-    }
-    else
-    {
-        const glm::quat q_delta = glm::rotation(from, desired_dir);
-        const glm::quat q_step = glm::slerp(glm::identity<glm::quat>(), q_delta, alpha);
-        look_dir_ = glm::normalize(q_step * from);
+        return;
     }
 
-    // Arrived at full lookAt angle → release lock; next frames ease back to forward
-    if (look_glance_active_)
-    {
-        const float gdot =
-            glm::clamp(glm::dot(glm::normalize(look_dir_), look_glance_dir_), -1.0f, 1.0f);
-        if (gdot >= kLookArriveDot)
-            look_glance_active_ = false;
-    }
+    const glm::quat q_delta = glm::rotation(from, desired_dir);
+    const glm::quat q_step = glm::slerp(glm::identity<glm::quat>(), q_delta, alpha);
+    look_dir_ = glm::normalize(q_step * from);
 }
 
 CameraUBO VulkanEngine::build_camera_ubo() const
@@ -1972,7 +1961,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             mx < static_cast<float>(width) - inspector_w &&
             my < static_cast<float>(height) - toolbar_h;
 
-        // Right-click scene: unselect + ease camera forward (no pick pass)
+        // Right-click scene: clear selection + rotate camera home to original forward
         if (over_scene && io.MouseClicked[ImGuiMouseButton_Right])
             clear_selection();
 
