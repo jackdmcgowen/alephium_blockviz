@@ -13,8 +13,11 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Source Files\imgui">
-      <UniqueIdentifier>{945d72ed-3a8c-4be2-bff3-295708be9572}</UniqueIdentifier>
+    <Filter Include="Source Files\host">
+      <UniqueIdentifier>{d1e2f3a4-b5c6-7890-def0-1234567890ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\app">
+      <UniqueIdentifier>{e2f3a4b5-c6d7-8901-ef01-234567890abc}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\domain">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
@@ -25,21 +28,45 @@
     <Filter Include="Source Files\engine">
       <UniqueIdentifier>{c3d4e5f6-a7b8-9012-cdef-123456789012}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\imgui">
+      <UniqueIdentifier>{945d72ed-3a8c-4be2-bff3-295708be9572}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\host">
+      <UniqueIdentifier>{f3a4b5c6-d7e8-9012-f012-34567890abcd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\app">
+      <UniqueIdentifier>{a4b5c6d7-e8f9-0123-0123-4567890abcde}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\domain">
+      <UniqueIdentifier>{b5c6d7e8-f9a0-1234-1234-567890abcdef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\adapters">
+      <UniqueIdentifier>{c6d7e8f9-a0b1-2345-2345-67890abcdef0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\engine">
+      <UniqueIdentifier>{d7e8f9a0-b1c2-3456-3456-7890abcdef01}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\host</Filter>
     </ClCompile>
     <ClCompile Include="src\commands.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\host</Filter>
     </ClCompile>
     <ClCompile Include="src\config.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\host</Filter>
     </ClCompile>
-    <ClCompile Include="src\engine\vulkan_engine.cpp">
-      <Filter>Source Files\engine</Filter>
+    <ClCompile Include="src\app\blockflow_overlay.cpp">
+      <Filter>Source Files\app</Filter>
     </ClCompile>
     <ClCompile Include="src\domain\block_graph.cpp">
+      <Filter>Source Files\domain</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\block_scene.cpp">
+      <Filter>Source Files\domain</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\layout.cpp">
       <Filter>Source Files\domain</Filter>
     </ClCompile>
     <ClCompile Include="src\adapters\alephium\alph_detail_store.cpp">
@@ -54,8 +81,8 @@
     <ClCompile Include="src\adapters\alephium\network_poller.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="src\domain\layout.cpp">
-      <Filter>Source Files\domain</Filter>
+    <ClCompile Include="src\engine\vulkan_engine.cpp">
+      <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\imgui</Filter>
@@ -78,34 +105,49 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\commands.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\host</Filter>
     </ClInclude>
     <ClInclude Include="src\config.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\host</Filter>
     </ClInclude>
-    <ClInclude Include="src\engine\vulkan_engine.hpp">
-      <Filter>Source Files\engine</Filter>
+    <ClInclude Include="src\app\blockflow_overlay.hpp">
+      <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="src\alph_block.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\app\camera_state.hpp">
+      <Filter>Header Files\app</Filter>
+    </ClInclude>
+    <ClInclude Include="src\app\ui_chrome.hpp">
+      <Filter>Header Files\app</Filter>
+    </ClInclude>
+    <ClInclude Include="src\app\ui_snapshot.hpp">
+      <Filter>Header Files\app</Filter>
     </ClInclude>
     <ClInclude Include="src\domain\block_graph.hpp">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\domain</Filter>
     </ClInclude>
-    <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\adapters\alephium\network_poller.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\domain\block_scene.hpp">
+      <Filter>Header Files\domain</Filter>
     </ClInclude>
     <ClInclude Include="src\domain\layout.hpp">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\alph_block.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\network_poller.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="src\engine\vulkan_engine.hpp">
+      <Filter>Header Files\engine</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
