@@ -30,10 +30,13 @@ const char* const commandTable[] =
         [ CMD_BLOCKFLOW_BLOCKS_WITH_EVENTS_INTERVAL  ] = "%s/blockflow/blocks-with-events/?fromTs=%lld&toTs=%lld" ,
         [ CMD_BLOCKFLOW_CHAIN_INFO                   ] = "%s/blockflow/chain-info/?fromGroup=%d&toGroup=%d"       ,
         [ CMD_BLOCKFLOW_HASHES                       ] = "%s/blockflow/hashes/?fromGroup=%d&toGroup=%d&height=%d" ,
-        [ CMD_BLOCKFLOW_HEADERS_BLOCKHASH            ] = "%s/blockflow/headers/%.64s"
+        [ CMD_BLOCKFLOW_HEADERS_BLOCKHASH            ] = "%s/blockflow/headers/%.64s"                            ,
+        [ CMD_BLOCKFLOW_IS_BLOCK_IN_MAIN_CHAIN       ] = "%s/blockflow/is-block-in-main-chain?blockHash=%.64s"
     };
 static_assert( sizeof(commandTable) / sizeof(commandTable[0]) == CMD_COUNT, "Command table size mismatch" );
 
+/* URL buffers throughout this file must be at least this size */
+#define CMD_URL_BUF 256
 
 void build_request
     (
@@ -44,7 +47,7 @@ void build_request
 {
 va_list                 argv;
 va_start               ( argv, format );
-vsnprintf( url, 128, format, argv );
+vsnprintf( url, CMD_URL_BUF, format, argv );
 va_end( argv );
 
 }   /* build_request() */
@@ -168,7 +171,7 @@ cJSON *get_infos_chain_params
     void
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -186,7 +189,7 @@ cJSON *get_infos_node
     void
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -204,7 +207,7 @@ cJSON *get_infos_self_clique
     void
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -222,7 +225,7 @@ cJSON *get_infos_version
     void
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -241,7 +244,7 @@ cJSON *get_blockflow_chain_info
     int                 toGroup
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -261,7 +264,7 @@ cJSON *get_blockflow_hashes
     int                 height
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -280,7 +283,7 @@ cJSON* get_blockflow_blocks
     int64_t             toTs
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -299,7 +302,7 @@ cJSON* get_blockflow_blocks_with_events
     int64_t             toTs        /* timestamp in milliseconds    */
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -317,7 +320,7 @@ cJSON* get_blockflow_blocks_blockhash
     const char * const  blockHash
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -335,7 +338,7 @@ cJSON* get_blockflow_blocks_with_events_blockhash
     const char * const  blockHash
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -352,7 +355,7 @@ cJSON* get_blockflow_headers_blockhash
     const char * const  blockHash
     )
 {
-char				    url[128];
+char url[CMD_URL_BUF];
 ResponseData	        response = { 0 };
 cJSON                  *obj;
 
@@ -363,6 +366,64 @@ obj = read_response( &response );
 return( obj );
 
 }   /* get_blockflow_headers_blockhash() */
+
+
+int get_blockflow_is_block_in_main_chain
+    (
+    const char * const  blockHash,
+    int                *transport_ok
+    )
+{
+char                    url[CMD_URL_BUF];
+ResponseData            response = { 0 };
+cJSON                  *obj;
+int                     is_main = 0;
+
+if( transport_ok )
+    *transport_ok = 0;
+
+if( !blockHash || !blockHash[0] )
+    return( 0 );
+
+build_request_1( CMD_BLOCKFLOW_IS_BLOCK_IN_MAIN_CHAIN, blockHash );
+write_url( url, &response );
+
+if( response.httpCode != 200 || !response.buffer )
+    {
+    if( response.buffer )
+        free( response.buffer );
+    return( 0 );
+    }
+
+obj = cJSON_ParseWithLength( response.buffer, response.length );
+free( response.buffer );
+response.buffer = NULL;
+
+if( !obj )
+    {
+    printf( "is-block-in-main-chain: JSON parse failed\n" );
+    return( 0 );
+    }
+
+if( transport_ok )
+    *transport_ok = 1;
+
+if( cJSON_IsTrue( obj ) )
+    is_main = 1;
+else if( cJSON_IsFalse( obj ) )
+    is_main = 0;
+else
+    {
+    printf( "is-block-in-main-chain: unexpected JSON type\n" );
+    if( transport_ok )
+        *transport_ok = 0;
+    is_main = 0;
+    }
+
+cJSON_Delete( obj );
+return( is_main );
+
+}   /* get_blockflow_is_block_in_main_chain() */
 
 
 int get_height

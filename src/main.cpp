@@ -5,9 +5,11 @@
 #include <stdlib.h>
 #include <time.h>
 #include <vector>
+#include <string>
 #include "commands.h"
 #include "config.h"
 #include "vulkan_renderer.hpp"
+#include "adapters/alephium/main_chain_cache.hpp"
 #include <windows.h>
 
 extern "C" CURL* curl;
@@ -16,6 +18,7 @@ const char * baseUrl;
 static volatile bool keepRunning = true; // Global exit flag
 
 static VulkanRenderer renderer;
+static MainChainCache main_chain_cache;
 
 static void format_output(cJSON* json)
 {
@@ -149,11 +152,12 @@ int main()
 
         if (now - lastPollTs >= (ALPH_TARGET_BLOCK_SECONDS * 1000 )) // 8 seconds
         {
-            //get_heights(curr_heights);
             printf("\nPolling blockflow from %lld to %lld\n", lastPollTs, now);
-            ResponseData response = { NULL, 0, 0, 0 };
-            cJSON* obj = get_blockflow_blocks_with_events(lastPollTs - (ALPH_TARGET_BLOCK_SECONDS * 1000), now);
 
+            // Tips for deep vs hot zone (also used by ensure path)
+            main_chain_cache.refresh_tips();
+
+            cJSON* obj = get_blockflow_blocks_with_events(lastPollTs - (ALPH_TARGET_BLOCK_SECONDS * 1000), now);
 
             if (obj)
             {
@@ -161,7 +165,7 @@ int main()
                 if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
                 {
                     int count = cJSON_GetArraySize(blocksAndEvents);
-                    int totalBlocks = 0;
+                    int seen = 0, added = 0, skipped_not_main = 0, skipped_bad = 0;
 
                     for (int i = 0; i < count; i++)
                     {
@@ -173,16 +177,42 @@ int main()
                             {
                                 cJSON* iter = cJSON_GetArrayItem(shard, j);
                                 GET_OBJECT_ITEM( iter, block );
-                                if (block)
+                                if (!block)
+                                    continue;
+
+                                ++seen;
+
+                                GET_OBJECT_ITEM(block, hash);
+                                GET_OBJECT_ITEM(block, height);
+                                GET_OBJECT_ITEM(block, chainFrom);
+                                GET_OBJECT_ITEM(block, chainTo);
+                                if (!hash || !cJSON_IsString(hash) || !hash->valuestring ||
+                                    !height || !chainFrom || !chainTo)
                                 {
-                                    renderer.Add_Block(block);
-                                    totalBlocks++;
+                                    ++skipped_bad;
+                                    continue;
                                 }
 
+                                const int h = height->valueint;
+                                const int cf = chainFrom->valueint;
+                                const int ct = chainTo->valueint;
+                                const std::string block_hash = hash->valuestring;
+
+                                // Hold out until main-chain (retry next poll). Positives cached permanently.
+                                if (!main_chain_cache.ensure(block_hash, cf, ct, h))
+                                {
+                                    ++skipped_not_main;
+                                    continue;
+                                }
+
+                                renderer.Add_Block(block);
+                                ++added;
                             }
                         }
                     }
-                    printf("Polled %d blocks\n", totalBlocks);
+                    printf("Polled seen=%d added=%d skipped_not_main=%d skipped_bad=%d (confirmDepth=%d)\n",
+                           seen, added, skipped_not_main, skipped_bad, ALPH_MAIN_CHAIN_CONFIRM_DEPTH);
+                    (void)curr_heights;
                 }
                 lastPollTs = now;
                 cJSON_Delete(obj);
