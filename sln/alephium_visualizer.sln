@@ -9,12 +9,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "alephium_visualizer", "alep
 		{6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF} = {6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "blockviz_engine", "engine\blockviz_engine.vcxproj", "{4C1AA4B2-BC4E-4DD5-8E48-D0967106857D}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "blockviz_engine", "blockviz_engine.vcxproj", "{4C1AA4B2-BC4E-4DD5-8E48-D0967106857D}"
 	ProjectSection(ProjectDependencies) = postProject
 		{6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF} = {6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "graphics", "graphics\graphics.vcxproj", "{6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "graphics", "graphics.vcxproj", "{6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

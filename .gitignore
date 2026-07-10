@@ -69,3 +69,9 @@ debug.log
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# MSVC centralized build output
+build/
+
+sln/.vs/
+

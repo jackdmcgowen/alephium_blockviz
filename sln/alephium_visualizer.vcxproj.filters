@@ -48,107 +48,107 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cpp">
+    <ClCompile Include="..\src\main.cpp">
       <Filter>Source Files\host</Filter>
     </ClCompile>
-    <ClCompile Include="src\commands.c">
+    <ClCompile Include="..\src\commands.c">
       <Filter>Source Files\host</Filter>
     </ClCompile>
-    <ClCompile Include="src\config.c">
+    <ClCompile Include="..\src\config.c">
       <Filter>Source Files\host</Filter>
     </ClCompile>
-    <ClCompile Include="src\app\blockflow_overlay.cpp">
+    <ClCompile Include="..\src\app\blockflow_overlay.cpp">
       <Filter>Source Files\app</Filter>
     </ClCompile>
-    <ClCompile Include="src\domain\block_graph.cpp">
+    <ClCompile Include="..\src\domain\block_graph.cpp">
       <Filter>Source Files\domain</Filter>
     </ClCompile>
-    <ClCompile Include="src\domain\block_scene.cpp">
+    <ClCompile Include="..\src\domain\block_scene.cpp">
       <Filter>Source Files\domain</Filter>
     </ClCompile>
-    <ClCompile Include="src\domain\layout.cpp">
+    <ClCompile Include="..\src\domain\layout.cpp">
       <Filter>Source Files\domain</Filter>
     </ClCompile>
-    <ClCompile Include="src\adapters\alephium\alph_detail_store.cpp">
+    <ClCompile Include="..\src\adapters\alephium\alph_detail_store.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="src\adapters\alephium\main_chain_cache.cpp">
+    <ClCompile Include="..\src\adapters\alephium\main_chain_cache.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="src\adapters\alephium\alephium_adapter.cpp">
+    <ClCompile Include="..\src\adapters\alephium\alephium_adapter.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="src\adapters\alephium\network_poller.cpp">
+    <ClCompile Include="..\src\adapters\alephium\network_poller.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\backends\imgui_impl_vulkan.cpp">
+    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\backends\imgui_impl_win32.cpp">
+    <ClCompile Include="..\imgui\backends\imgui_impl_win32.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\imgui.cpp">
+    <ClCompile Include="..\imgui\imgui.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\imgui_tables.cpp">
+    <ClCompile Include="..\imgui\imgui_tables.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\imgui_widgets.cpp">
+    <ClCompile Include="..\imgui\imgui_widgets.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="imgui\imgui_draw.cpp">
+    <ClCompile Include="..\imgui\imgui_draw.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\commands.h">
+    <ClInclude Include="..\src\commands.h">
       <Filter>Header Files\host</Filter>
     </ClInclude>
-    <ClInclude Include="src\config.h">
+    <ClInclude Include="..\src\config.h">
       <Filter>Header Files\host</Filter>
     </ClInclude>
-    <ClInclude Include="src\app\blockflow_overlay.hpp">
+    <ClInclude Include="..\src\app\blockflow_overlay.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="src\app\camera_state.hpp">
+    <ClInclude Include="..\src\app\camera_state.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="src\app\ui_chrome.hpp">
+    <ClInclude Include="..\src\app\ui_chrome.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="src\app\ui_snapshot.hpp">
+    <ClInclude Include="..\src\app\ui_snapshot.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="src\domain\block_graph.hpp">
+    <ClInclude Include="..\src\domain\block_graph.hpp">
       <Filter>Header Files\domain</Filter>
     </ClInclude>
-    <ClInclude Include="src\domain\block_scene.hpp">
+    <ClInclude Include="..\src\domain\block_scene.hpp">
       <Filter>Header Files\domain</Filter>
     </ClInclude>
-    <ClInclude Include="src\domain\layout.hpp">
+    <ClInclude Include="..\src\domain\layout.hpp">
       <Filter>Header Files\domain</Filter>
     </ClInclude>
-    <ClInclude Include="src\alph_block.hpp">
+    <ClInclude Include="..\src\alph_block.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp">
+    <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp">
+    <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp">
+    <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="src\adapters\alephium\network_poller.hpp">
+    <ClInclude Include="..\src\adapters\alephium\network_poller.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="src\engine\vulkan_engine.hpp">
+    <ClInclude Include="..\src\engine\vulkan_engine.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="Alephium-Logo-round.ico">
+    <Image Include="..\Alephium-Logo-round.ico">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>
