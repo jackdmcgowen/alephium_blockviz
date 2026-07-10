@@ -10,6 +10,10 @@
 #include "app/ui_chrome.hpp"
 #include "commands.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
+
 #include "graphics/debug/debug_drawer.h"
 #include "graphics/mesh_arena.h"
 
@@ -97,6 +101,12 @@ static bool s_resized;
 
 // Layout spacing (not camera; still engine-side until layout owns params fully)
 static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
+
+// Soft look-at (selection): partial aim + quaternion slerp of view direction
+static constexpr float kLookAimStrength = 0.65f; // 0 = free forward, 1 = hard lock on cube
+static constexpr float kLookOmega       = 10.0f; // rad-ish ease rate (higher = snappier)
+static const glm::vec3 kCamUp(0.0f, -1.0f, 0.0f);
+static const glm::vec3 kCamForward(0.0f, 0.0f, 1.0f);
 
 static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
     VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
@@ -459,7 +469,7 @@ void VulkanEngine::render_loop()
                 selected_detail_local = selected_block;
             }
 
-            // Look-at: aim at selected cube, keep eye on Z track
+            // Look-at target: selected cube world pos (soft aim applied in update_look_direction)
             has_look_target_ = false;
             if (!selected_hash_local.empty())
             {
@@ -493,6 +503,8 @@ void VulkanEngine::render_loop()
                 frame_pick_map.push_back(placed.hash);
             }
 
+            const glm::vec3 eye = camera_eye();
+            update_look_direction(last_frame_dt_sec_, eye, has_look_target_, selected_look_pos_);
             const CameraUBO camera = build_camera_ubo();
             FrameSubmit submit{};
             submit.instances = gpu_instances.empty() ? nullptr : gpu_instances.data();
@@ -617,6 +629,9 @@ void VulkanEngine::render_loop()
         }
         else
         {
+            has_look_target_ = false;
+            const glm::vec3 eye = camera_eye();
+            update_look_direction(last_frame_dt_sec_, eye, false, glm::vec3(0.f));
             FrameSubmit submit{};
             submit.camera = build_camera_ubo();
             submit.client_seq = ++submit_seq_;
@@ -646,6 +661,11 @@ void VulkanEngine::render_loop()
             dt = static_cast<double>((t2.QuadPart - t1.QuadPart) * 1000LL / freq.QuadPart);
             t += dt;
         } while (dt <= frameTimeMin);
+
+        // Next frame's look slerp uses this dt (seconds)
+        last_frame_dt_sec_ = static_cast<float>(dt) * 0.001f;
+        if (last_frame_dt_sec_ < 1e-4f || last_frame_dt_sec_ > 0.1f)
+            last_frame_dt_sec_ = 1.f / 60.f;
 
     }
 
@@ -1473,10 +1493,8 @@ void VulkanEngine::create_sync_objects()
 }   /* create_sync_objects() */
 
 
-CameraUBO VulkanEngine::build_camera_ubo() const
+glm::vec3 VulkanEngine::camera_eye() const
 {
-    CameraUBO cam{};
-
     float eye_z = static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS);
     float meters_per_second = 1.f;
     if (camera_)
@@ -1485,21 +1503,83 @@ CameraUBO VulkanEngine::build_camera_ubo() const
         eye_z = s.eye_z;
         meters_per_second = s.meters_per_second;
     }
+    const float cam_z = eye_z - meters_per_second * elapsedSeconds;
+    return glm::vec3(0.0f, 0.0f, cam_z);
+}
 
-    const float meters = meters_per_second * elapsedSeconds;
-    const float cam_z = eye_z - meters;
-    glm::vec3 eye(0.0f, 0.0f, cam_z);
-    glm::vec3 center(0.0f, 0.0f, cam_z + 1.0f);
-
-    if (has_look_target_)
+void VulkanEngine::update_look_direction(float dt, const glm::vec3& eye,
+                                         bool has_target, const glm::vec3& target_pos)
+{
+    const glm::vec3 forward_center = eye + kCamForward;
+    glm::vec3 desired_center = forward_center;
+    if (has_target)
     {
-        center = selected_look_pos_;
-        if (glm::length(center - eye) < 0.05f)
-            center = eye + glm::vec3(0.0f, 0.0f, 1.0f);
+        // Soft aim: never fully lock on the cube (readable scene + less "stuck")
+        desired_center = glm::mix(forward_center, target_pos, kLookAimStrength);
+        if (glm::length(desired_center - eye) < 0.05f)
+            desired_center = forward_center;
     }
 
+    glm::vec3 desired_dir = desired_center - eye;
+    const float dlen = glm::length(desired_dir);
+    if (dlen < 1e-4f)
+        desired_dir = kCamForward;
+    else
+        desired_dir /= dlen;
+
+    if (!look_dir_init_)
+    {
+        look_dir_ = desired_dir;
+        look_dir_init_ = true;
+        return;
+    }
+
+    glm::vec3 from = look_dir_;
+    const float flen = glm::length(from);
+    if (flen < 1e-4f)
+        from = kCamForward;
+    else
+        from /= flen;
+
+    // Frame-rate independent ease toward desired direction
+    float alpha = 1.0f - std::exp(-kLookOmega * std::max(dt, 1e-4f));
+    alpha = std::clamp(alpha, 0.0f, 1.0f);
+
+    const float dot = glm::clamp(glm::dot(from, desired_dir), -1.0f, 1.0f);
+    if (dot > 0.9995f)
+    {
+        look_dir_ = desired_dir;
+        return;
+    }
+
+    // Quaternion that rotates current look → desired; slerp partway each frame
+    const glm::quat q_delta = glm::rotation(from, desired_dir);
+    const glm::quat q_step = glm::slerp(glm::identity<glm::quat>(), q_delta, alpha);
+    look_dir_ = glm::normalize(q_step * from);
+}
+
+CameraUBO VulkanEngine::build_camera_ubo() const
+{
+    CameraUBO cam{};
+
+    float meters_per_second = 1.f;
+    if (camera_)
+        meters_per_second = camera_->snapshot().meters_per_second;
+
+    const glm::vec3 eye = camera_eye();
+    glm::vec3 dir = look_dir_init_ ? look_dir_ : kCamForward;
+    const float dlen = glm::length(dir);
+    if (dlen < 1e-4f)
+        dir = kCamForward;
+    else
+        dir /= dlen;
+
+    glm::vec3 center = eye + dir;
+    if (glm::length(center - eye) < 0.05f)
+        center = eye + kCamForward;
+
     const float aspect = (height > 0) ? (float)width / (float)height : 1.f;
-    cam.view = glm::lookAt(eye, center, glm::vec3(0.0f, -1.0f, 0.0f));
+    cam.view = glm::lookAt(eye, center, kCamUp);
     cam.proj = glm::perspective(FOV, aspect, NEAR_PLANE, FAR_PLANE);
     cam.view_pos = eye;
     cam.light_pos = center;
