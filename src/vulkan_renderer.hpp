@@ -18,6 +18,7 @@
 #include "domain/block_graph.hpp"
 #include "domain/layout.hpp"
 #include "adapters/alephium/alph_detail_store.hpp"
+#include "graphics/gpu_pub_lib.h"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
@@ -72,6 +73,10 @@ public:
     void Resize();
     void Start();
     void Stop();
+
+    // PR6a: publish GPU draw data (instances + camera). Add_Block path unchanged.
+    // pick_map is frame-local instance index → block hash (not on FrameSubmit public type yet).
+    void submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map);
 
 private:
     void resize();
@@ -200,7 +205,21 @@ private:
     void create_command_pool();
     void create_sync_objects();
     void update_uniform_buffer();
+    CameraUBO build_camera_ubo() const;
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
+
+    // PR6a double-buffer of published draw state (render thread)
+    struct GpuFrameSlot
+    {
+        std::vector<GpuInstance> instances;
+        CameraUBO camera{};
+        uint64_t client_seq = 0;
+        std::vector<std::string> pick_map;
+    };
+    GpuFrameSlot gpu_slots_[2];
+    int gpu_write_slot_ = 0;
+    int gpu_published_slot_ = 0;
+    uint64_t submit_seq_ = 0;
 
     void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
     uint32_t read_picker_obj_id(VkDevice device);

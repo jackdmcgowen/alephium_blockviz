@@ -120,7 +120,7 @@ static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
 
 // Modal ImGui chrome (does not cover center 3D view)
 static const float kInspectorWidth = 340.f;
-static const float kToolbarHeight  = 120.f;
+static const float kToolbarHeight  = 168.f;
 static const float kEyeZStep       = 40.f;   // world units per second while held
 static const float kEyeZMin        = -2000.f;
 static const float kEyeZMax        = 2000.f;
@@ -572,10 +572,13 @@ void VulkanRenderer::render_loop()
             }
         }
 
+        // Build GPU instances + pick map, then publish via submit_frame (PR6a dual path)
+        std::vector<GpuInstance> gpu_instances;
+        gpu_instances.reserve(layout.placements.size());
         pick_id_to_hash_.reserve(layout.placements.size());
         for (const PlacedBlock& placed : layout.placements)
         {
-            if (instanceCount >= MAX_INSTANCES)
+            if (gpu_instances.size() >= static_cast<size_t>(MAX_INSTANCES))
             {
                 printf("Instance buffer full\n");
                 break;
@@ -587,12 +590,18 @@ void VulkanRenderer::render_loop()
             else if (!hovered_hash_.empty() && placed.hash == hovered_hash_)
                 color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-            InstanceData inst = { placed.pos, color };
-            memcpy(static_cast<uint8_t*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData),
-                   &inst, sizeof(InstanceData));
+            gpu_instances.push_back(GpuInstance{ placed.pos, color });
             pick_id_to_hash_.push_back(placed.hash);
-            instanceCount++;
         }
+
+        // Camera uses look-at state set above; publish before unlock ends frame draw path
+        const CameraUBO camera = build_camera_ubo();
+        FrameSubmit submit{};
+        submit.instances = gpu_instances.empty() ? nullptr : gpu_instances.data();
+        submit.instance_count = gpu_instances.size();
+        submit.camera = camera;
+        submit.client_seq = ++submit_seq_;
+        submit_frame(submit, pick_id_to_hash_);
 
         // Dependency arrows: active tip frontier + selection/hover confirmed deps
         {
@@ -759,19 +768,29 @@ void VulkanRenderer::render_loop()
                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
             ImGui::SetNextWindowPos(ImVec2(0, ui_h - toolbar_h), ImGuiCond_Always);
             ImGui::SetNextWindowSize(ImVec2(scene_w, toolbar_h), ImGuiCond_Always);
-            ImGui::SetNextWindowBgAlpha(0.88f);
+            ImGui::SetNextWindowBgAlpha(0.92f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.f, 10.f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.f, 8.f));
             ImGui::Begin("Blockflow", nullptr, flags);
 
             int64_t now = time(NULL) * 1000;
-            ImGui::SliderFloat("meters/s", &meters_per_second, 1.0f, 50.0f);
-            ImGui::SameLine();
-            ImGui::Text("z: %.1f  (Up/Down)", eye_z);
-            ImGui::SameLine();
             const float bps = total_blocks / (0.001f * (now - start) + 1e-3f);
-            ImGui::Text("total %d  bps %1.2f", total_blocks, bps);
+
+            // Row 1: scroll speed (full-ish width)
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
+            ImGui::SliderFloat("Scroll speed", &meters_per_second, 1.0f, 50.0f, "%.1f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
+
+            // Row 2: stats
+            ImGui::Text("z: %.1f  (Up/Down)", eye_z);
+            ImGui::SameLine(0.f, 24.f);
+            ImGui::Text("blocks: %d", total_blocks);
+            ImGui::SameLine(0.f, 24.f);
+            ImGui::Text("rate: %1.2f/s", bps);
 
             ImGui::Separator();
-            ImGui::BeginChild("feed", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
             for (auto& block : blockQueue)
             {
                 ImGui::PushID(block.hash.c_str());
@@ -780,10 +799,9 @@ void VulkanRenderer::render_loop()
                     ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
                     "[%d->%d]", block.chainFrom, block.chainTo);
                 ImGui::SameLine();
-                if (ImGui::SmallButton(block.hash.c_str()))
+                if (ImGui::Button(block.hash.c_str()))
                 {
                     set_selection(block.hash);
-                    // Prefer feed payload if store was empty (same hash, one assign)
                     if (selected_block.txns.empty() && !block.txns.empty())
                         selected_block = block;
                     ImGui::SetClipboardText(block.hash.c_str());
@@ -792,6 +810,7 @@ void VulkanRenderer::render_loop()
             }
             ImGui::EndChild();
             ImGui::End();
+            ImGui::PopStyleVar(2);
         }
 
         // --- Inspector: right rail (opaque; does not cover center 3D) ---
@@ -870,7 +889,7 @@ void VulkanRenderer::render_loop()
         }
 
         ImGui::Render();
-        update_uniform_buffer();
+        // Camera/instances already published via submit_frame (PR6a); keep viewProj for debug draw
         render();
 
         elapsedSeconds += static_cast<float>(dt) * 0.001f; // auto scroll along view
@@ -1706,40 +1725,99 @@ void VulkanRenderer::create_sync_objects()
 }   /* create_sync_objects() */
 
 
-void VulkanRenderer::update_uniform_buffer()
+CameraUBO VulkanRenderer::build_camera_ubo() const
 {
-    UniformBufferObject ubo{};
-
-    float meters =  meters_per_second * elapsedSeconds;
-
+    CameraUBO cam{};
+    const float meters = meters_per_second * elapsedSeconds;
     const float cam_z = eye_z - meters;
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, cam_z); // stay on Z track
-    glm::vec3 center = glm::vec3(0.0f, 0.0f, cam_z + 1.0f);
-
-    std::lock_guard<std::mutex> lk(renderMutex);
+    glm::vec3 eye(0.0f, 0.0f, cam_z);
+    glm::vec3 center(0.0f, 0.0f, cam_z + 1.0f);
 
     if (has_look_target_)
     {
         center = selected_look_pos_;
-        // Avoid degenerate lookAt if eye ≈ target
         if (glm::length(center - eye) < 0.05f)
             center = eye + glm::vec3(0.0f, 0.0f, 1.0f);
     }
 
-    ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, -1.0f, 0.0f));
-    ubo.proj = glm::perspective( FOV, (float)width / height, NEAR_PLANE, FAR_PLANE );
+    const float aspect = (height > 0) ? (float)width / (float)height : 1.f;
+    cam.view = glm::lookAt(eye, center, glm::vec3(0.0f, -1.0f, 0.0f));
+    cam.proj = glm::perspective(FOV, aspect, NEAR_PLANE, FAR_PLANE);
+    cam.view_pos = eye;
+    cam.light_pos = center;
+    cam.meters = meters_per_second;
+    return cam;
+}
 
+void VulkanRenderer::submit_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
+{
+    // Render-thread publish: deep-copy into a slot, then upload to GPU buffers.
+    gpu_write_slot_ = 1 - gpu_published_slot_;
+    GpuFrameSlot& slot = gpu_slots_[gpu_write_slot_];
+
+    slot.instances.resize(frame.instance_count);
+    if (frame.instance_count > 0 && frame.instances)
+        std::memcpy(slot.instances.data(), frame.instances, frame.instance_count * sizeof(GpuInstance));
+    slot.camera = frame.camera;
+    slot.client_seq = frame.client_seq;
+    slot.pick_map = pick_map;
+
+    // Upload instances (layout matches InstanceData / GpuInstance: pos + color)
+    instanceCount = 0;
+    const size_t n = std::min(slot.instances.size(), static_cast<size_t>(MAX_INSTANCES));
+    if (mappedInstanceMemory && n > 0)
+    {
+        static_assert(sizeof(GpuInstance) == sizeof(InstanceData), "GpuInstance/InstanceData layout mismatch");
+        std::memcpy(mappedInstanceMemory, slot.instances.data(), n * sizeof(GpuInstance));
+        instanceCount = n;
+    }
+
+    // Upload camera UBO (same layout as UniformBufferObject / CameraUBO)
+    {
+        UniformBufferObject ubo{};
+        ubo.view = slot.camera.view;
+        ubo.proj = slot.camera.proj;
+        ubo.lightPos = slot.camera.light_pos;
+        ubo.viewPos = slot.camera.view_pos;
+        ubo.meters = slot.camera.meters;
+        viewProj = ubo.proj * ubo.view;
+
+        void* data = nullptr;
+        vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
+        if (data)
+        {
+            std::memcpy(data, &ubo, sizeof(ubo));
+            vkUnmapMemory(device, uniformBufferMemory);
+        }
+    }
+
+    // Pick map for the in-flight slot used on the next record (currentFrame set in render())
+    pick_id_to_hash_ = slot.pick_map;
+    gpu_published_slot_ = gpu_write_slot_;
+}
+
+void VulkanRenderer::update_uniform_buffer()
+{
+    // Legacy path: publish camera-only frame with current instances left as-is
+    CameraUBO cam = build_camera_ubo();
+    FrameSubmit fs{};
+    fs.camera = cam;
+    fs.client_seq = ++submit_seq_;
+    // Keep existing instance buffer; only refresh camera
+    UniformBufferObject ubo{};
+    ubo.view = cam.view;
+    ubo.proj = cam.proj;
+    ubo.lightPos = cam.light_pos;
+    ubo.viewPos = cam.view_pos;
+    ubo.meters = cam.meters;
     viewProj = ubo.proj * ubo.view;
-
-    ubo.viewPos = eye;
-    ubo.lightPos = center;
-    ubo.meters = meters_per_second;
-
-    void* data;
+    void* data = nullptr;
     vkMapMemory(device, uniformBufferMemory, 0, sizeof(ubo), 0, &data);
-    memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(device, uniformBufferMemory);
-
+    if (data)
+    {
+        std::memcpy(data, &ubo, sizeof(ubo));
+        vkUnmapMemory(device, uniformBufferMemory);
+    }
 }   /* update_uniform_buffer() */
 
 
