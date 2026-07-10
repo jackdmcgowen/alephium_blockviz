@@ -16,6 +16,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
 #include "domain/block_graph.hpp"
+#include "domain/layout.hpp"
 #include "adapters/alephium/alph_detail_store.hpp"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
@@ -144,6 +145,7 @@ private:
     // Dual-write path (PR3): keep chains as source of truth for layout; graph/store warm up for peel
     BlockGraph block_graph_;
     AlphDetailStore detail_store_;
+    PolarShardLayout polar_layout_;
     bool dual_write_validate_ = false; // set true to assert live hash-set parity each Add_Block
 
     AlphBlock selected_block;

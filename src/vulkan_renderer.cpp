@@ -402,7 +402,6 @@ void VulkanRenderer::render_loop()
     QueryPerformanceFrequency(&freq);
 
     int64_t start = static_cast<int64_t>(time(NULL) - ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
-    std::vector<int> start_height(16);
     while (running)
     {
         // Start the Dear ImGui frame
@@ -415,62 +414,34 @@ void VulkanRenderer::render_loop()
         std::unique_lock<std::mutex> lock(dataMutex);
 
         instanceCount = 0;
-
-        // hash -> world position for this frame's layout (for dep arrows)
-        std::unordered_map<std::string, glm::vec3> block_positions;
-        std::unordered_map<std::string, uint8_t>   block_shards;
-        block_positions.reserve(4096);
-        block_shards.reserve(4096);
-
         debugDrawer.clear();
 
-        for( auto& heightMap : chains)
+        LayoutParams layout_params;
+        layout_params.meters_per_height = meters_per_height;
+        layout_params.base_radius = 20.0f;
+        layout_params.lane_count = 16;
+
+        LayoutResult layout = polar_layout_.build(chains, layout_params);
+        const auto& block_positions = layout.positions;
+        const auto& block_shards = layout.lanes;
+
+        for (const PlacedBlock& placed : layout.placements)
         {
-            for (auto& hashesAtHeight : heightMap)
+            InstanceData inst = { placed.pos, placed.color };
+
+            if (lastPickedID == instanceCount && placed.block)
+                selected_block = *placed.block;
+
+            if (instanceCount < MAX_INSTANCES)
             {
-                int block_index = 0;
-                for (auto& hashesAtBlocks : hashesAtHeight.second)
-                {
-                    auto& block = hashesAtBlocks.second;
-                    int shardId = block.chain_idx();
-                    if (start_height[shardId] == 0 )
-                    {
-                        start_height[shardId] = block.height;
-                    }
-
-                    {
-                        float angle = (shardId / 16.0f) * 2.0f * glm::pi<float>();
-                        float radius = 20.0f + block_index * meters_per_height;
-
-                        float z = -static_cast<float>( block.height - start_height[shardId] ) * meters_per_height;
-                        glm::vec3 pos(
-                            radius * cosf(angle),
-                            radius * sinf(angle),
-                            z
-                        );
-                        InstanceData inst = { pos, SHARD_COLORS[shardId] };
-
-                        block_positions[block.hash] = pos;
-                        block_shards[block.hash]    = static_cast<uint8_t>(shardId);
-
-                        if (lastPickedID == instanceCount)
-                        {
-                            selected_block = block;
-                        }
-
-
-                        if (instanceCount < MAX_INSTANCES)
-                        {
-                            memcpy(static_cast<uint8_t *>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData), &inst, sizeof(InstanceData));
-                            instanceCount++;
-                        }
-                        else
-                        {
-                            printf("Instance buffer full\n");
-                        }
-                    }
-                    block_index++;
-                }
+                memcpy(static_cast<uint8_t*>(mappedInstanceMemory) + instanceCount * sizeof(InstanceData),
+                       &inst, sizeof(InstanceData));
+                instanceCount++;
+            }
+            else
+            {
+                printf("Instance buffer full\n");
+                break;
             }
         }
 
@@ -499,9 +470,7 @@ void VulkanRenderer::render_loop()
 
                     // map is ordered by height; last key is the tip height for this chain
                     const auto tip_it = std::prev(heightMap.end());
-                    const int tip_height = static_cast<int>(tip_it->first);
                     const HashToBlocks& tips_at_height = tip_it->second;
-                    (void)tip_height;
 
                     const glm::vec3& dest_c = SHARD_COLORS[shard_id % 16];
 
