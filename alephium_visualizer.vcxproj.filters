@@ -45,6 +45,9 @@
     <ClCompile Include="src\adapters\alephium\main_chain_cache.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
+    <ClCompile Include="src\adapters\alephium\alephium_adapter.cpp">
+      <Filter>Source Files\adapters</Filter>
+    </ClCompile>
     <ClCompile Include="src\adapters\alephium\network_poller.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
@@ -90,6 +93,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\adapters\alephium\network_poller.hpp">

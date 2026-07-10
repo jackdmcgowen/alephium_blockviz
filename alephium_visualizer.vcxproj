@@ -30,6 +30,7 @@
     <ClCompile Include="src\domain\block_graph.cpp" />
     <ClCompile Include="src\adapters\alephium\alph_detail_store.cpp" />
     <ClCompile Include="src\adapters\alephium\main_chain_cache.cpp" />
+    <ClCompile Include="src\adapters\alephium\alephium_adapter.cpp" />
     <ClCompile Include="src\adapters\alephium\network_poller.cpp" />
     <ClCompile Include="src\domain\layout.cpp" />
     <ClCompile Include="src\main.cpp" />
@@ -43,6 +44,7 @@
     <ClInclude Include="src\domain\layout.hpp" />
     <ClInclude Include="src\adapters\alephium\alph_detail_store.hpp" />
     <ClInclude Include="src\adapters\alephium\main_chain_cache.hpp" />
+    <ClInclude Include="src\adapters\alephium\alephium_adapter.hpp" />
     <ClInclude Include="src\adapters\alephium\network_poller.hpp" />
     <ClInclude Include="src\vulkan_renderer.hpp" />
   </ItemGroup>
