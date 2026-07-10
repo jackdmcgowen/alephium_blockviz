@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <string>
 #include "vulkan_renderer.hpp"
+#include "app/ui_chrome.hpp"
 #include "commands.h"
 
 #include "graphics/debug/debug_drawer.h"
@@ -72,25 +73,6 @@ static const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
 
 static constexpr bool kHoverPickEnabled = true;
 
-const glm::vec3 SHARD_COLORS[16] = {
-    glm::vec3(1.00f, 0.34f, 0.20f),  // #FF5733 Orange
-    glm::vec3(0.20f, 1.00f, 0.34f),  // #33FF57 Green
-    glm::vec3(0.20f, 0.34f, 1.00f),  // #3357FF Blue
-    glm::vec3(1.00f, 0.20f, 1.00f),  // #FF33FF Pink
-    glm::vec3(1.00f, 0.76f, 0.00f),  // #FFC300 Yellow
-    glm::vec3(0.85f, 0.97f, 0.65f),  // #DAF7A6 Light Green
-    glm::vec3(0.78f, 0.00f, 0.22f),  // #C70039 Dark Red
-    glm::vec3(0.34f, 0.09f, 0.27f),  // #581845 Dark Purple
-    glm::vec3(1.00f, 1.00f, 1.00f),  // #FFFFFF White
-    glm::vec3(0.50f, 0.50f, 0.00f),  // #808000 Olive
-    glm::vec3(0.00f, 1.00f, 1.00f),  // #00FFFF Aqua
-    glm::vec3(1.00f, 0.75f, 0.80f),  // #FFC0CB Pink
-    glm::vec3(0.50f, 0.00f, 0.50f),  // #800080 Purple
-    glm::vec3(1.00f, 1.00f, 0.00f),  // #FFFF00 Yellow
-    glm::vec3(0.50f, 0.50f, 0.50f),  // #808080 Grey
-    glm::vec3(0.00f, 1.00f, 0.00f)   // #00FF00 Lime
-};
-
 const VulkanRenderer::VertexNormal VulkanRenderer::CUBE_VERTICES[8] = {
     { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
     { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
@@ -113,16 +95,8 @@ const uint16_t VulkanRenderer::CUBE_INDICES[36] = {
 
 static bool s_resized;
 
+// Layout spacing (not camera; still engine-side until layout owns params fully)
 static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
-static float meters_per_second = 1;
-static float eye_z = -ALPH_LOOKBACK_WINDOW_SECONDS;
-
-// Modal ImGui chrome (does not cover center 3D view)
-static const float kInspectorWidth = 340.f;
-static const float kToolbarHeight  = 168.f;
-static const float kEyeZStep       = 40.f;   // world units per second while held
-static const float kEyeZMin        = -2000.f;
-static const float kEyeZMax        = 2000.f;
 
 static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
     VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
@@ -197,6 +171,16 @@ VulkanRenderer::VulkanRenderer()
 void VulkanRenderer::set_scene(BlockScene* scene)
 {
     scene_ = scene;
+}
+
+void VulkanRenderer::set_ui_overlay(IUiOverlay* overlay)
+{
+    overlay_ = overlay;
+}
+
+void VulkanRenderer::set_camera(CameraState* camera)
+{
+    camera_ = camera;
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -349,6 +333,12 @@ bool VulkanRenderer::is_selected(const std::string& hash) const
     return !hash.empty() && selected_hash_ == hash;
 }
 
+AlphBlock VulkanRenderer::copy_selected_block() const
+{
+    std::lock_guard<std::mutex> lock(selection_mutex_);
+    return selected_block;
+}
+
 void VulkanRenderer::refresh_selection_if_needed(BlockScene& scene)
 {
     // Caller holds scene.mutex() and selection_mutex_.
@@ -385,7 +375,6 @@ void VulkanRenderer::render_loop()
     t = dt = 0.0;
     QueryPerformanceFrequency(&freq);
 
-    int64_t start = static_cast<int64_t>(time(NULL) - ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     while (running)
     {
         // Start the Dear ImGui frame
@@ -633,157 +622,9 @@ void VulkanRenderer::render_loop()
         publish_ui_snapshot(std::move(frame_ui));
         apply_published_frame();
 
-        // ImGui reads only the published snapshot (no live scene / selection races)
-        const UiSnapshot ui = copy_ui_snapshot();
-
-        // Frame dt for keyboard camera
-        const float dt_sec = (dt > 0.0) ? static_cast<float>(dt) * 0.001f : (1.f / 60.f);
-
-        ImGuiIO& io = ImGui::GetIO();
-        if (!io.WantCaptureKeyboard)
-        {
-            if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
-                eye_z += kEyeZStep * dt_sec;
-            if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
-                eye_z -= kEyeZStep * dt_sec;
-            eye_z = std::clamp(eye_z, kEyeZMin, kEyeZMax);
-        }
-
-        const float ui_w = static_cast<float>(width);
-        const float ui_h = static_cast<float>(height);
-        const float inspector_w = std::min(kInspectorWidth, ui_w * 0.35f);
-        const float toolbar_h = kToolbarHeight;
-        const float scene_w = std::max(1.f, ui_w - inspector_w);
-
-        // --- Toolbar: bottom-left ---
-        {
-            ImGuiWindowFlags flags =
-                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
-            ImGui::SetNextWindowPos(ImVec2(0, ui_h - toolbar_h), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(scene_w, toolbar_h), ImGuiCond_Always);
-            ImGui::SetNextWindowBgAlpha(0.92f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.f, 10.f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.f, 8.f));
-            ImGui::Begin("Blockflow", nullptr, flags);
-
-            int64_t now = time(NULL) * 1000;
-            const float bps = ui.total_blocks / (0.001f * (now - start) + 1e-3f);
-
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
-            ImGui::SliderFloat("Scroll speed", &meters_per_second, 1.0f, 50.0f, "%.1f");
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
-
-            ImGui::Text("z: %.1f  (Up/Down)", eye_z);
-            ImGui::SameLine(0.f, 24.f);
-            ImGui::Text("blocks: %d", ui.total_blocks);
-            ImGui::SameLine(0.f, 24.f);
-            ImGui::Text("rate: %1.2f/s", bps);
-
-            ImGui::Separator();
-            ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-            for (const FeedEntry& entry : ui.feed)
-            {
-                ImGui::PushID(entry.hash.c_str());
-                const int shardId = entry.chain_idx();
-                ImGui::TextColored(
-                    ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
-                    "[%d->%d]", entry.chainFrom, entry.chainTo);
-                ImGui::SameLine();
-                if (ImGui::Button(entry.hash.c_str()))
-                {
-                    set_selection(entry.hash);
-                    ImGui::SetClipboardText(entry.hash.c_str());
-                }
-                ImGui::PopID();
-            }
-            ImGui::EndChild();
-            ImGui::End();
-            ImGui::PopStyleVar(2);
-        }
-
-        // --- Inspector: right rail (detail from UiSnapshot; re-copy if feed click updated selection) ---
-        {
-            AlphBlock inspector = ui.selected_detail;
-            {
-                std::lock_guard<std::mutex> slock(selection_mutex_);
-                if (!selected_hash_.empty() &&
-                    (inspector.hash != selected_hash_ || inspector.txns.empty()))
-                    inspector = selected_block;
-            }
-
-            ImGuiWindowFlags flags =
-                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
-                ImGuiWindowFlags_AlwaysVerticalScrollbar;
-            ImGui::SetNextWindowPos(ImVec2(ui_w - inspector_w, 0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(inspector_w, ui_h), ImGuiCond_Always);
-            ImGui::SetNextWindowBgAlpha(0.94f);
-            ImGui::Begin("Block", nullptr, flags);
-
-            char url[512];
-            if (!inspector.hash.empty())
-            {
-                memset(url, 0, sizeof(url));
-                snprintf(url, sizeof(url), "https://explorer.alephium.org/blocks/%s",
-                         inspector.hash.c_str());
-
-                ImGui::Text("hash:");
-                ImGui::SameLine();
-                ImGui::TextLinkOpenURL(inspector.hash.c_str(), url);
-
-                ImGui::Text("height: %d", inspector.height);
-
-                const int shardId = inspector.chain_idx();
-                ImGui::Text("chain:");
-                ImGui::SameLine();
-                ImGui::TextColored(
-                    ImVec4(SHARD_COLORS[shardId].r, SHARD_COLORS[shardId].g, SHARD_COLORS[shardId].b, 1.0f),
-                    "[%d->%d]", inspector.chainFrom, inspector.chainTo);
-
-                ImGui::Separator();
-                ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
-
-                for (auto& tx : inspector.txns)
-                {
-                    memset(url, 0, sizeof(url));
-                    snprintf(url, sizeof(url), "https://explorer.alephium.org/transactions/%s",
-                             tx.txid.c_str());
-
-                    ImGui::Separator();
-                    ImGui::Text("txid:");
-                    ImGui::SameLine();
-                    ImGui::TextLinkOpenURL(tx.txid.c_str(), url);
-
-                    ImGui::Text("version: %d", tx.version);
-                    ImGui::Text("networkId: %d", tx.networkId);
-                    ImGui::Text("scriptOpt: %s", tx.scriptOpt.c_str());
-                    ImGui::Text("gasAmount: %d", tx.gasAmount);
-                    ImGui::Text("gasPrice: %s", tx.gasPrice.c_str());
-                    ImGui::Text("inputs: %d  outputs: %d",
-                                static_cast<int>(tx.inputs.size()),
-                                static_cast<int>(tx.outputs.size()));
-
-                    for (auto& out : tx.outputs)
-                    {
-                        memset(url, 0, sizeof(url));
-                        snprintf(url, sizeof(url), "https://explorer.alephium.org/addresses/%s",
-                                 out.address.c_str());
-                        ImGui::Bullet();
-                        ImGui::TextLinkOpenURL(out.address.c_str(), url);
-                        ImGui::SameLine();
-                        ImGui::Text("(%s)", out.toAmount().c_str());
-                    }
-                }
-            }
-            else
-            {
-                ImGui::TextWrapped(
-                    "Select a block from the feed below or click a cube in the scene.");
-                ImGui::Spacing();
-                ImGui::TextDisabled("Camera: Up/Down arrows scroll Z");
-            }
-            ImGui::End();
-        }
+        // PR8: app chrome only via IUiOverlay (explorer URLs live in overlay TU)
+        if (overlay_)
+            overlay_->draw();
 
         ImGui::Render();
         // GPU buffers filled via apply_published_frame (PR7); viewProj set there for debug draw
@@ -1627,6 +1468,16 @@ void VulkanRenderer::create_sync_objects()
 CameraUBO VulkanRenderer::build_camera_ubo() const
 {
     CameraUBO cam{};
+
+    float eye_z = static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS);
+    float meters_per_second = 1.f;
+    if (camera_)
+    {
+        const CameraState::Snapshot s = camera_->snapshot();
+        eye_z = s.eye_z;
+        meters_per_second = s.meters_per_second;
+    }
+
     const float meters = meters_per_second * elapsedSeconds;
     const float cam_z = eye_z - meters;
     glm::vec3 eye(0.0f, 0.0f, cam_z);
@@ -1991,9 +1842,9 @@ void VulkanRenderer::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         ImGuiIO& io = ImGui::GetIO();
 
-        // Scene rect: exclude right inspector + bottom toolbar
-        const float inspector_w = std::min(kInspectorWidth, static_cast<float>(width) * 0.35f);
-        const float toolbar_h = kToolbarHeight;
+        // Scene rect: exclude right inspector + bottom toolbar (shared chrome layout)
+        const float inspector_w = ui_chrome::inspector_width(static_cast<float>(width));
+        const float toolbar_h = ui_chrome::kToolbarHeight;
         const float mx = io.MousePos.x;
         const float my = io.MousePos.y;
         const bool over_scene =

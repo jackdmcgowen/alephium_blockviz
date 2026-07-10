@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
+#include "app/camera_state.hpp"
 #include "app/ui_snapshot.hpp"
 #include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
@@ -27,6 +28,7 @@
 
 // PR6b: engine has no cJSON ingest. Domain lives in BlockScene (adapter writes, renderer reads).
 // PR7: triple-buffer FrameSubmit + UiSnapshot for race-free ImGui.
+// PR8: engine hosts ImGui; chrome via IUiOverlay; camera via CameraState (no explorer URLs).
 class VulkanRenderer
 {
 public:
@@ -66,10 +68,15 @@ public:
     // Domain scene (owned by app; set before Start / network). Not owned.
     void set_scene(BlockScene* scene);
 
+    // PR8: client chrome + camera (not owned; set before Start).
+    void set_ui_overlay(IUiOverlay* overlay);
+    void set_camera(CameraState* camera);
+
     // Thread-safe selection (network may call after replace).
     void set_selection(const std::string& hash);
     void clear_selection();
     bool is_selected(const std::string& hash) const;
+    AlphBlock copy_selected_block() const;
 
     void Resize();
     void Start();
@@ -157,7 +164,9 @@ private:
     std::mutex  renderMutex;
     mutable std::mutex  selection_mutex_; // selection only; scene has its own mutex
 
-    BlockScene* scene_ = nullptr;
+    BlockScene*   scene_   = nullptr;
+    IUiOverlay*   overlay_ = nullptr;
+    CameraState*  camera_  = nullptr;
     PolarShardLayout polar_layout_;
 
     std::string selected_hash_;

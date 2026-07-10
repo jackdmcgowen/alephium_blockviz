@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include "commands.h"
 #include "config.h"
+#include "app/blockflow_overlay.hpp"
+#include "app/camera_state.hpp"
 #include "domain/block_scene.hpp"
 #include "vulkan_renderer.hpp"
 #include "adapters/alephium/network_poller.hpp"
@@ -16,7 +18,9 @@ const char* baseUrl;
 
 static volatile bool keepRunning = true;
 static BlockScene scene;
+static CameraState camera;
 static VulkanRenderer renderer;
+static BlockflowOverlay overlay(camera, renderer);
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -69,6 +73,8 @@ int main()
 
     renderer.Init(hInstance, hwnd);
     renderer.set_scene(&scene);
+    renderer.set_camera(&camera);
+    renderer.set_ui_overlay(&overlay);
     renderer.Start();
 
     ShowWindow(hwnd, SW_SHOW);

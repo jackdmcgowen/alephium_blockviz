@@ -34,6 +34,7 @@
     <ClCompile Include="src\adapters\alephium\alephium_adapter.cpp" />
     <ClCompile Include="src\adapters\alephium\network_poller.cpp" />
     <ClCompile Include="src\domain\layout.cpp" />
+    <ClCompile Include="src\app\blockflow_overlay.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\vulkan_renderer.cpp" />
   </ItemGroup>
@@ -41,6 +42,9 @@
     <ClInclude Include="src\alph_block.hpp" />
     <ClInclude Include="src\commands.h" />
     <ClInclude Include="src\config.h" />
+    <ClInclude Include="src\app\blockflow_overlay.hpp" />
+    <ClInclude Include="src\app\camera_state.hpp" />
+    <ClInclude Include="src\app\ui_chrome.hpp" />
     <ClInclude Include="src\app\ui_snapshot.hpp" />
     <ClInclude Include="src\domain\block_graph.hpp" />
     <ClInclude Include="src\domain\block_scene.hpp" />
