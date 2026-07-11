@@ -2,11 +2,10 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    vec3 lightPos;    // Added light position
+    vec3 lightPos;
     float pad1;
-    vec3 viewPos;     // Added camera position
+    vec3 viewPos;
     float pad2;
-    float meters;
 } ubo;
 
 
@@ -16,20 +15,13 @@ layout(location = 2) in vec3 inInstancePos;
 layout(location = 3) in vec3 inInstanceColor;
 
 layout(location = 0) out vec3 fragColor;
-layout(location = 1) out vec3 fragPos;    // Added for Phong
-layout(location = 2) out vec3 fragNormal; // Added for Phong
+layout(location = 1) out vec3 fragPos;
+layout(location = 2) out vec3 fragNormal;
 
 void main() {
-
-    mat4 posMat = mat4(
-        vec4( 1.0, 0.0, 0.0, 0.0),
-        vec4( 0.0, 1.0, 0.0, 0.0),
-        vec4( 0.0, 0.0, 1.0, 0.0),
-        vec4( 0.0, 0.0, ubo.meters, 1.0) );
-    
-    vec4 worldPos = posMat * vec4(inPosition + inInstancePos, 1.0);
+    vec4 worldPos = vec4(inPosition + inInstancePos, 1.0);
     gl_Position = ubo.proj * ubo.view * worldPos;
-    
+
     fragPos = worldPos.xyz;
     fragNormal = normalize(inNormal);
     fragColor = inInstanceColor;

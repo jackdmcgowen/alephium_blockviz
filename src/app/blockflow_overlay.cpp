@@ -78,19 +78,12 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.f, 8.f));
     ImGui::Begin("Blockflow", nullptr, flags);
 
-    float mps = camera_.meters_per_second();
-
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
     const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
     const float bps = ui.total_blocks / (0.001f * elapsed_ms);
 
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
-    if (ImGui::SliderFloat("Scroll speed", &mps, CameraController::kMpsMin, CameraController::kMpsMax, "%.1f"))
-        camera_.set_meters_per_second(mps);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
-
-    ImGui::Text("z: %.1f  (Up/Down / wheel)", camera_.scroll_z());
+    // True eye Z (manual scroll only — no auto-scroll rate).
+    ImGui::Text("z: %.1f  (Up/Down / wheel)", camera_.camera().eye.z);
     ImGui::SameLine(0.f, 24.f);
     ImGui::Text("blocks: %d", ui.total_blocks);
     ImGui::SameLine(0.f, 24.f);

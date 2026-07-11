@@ -38,7 +38,6 @@ struct CameraUBO
     float     pad1 = 0.0f;
     glm::vec3 view_pos{};
     float     pad2 = 0.0f;
-    float     meters = 0.0f; // matches vert.glsl ubo.meters
 };
 
 // v1 instance path: position + color only (no scale)

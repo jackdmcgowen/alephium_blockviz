@@ -87,7 +87,6 @@ void FrameResources::upload_camera(const CameraUBO& camera, glm::mat4* out_view_
     ubo.proj = camera.proj;
     ubo.lightPos = camera.light_pos;
     ubo.viewPos = camera.view_pos;
-    ubo.meters = camera.meters;
 
     if (out_view_proj)
         *out_view_proj = ubo.proj * ubo.view;

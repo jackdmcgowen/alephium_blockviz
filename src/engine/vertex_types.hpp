@@ -27,7 +27,6 @@ struct UniformBufferObject
     glm::float32 pad1;
     glm::vec3 viewPos;
     glm::float32 pad2;
-    glm::float32 meters;
 };
 
 struct PickerPushConstants

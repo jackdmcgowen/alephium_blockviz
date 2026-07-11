@@ -90,7 +90,7 @@ Frustum Camera::frustum() const
     return f;
 }
 
-CameraUBO Camera::to_ubo(float meters_per_second) const
+CameraUBO Camera::to_ubo() const
 {
     CameraUBO cam{};
     glm::vec3 f = forward;
@@ -105,6 +105,5 @@ CameraUBO Camera::to_ubo(float meters_per_second) const
     cam.proj = proj_matrix();
     cam.view_pos = eye;
     cam.light_pos = center;
-    cam.meters = meters_per_second;
     return cam;
 }

@@ -37,5 +37,5 @@ struct Camera
     glm::mat4 view_proj() const;
     Frustum   frustum() const;
 
-    CameraUBO to_ubo(float meters_per_second) const;
+    CameraUBO to_ubo() const;
 };

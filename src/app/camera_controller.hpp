@@ -1,7 +1,7 @@
 #pragma once
 
-// Render-thread camera controller: scroll Z, auto-scroll rate, selection look-aim.
-// Builds a graphics::Camera each tick (pose + projection + frustum).
+// Render-thread camera controller: manual Z scroll + selection look-aim.
+// Eye Z is user scroll_z only (no auto-scroll rate — that distorted world Z).
 #include "alph_block.hpp"
 #include "graphics/camera.hpp"
 
@@ -17,17 +17,14 @@
 class CameraController
 {
 public:
-    static constexpr float kEyeZMin    = -2000.f;
-    static constexpr float kEyeZMax    =  2000.f;
-    static constexpr float kEyeZStep   = 40.f;  // world units / second while key held
-    static constexpr float kWheelStep  = 25.f;  // world units per mouse-wheel notch
-    static constexpr float kMpsMin     = 1.f;
-    static constexpr float kMpsMax     = 50.f;
-    static constexpr float kLookOmega  = 10.f;  // slerp ease rate
+    static constexpr float kEyeZMin   = -2000.f;
+    static constexpr float kEyeZMax   =  2000.f;
+    static constexpr float kEyeZStep  = 40.f;  // world units / second while key held
+    static constexpr float kWheelStep = 25.f;  // world units per mouse-wheel notch
+    static constexpr float kLookOmega = 10.f;  // slerp ease rate
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
-        , meters_per_second_(1.f)
     {
         camera_.forward = kForward;
         camera_.up = kUp;
@@ -47,7 +44,6 @@ public:
     }
 
     float scroll_z() const { return scroll_z_; }
-    float meters_per_second() const { return meters_per_second_; }
 
     void set_scroll_z(float z)
     {
@@ -57,11 +53,6 @@ public:
     void nudge_scroll(float world_delta)
     {
         scroll_z_ = std::clamp(scroll_z_ + world_delta, kEyeZMin, kEyeZMax);
-    }
-
-    void set_meters_per_second(float mps)
-    {
-        meters_per_second_ = std::clamp(mps, kMpsMin, kMpsMax);
     }
 
     // Hard-aim at world target (frozen direction until clear / new target).
@@ -90,10 +81,9 @@ public:
     const std::string& look_aim_hash() const { return look_aim_hash_; }
     bool look_engaged() const { return look_engaged_; }
 
-    // Advance auto-scroll + look slerp; rebuild Camera pose / matrices.
+    // Advance look slerp; rebuild Camera pose / matrices (no Z auto-scroll).
     const Camera& tick(float dt_sec)
     {
-        elapsed_sec_ += std::max(dt_sec, 0.f);
         update_look_(dt_sec);
         rebuild_camera_();
         return camera_;
@@ -101,22 +91,17 @@ public:
 
     const Camera& camera() const { return camera_; }
 
-    CameraUBO ubo() const
-    {
-        return camera_.to_ubo(meters_per_second_);
-    }
+    CameraUBO ubo() const { return camera_.to_ubo(); }
 
     Frustum frustum() const { return camera_.frustum(); }
 
 private:
-    // Not constexpr: glm::vec3 is not a C++17 literal type on all toolchains.
     static inline const glm::vec3 kUp{ 0.f, -1.f, 0.f };
     static inline const glm::vec3 kForward{ 0.f, 0.f, 1.f };
 
     glm::vec3 eye_position_() const
     {
-        const float cam_z = scroll_z_ - meters_per_second_ * elapsed_sec_;
-        return glm::vec3(0.f, 0.f, cam_z);
+        return glm::vec3(0.f, 0.f, scroll_z_);
     }
 
     void update_look_(float dt)
@@ -171,8 +156,6 @@ private:
     }
 
     float scroll_z_ = 0.f;
-    float meters_per_second_ = 1.f;
-    float elapsed_sec_ = 0.f;
 
     glm::vec3 look_dir_{ 0.f, 0.f, 1.f };
     bool      look_dir_init_ = false;
