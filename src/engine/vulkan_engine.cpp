@@ -257,12 +257,13 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     swapchainExtent = { width, height };
     s_resized = true;
     create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
-    create_depth_resources();
-    create_image_views();
+    create_swapchain_targets();
     create_descriptor_set_layout();
-    cube_pipe_.create(device, descriptorSetLayout, swapchainImageFormat, depthFormat, width, height);
+    cube_pipe_.create(device, descriptorSetLayout, swapchainImageFormat,
+                      swapchain_targets_.depth_format(), width, height);
     create_picker_resources();
-    picker_pipe_.create(device, descriptorSetLayout, PICKING_FORMAT, depthFormat, width, height);
+    picker_pipe_.create(device, descriptorSetLayout, PICKING_FORMAT,
+                        swapchain_targets_.depth_format(), width, height);
     create_picker_staging();
     create_command_pool();
     create_frame_resources();
@@ -304,7 +305,8 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     imgui_vk.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     imgui_vk.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     imgui_vk.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
-    imgui_vk.PipelineRenderingCreateInfo.depthAttachmentFormat = depthFormat;
+    const VkFormat depth_fmt = swapchain_targets_.depth_format();
+    imgui_vk.PipelineRenderingCreateInfo.depthAttachmentFormat = depth_fmt;
     imgui_vk.Subpass = 0;
     imgui_vk.MinImageCount = 2;
     imgui_vk.ImageCount = MAX_FRAMES_IN_FLIGHT;
@@ -315,7 +317,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
 
 
     meshArena = new MeshArena();
-    if (!meshArena->create(device, &deviceMemProps, swapchainImageFormat, depthFormat))
+    if (!meshArena->create(device, &deviceMemProps, swapchainImageFormat, depth_fmt))
     {
         printf("Failed to create MeshArena for debug drawing\n");
     }
@@ -860,25 +862,12 @@ void VulkanEngine::resize_internal()
 
     vkDeviceWaitIdle(device);
 
-
-
     destroy_image_view(device, picker_imageView);
     destroy_image(device, picker_image, picker_memory);
 
-    for (auto imageView : swapchainImageViews)
-    {
-        destroy_image_view(device, imageView);
-    }
-    destroy_image_view(device, depthImageView);
-
-    destroy_image(device, depthImage, depthImageMemory);
-
     swapchainExtent = { width, height };
     create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
-    create_image_views();
-
-    create_depth_resources();
-
+    create_swapchain_targets();
     create_picker_resources();
 
     s_resized = true;
@@ -886,33 +875,24 @@ void VulkanEngine::resize_internal()
 }   /* resize() */
 
 
-void VulkanEngine::create_depth_resources()
+void VulkanEngine::create_swapchain_targets()
 {
-    depthFormat = find_depth_format();
-    create_image(
-        device, 
-        width, height,
-        depthFormat,
-        VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        depthImage,
-        depthImageMemory,
-        &deviceMemProps
-        );
-    depthImageView = create_image_view(device, depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-}   /* create_depth_resources() */
-
-
-void VulkanEngine::create_image_views()
-{
-    swapchainImageViews.resize(swapchainImages.size());
-    for (size_t i = 0; i < swapchainImages.size(); i++)
-    {
-        swapchainImageViews[i] = create_image_view(device, swapchainImages[i], swapchainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
-}   /* create_image_views() */
+    SwapchainTargetsCreateInfo info{};
+    info.device = device;
+    info.physical_device = physicalDevice;
+    info.mem_props = &deviceMemProps;
+    info.swapchain_images = swapchainImages.empty() ? nullptr : swapchainImages.data();
+    info.swapchain_image_count = static_cast<uint32_t>(swapchainImages.size());
+    info.color_format = swapchainImageFormat;
+    info.width = width;
+    info.height = height;
+    // First call: create. After resize: destroy+create via recreate.
+    if (swapchain_targets_.color_view_count() == 0 &&
+        swapchain_targets_.depth_view() == VK_NULL_HANDLE)
+        swapchain_targets_.create(info);
+    else
+        swapchain_targets_.recreate(info);
+}
 
 
 void VulkanEngine::create_descriptor_set_layout()
@@ -1316,7 +1296,7 @@ void VulkanEngine::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, u
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = depthImageView,
+    depthAttachment.imageView = swapchain_targets_.depth_view();
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1410,7 +1390,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = swapchainImageViews[imageIndex],
+    colorAttachment.imageView = swapchain_targets_.color_view(imageIndex);
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1418,7 +1398,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = depthImageView,
+    depthAttachment.imageView = swapchain_targets_.depth_view();
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1440,7 +1420,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 }
         );
 
-        pipeline_barrier(buffer, depthImage,
+        pipeline_barrier(buffer, swapchain_targets_.depth_image(),
             VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
             { VK_IMAGE_ASPECT_DEPTH_BIT, 0,1,0,1 }
@@ -1542,29 +1522,6 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 }   /* record_command_buffer() */
 
 
-VkFormat VulkanEngine::find_depth_format()
-{
-    VkFormat candidates[] = 
-        {
-        VK_FORMAT_D32_SFLOAT,
-        VK_FORMAT_D32_SFLOAT_S8_UINT,
-        VK_FORMAT_D24_UNORM_S8_UINT
-        };
-
-    for (VkFormat format : candidates)
-    {
-        VkFormatProperties props;
-        vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
-        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
-        {
-            return format;
-        }
-    }
-    throw std::runtime_error("Failed to find supported depth format");
-
-}   /* find_depth_format() */
-
-
 void VulkanEngine::cleanup()
 {
     vkDeviceWaitIdle(device);
@@ -1579,9 +1536,6 @@ void VulkanEngine::cleanup()
         delete meshArena;
         meshArena = nullptr;
     }
-
-    destroy_image_view(device, depthImageView);
-    destroy_image(device, depthImage, depthImageMemory);
 
     frame_resources_.destroy(device);
     destroy_buffer(device, stagingBuffer, stagingMemory);
@@ -1599,11 +1553,7 @@ void VulkanEngine::cleanup()
     picker_pipe_.destroy(device);
     cube_pipe_.destroy(device);
 
-    for (auto imageView : swapchainImageViews)
-    {
-        destroy_image_view(device, imageView);
-        
-    }
+    swapchain_targets_.destroy(device);
     destroy_swapchain(device, swapchain);
     destroy_device(device);
 

@@ -22,6 +22,7 @@
 #include "engine/frame_sync.hpp"
 #include "engine/pipelines/cube_pipeline.hpp"
 #include "engine/pipelines/picker_pipeline.hpp"
+#include "engine/swapchain_targets.hpp"
 #include "engine/vertex_types.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
@@ -89,11 +90,7 @@ private:
     std::vector<VkImage> swapchainImages;
     VkFormat swapchainImageFormat;
     VkExtent2D swapchainExtent;
-    std::vector<VkImageView> swapchainImageViews;
-    VkImage depthImage;
-    VkFormat depthFormat;
-    VkDeviceMemory depthImageMemory;
-    VkImageView depthImageView;
+    SwapchainTargets swapchain_targets_;
     VkDescriptorSetLayout descriptorSetLayout;
 
     CubePipeline cube_pipe_;
@@ -165,8 +162,7 @@ private:
 
     void render_loop();
     void render();
-    void create_depth_resources();
-    void create_image_views();
+    void create_swapchain_targets();
     void create_descriptor_set_layout();
     void create_picker_resources();
     void create_picker_staging();
@@ -208,7 +204,6 @@ private:
     void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
     uint32_t read_picker_obj_id(VkDevice device);
 
-    VkFormat find_depth_format();
     void cleanup();
 };
 
