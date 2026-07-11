@@ -7,6 +7,7 @@
 #include "app/app_identity.hpp"
 #include "app/blockflow_overlay.hpp"
 #include "app/camera_state.hpp"
+#include "app/scene_presenter.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
 #include "adapters/alephium/network_poller.hpp"
@@ -29,6 +30,7 @@ static BlockScene scene;
 static CameraState camera;
 static IBlockvizEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
+static ScenePresenter* scene_presenter = nullptr;
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -80,6 +82,7 @@ int main()
 
     engine = create_blockviz_engine();
     overlay = new BlockflowOverlay(camera, *engine);
+    scene_presenter = new ScenePresenter(scene);
 
     // Host owns application identity; engine fills its own product identity.
     EngineCreateInfo create_info{};
@@ -90,6 +93,7 @@ int main()
 
     engine->set_scene(&scene);
     engine->set_camera(&camera);
+    engine->set_frame_source(scene_presenter);
     engine->set_ui_overlay(overlay);
     engine->start();
 
@@ -137,6 +141,8 @@ int main()
     engine->stop();
     destroy_blockviz_engine(engine);
     engine = nullptr;
+    delete scene_presenter;
+    scene_presenter = nullptr;
     delete overlay;
     overlay = nullptr;
     free_configs(&config_array);

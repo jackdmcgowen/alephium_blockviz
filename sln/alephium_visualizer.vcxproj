@@ -35,6 +35,7 @@
     <ClCompile Include="..\src\adapters\alephium\network_poller.cpp" />
     <ClCompile Include="..\src\domain\layout.cpp" />
     <ClCompile Include="..\src\app\blockflow_overlay.cpp" />
+    <ClCompile Include="..\src\app\scene_presenter.cpp" />
     <ClCompile Include="..\src\main.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -44,6 +45,7 @@
     <ClInclude Include="..\src\app\app_identity.hpp" />
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
     <ClInclude Include="..\src\app\camera_state.hpp" />
+    <ClInclude Include="..\src\app\scene_presenter.hpp" />
     <ClInclude Include="..\src\app\ui_chrome.hpp" />
     <ClInclude Include="..\src\app\ui_snapshot.hpp" />
     <ClInclude Include="..\src\domain\block_graph.hpp" />

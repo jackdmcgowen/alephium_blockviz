@@ -15,7 +15,6 @@
 #include "alph_block.hpp"
 #include "app/camera_state.hpp"
 #include "app/ui_snapshot.hpp"
-#include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
 #include "engine/frame_descriptors.hpp"
@@ -61,6 +60,7 @@ public:
     // IBlockvizEngine
     void set_scene(BlockScene* scene) override;
     void set_camera(CameraState* camera) override;
+    void set_frame_source(IFrameSource* source) override;
     void set_selection(const std::string& hash) override;
     void clear_selection() override;
     bool is_selected(const std::string& hash) const override;
@@ -125,10 +125,10 @@ private:
     std::mutex  renderMutex;
     mutable std::mutex  selection_mutex_;
 
-    BlockScene*   scene_   = nullptr;
-    IUiOverlay*   overlay_ = nullptr;
-    CameraState*  camera_  = nullptr;
-    PolarShardLayout polar_layout_;
+    BlockScene*    scene_        = nullptr;
+    IUiOverlay*    overlay_      = nullptr;
+    CameraState*   camera_       = nullptr;
+    IFrameSource*  frame_source_ = nullptr;
 
     std::string selected_hash_;
     AlphBlock   selected_block;

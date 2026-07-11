@@ -50,27 +50,6 @@ glm::mat4 viewProj;
 
 static const float FOV = glm::radians(45.0f);
 
-// Shorten a segment so arrow ends sit outside cube centers (clearance in world units).
-static bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
-                          glm::vec3& from_out, glm::vec3& to_out)
-{
-    const glm::vec3 delta = to - from;
-    const float len = glm::length(delta);
-    if (len < 2.0f * clearance + 1e-4f)
-        return false;
-    const glm::vec3 dir = delta / len;
-    from_out = from + dir * clearance;
-    to_out   = to   - dir * clearance;
-    return true;
-}
-
-// Active frontier BlockFlow edges (not per-shard muted colors)
-static const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);
-// Selection dependency edges
-static const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
-// Hover preview deps (dimmer gold)
-static const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
-
 static constexpr bool kHoverPickEnabled = true;
 
 const VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
@@ -94,9 +73,6 @@ const uint16_t VulkanEngine::CUBE_INDICES[36] = {
 };
 
 static bool s_resized;
-
-// Layout spacing (not camera; still engine-side until layout owns params fully)
-static float meters_per_height = ALPH_TARGET_BLOCK_SECONDS;
 
 // Camera rotate-into (selection) / rotate-home (right-click clear)
 static constexpr float kLookOmega = 10.0f; // slerp ease rate (higher = snappier)
@@ -138,6 +114,11 @@ void VulkanEngine::set_ui_overlay(IUiOverlay* overlay)
 void VulkanEngine::set_camera(CameraState* camera)
 {
     camera_ = camera;
+}
+
+void VulkanEngine::set_frame_source(IFrameSource* source)
+{
+    frame_source_ = source;
 }
 
 void VulkanEngine::resize(uint32_t w, uint32_t h)
@@ -420,12 +401,10 @@ void VulkanEngine::render_loop()
 
     while (running)
     {
-        // Start the Dear ImGui frame
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        //start frame
         QueryPerformanceCounter(&t1);
 
         debugDrawer.clear();
@@ -441,64 +420,34 @@ void VulkanEngine::render_loop()
             selected_detail_local = selected_block;
         }
 
-        UiSnapshot frame_ui{};
-        std::vector<std::string> frame_pick_map;
-
+        // Catch up selection detail under scene lock (engine-owned policy).
         if (scene_)
         {
             std::unique_lock<std::mutex> lock(scene_->mutex());
+            std::lock_guard<std::mutex> slock(selection_mutex_);
+            refresh_selection_if_needed(*scene_);
+            selected_hash_local = selected_hash_;
+            hovered_hash_local = hovered_hash_;
+            selected_detail_local = selected_block;
+        }
 
-            LayoutParams layout_params;
-            layout_params.meters_per_height = meters_per_height;
-            layout_params.base_radius = 20.0f;
-            layout_params.lane_count = 16;
+        UiSnapshot frame_ui{};
+        std::vector<std::string> frame_pick_map;
 
-            // Layout from BlockGraph node snapshot
-            const std::vector<GraphNode> graph_nodes = scene_->nodes_snapshot();
-            LayoutResult layout = polar_layout_.build(graph_nodes, layout_params);
-            const auto& block_positions = layout.positions;
+        if (frame_source_)
+        {
+            FrameSourceInput fin{};
+            fin.selected_hash = selected_hash_local;
+            fin.hovered_hash = hovered_hash_local;
+            fin.selected_detail = selected_detail_local;
 
-            {
-                std::lock_guard<std::mutex> slock(selection_mutex_);
-                refresh_selection_if_needed(*scene_);
-                selected_hash_local = selected_hash_;
-                hovered_hash_local = hovered_hash_;
-                selected_detail_local = selected_block;
-            }
+            FrameSourceOutput fout{};
+            // Host ScenePresenter locks scene; must not hold scene mutex here.
+            frame_source_->prepare(fin, fout, &debugDrawer);
 
-            // Selection world pos → rotate-into aim (frozen dir, held until right-click)
-            has_look_target_ = false;
-            if (!selected_hash_local.empty())
-            {
-                auto lit = block_positions.find(selected_hash_local);
-                if (lit != block_positions.end())
-                {
-                    selected_look_pos_ = lit->second;
-                    has_look_target_ = true;
-                }
-            }
-
-            // Build GPU instances + pick map
-            std::vector<GpuInstance> gpu_instances;
-            gpu_instances.reserve(layout.placements.size());
-            frame_pick_map.reserve(layout.placements.size());
-            for (const PlacedBlock& placed : layout.placements)
-            {
-                if (gpu_instances.size() >= static_cast<size_t>(MAX_INSTANCES))
-                {
-                    printf("Instance buffer full\n");
-                    break;
-                }
-
-                glm::vec3 color = placed.color;
-                if (!selected_hash_local.empty() && placed.hash == selected_hash_local)
-                    color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
-                else if (!hovered_hash_local.empty() && placed.hash == hovered_hash_local)
-                    color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
-
-                gpu_instances.push_back(GpuInstance{ placed.pos, color });
-                frame_pick_map.push_back(placed.hash);
-            }
+            has_look_target_ = fout.has_look_target;
+            if (fout.has_look_target)
+                selected_look_pos_ = fout.look_target_pos;
 
             const glm::vec3 eye = camera_eye();
             if (has_look_target_ && selected_hash_local != look_aim_hash_)
@@ -506,127 +455,18 @@ void VulkanEngine::render_loop()
             else if (selected_hash_local.empty() && look_engaged_)
                 end_look_aim();
             update_look_direction(last_frame_dt_sec_, eye);
-            const CameraUBO camera = build_camera_ubo();
+
             FrameSubmit submit{};
-            submit.instances = gpu_instances.empty() ? nullptr : gpu_instances.data();
-            submit.instance_count = gpu_instances.size();
-            submit.camera = camera;
+            submit.instances = fout.instances.empty() ? nullptr : fout.instances.data();
+            submit.instance_count = fout.instances.size();
+            submit.camera = build_camera_ubo();
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, frame_pick_map);
+            publish_frame(submit, fout.pick_map);
 
-            // Dependency arrows (render-thread debug meshes; domain still locked)
-            {
-                const float tip_len    = std::max(0.18f, meters_per_height * 0.08f);
-                const float tip_rad    = std::max(0.06f, meters_per_height * 0.03f);
-                const float shaft_r    = tip_rad * 0.4f;
-                const float clearance  = std::max(0.55f, meters_per_height * 0.12f);
-                constexpr uint32_t kDepRadial    = 8;
-                constexpr uint32_t kMaxDepArrows = 512;
-                uint32_t arrow_count = 0;
-
-                auto add_dep_arrow = [&](const glm::vec3& from, const glm::vec3& to,
-                                         const glm::vec4& color, float tip_scale = 1.f)
-                {
-                    if (arrow_count >= kMaxDepArrows)
-                        return;
-                    glm::vec3 from_inset, to_inset;
-                    if (!inset_segment(from, to, clearance, from_inset, to_inset))
-                        return;
-                    debugDrawer.add_arrow(from_inset, to_inset, color,
-                                          tip_len * tip_scale, tip_rad * tip_scale,
-                                          shaft_r * tip_scale, kDepRadial);
-                    ++arrow_count;
-                };
-
-                auto draw_deps_of = [&](const AlphBlock& block, const glm::vec4& color, float tip_scale)
-                {
-                    auto to_it = block_positions.find(block.hash);
-                    if (to_it == block_positions.end())
-                        return;
-                    for (const std::string& dep_hash : block.deps)
-                    {
-                        if (arrow_count >= kMaxDepArrows)
-                            break;
-                        auto from_it = block_positions.find(dep_hash);
-                        if (from_it == block_positions.end())
-                            continue;
-                        add_dep_arrow(from_it->second, to_it->second, color, tip_scale);
-                    }
-                };
-
-                // A) Active tip BlockFlow edges — tip nodes from graph (max height / lane)
-                for (const NodeId& tip_hash : scene_->tip_ids())
-                {
-                    if (auto d = scene_->detail_store().get(tip_hash))
-                        draw_deps_of(*d, kActiveArrowColor, 1.f);
-                }
-
-                const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
-                const float ghost_half = 1.0f;
-
-                auto draw_selection_deps = [&](const AlphBlock& block)
-                {
-                    auto to_it = block_positions.find(block.hash);
-                    if (to_it == block_positions.end())
-                        return;
-                    const glm::vec3& to_pos = to_it->second;
-                    const int parent_lane = block.chain_idx();
-                    int missing_i = 0;
-
-                    for (const std::string& dep_hash : block.deps)
-                    {
-                        auto from_it = block_positions.find(dep_hash);
-                        if (from_it != block_positions.end())
-                        {
-                            add_dep_arrow(from_it->second, to_pos, kSelectionArrowColor, 1.15f);
-                            continue;
-                        }
-
-                        const float angle =
-                            ((static_cast<float>(parent_lane) + 0.35f +
-                              0.08f * static_cast<float>(missing_i)) /
-                             16.0f) *
-                            2.0f * 3.14159265f;
-                        const float radius = 20.0f * 0.9f;
-                        glm::vec3 ghost(
-                            radius * std::cos(angle),
-                            radius * std::sin(angle),
-                            to_pos.z + meters_per_height);
-                        debugDrawer.add_wire_box(ghost, ghost_half, kMissingOutline);
-                        debugDrawer.add_line(to_pos, ghost, kMissingOutline);
-                        ++missing_i;
-                    }
-                };
-
-                if (!selected_hash_local.empty() && selected_detail_local.hash == selected_hash_local)
-                    draw_selection_deps(selected_detail_local);
-                else if (!selected_hash_local.empty())
-                {
-                    if (auto d = scene_->detail_store().get(selected_hash_local))
-                        draw_selection_deps(*d);
-                }
-
-                if (!hovered_hash_local.empty() && hovered_hash_local != selected_hash_local)
-                {
-                    if (auto d = scene_->detail_store().get(hovered_hash_local))
-                        draw_deps_of(*d, kHoverArrowColor, 1.05f);
-                }
-            }
-
-            // Build UiSnapshot while still under scene lock (feed/total stable)
-            frame_ui.total_blocks = scene_->total_blocks();
+            frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
-            for (const RecentFeedItem& b : scene_->feed())
-            {
-                FeedEntry e;
-                e.hash = b.hash;
-                e.chainFrom = b.chainFrom;
-                e.chainTo = b.chainTo;
-                e.height = b.height;
-                frame_ui.feed.push_back(std::move(e));
-            }
         }
         else
         {
@@ -642,32 +482,27 @@ void VulkanEngine::render_loop()
             frame_ui.seq = submit_seq_;
         }
 
-        // PR7: publish overlay snapshot + apply latest GPU frame (triple-buffer acquire)
         publish_ui_snapshot(std::move(frame_ui));
         apply_published_frame();
 
-        // PR8: app chrome only via IUiOverlay (explorer URLs live in overlay TU)
         if (overlay_)
             overlay_->draw();
 
         ImGui::Render();
-        // GPU buffers filled via apply_published_frame (PR7); viewProj set there for debug draw
         render();
 
-        elapsedSeconds += static_cast<float>(dt) * 0.001f; // auto scroll along view
+        elapsedSeconds += static_cast<float>(dt) * 0.001f;
 
-        do //end frame
+        do
         {
             QueryPerformanceCounter(&t2);
             dt = static_cast<double>((t2.QuadPart - t1.QuadPart) * 1000LL / freq.QuadPart);
             t += dt;
         } while (dt <= frameTimeMin);
 
-        // Next frame's look slerp uses this dt (seconds)
         last_frame_dt_sec_ = static_cast<float>(dt) * 0.001f;
         if (last_frame_dt_sec_ < 1e-4f || last_frame_dt_sec_ > 0.1f)
             last_frame_dt_sec_ = 1.f / 60.f;
-
     }
 
 }   /* render_loop() */

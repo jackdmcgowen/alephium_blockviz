@@ -11,8 +11,40 @@
 #include <string>
 #include <vector>
 
+#include <glm/glm.hpp>
+
 class BlockScene;
 class CameraState;
+class DebugDrawer; // graphics debug draw; filled on render thread (E14)
+
+// Selection/hover snapshot the engine passes into the host frame builder (E14).
+struct FrameSourceInput
+{
+    std::string selected_hash;
+    std::string hovered_hash;
+    AlphBlock   selected_detail;
+};
+
+// Domain → GPU/UI products built on the render thread by the host (E14).
+struct FrameSourceOutput
+{
+    std::vector<GpuInstance> instances;
+    std::vector<std::string> pick_map;
+    bool      has_look_target = false;
+    glm::vec3 look_target_pos{ 0.f };
+    UiSnapshot ui{};
+};
+
+// Host implements; engine calls prepare() each frame on the render thread.
+// prepare may lock BlockScene; engine must not hold scene mutex across the call.
+class IFrameSource
+{
+public:
+    virtual ~IFrameSource() = default;
+    // debug may be null; when non-null it is already cleared for this frame.
+    virtual void prepare(const FrameSourceInput& in, FrameSourceOutput& out,
+                         DebugDrawer* debug) = 0;
+};
 
 // App + network selection / domain wiring beyond pure IRenderEngine.
 class IBlockvizEngine : public IRenderEngine
@@ -22,6 +54,7 @@ public:
 
     virtual void set_scene(BlockScene* scene) = 0;
     virtual void set_camera(CameraState* camera) = 0;
+    virtual void set_frame_source(IFrameSource* source) = 0; // not owned; nullptr = empty scene path
 
     virtual void set_selection(const std::string& hash) = 0;
     virtual void clear_selection() = 0;
