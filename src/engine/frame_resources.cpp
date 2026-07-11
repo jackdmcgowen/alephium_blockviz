@@ -1,5 +1,4 @@
 #include "engine/frame_resources.hpp"
-#include "gpu_prv_lib.h"
 
 #include <algorithm>
 #include <cstring>
@@ -7,82 +6,63 @@
 
 void FrameResources::create(const FrameResourcesCreateInfo& info)
 {
-    if (!info.device || !info.mem_props || !info.cube_vertices || !info.cube_indices ||
-        info.max_instances == 0)
+    if (!info.device || !info.mem_props || !info.buffer_manager || !info.cube_vertices ||
+        !info.cube_indices || info.max_instances == 0)
         throw std::runtime_error("FrameResources::create: invalid info");
 
     destroy(info.device);
-    device_ = info.device;
-    mem_props_ = info.mem_props;
+    buffers_ = info.buffer_manager;
     max_instances_ = info.max_instances;
 
-    create_buffer(device_, mem_props_, info.cube_vertex_bytes,
-                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  vertex_buffer_, vertex_memory_);
+    const VkMemoryPropertyFlags host =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    vertex_ = buffers_->create(BufferDesc{
+        info.cube_vertex_bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "cube.vb"});
     {
-        void* data = nullptr;
-        vkMapMemory(device_, vertex_memory_, 0, info.cube_vertex_bytes, 0, &data);
+        void* data = vertex_.map(info.device);
         if (data)
-        {
             std::memcpy(data, info.cube_vertices, info.cube_vertex_bytes);
-            vkUnmapMemory(device_, vertex_memory_);
-        }
+        vertex_.unmap(info.device);
     }
 
-    create_buffer(device_, mem_props_, info.cube_index_bytes,
-                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  index_buffer_, index_memory_);
+    index_ = buffers_->create(BufferDesc{
+        info.cube_index_bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, host, "cube.ib"});
     {
-        void* data = nullptr;
-        vkMapMemory(device_, index_memory_, 0, info.cube_index_bytes, 0, &data);
+        void* data = index_.map(info.device);
         if (data)
-        {
             std::memcpy(data, info.cube_indices, info.cube_index_bytes);
-            vkUnmapMemory(device_, index_memory_);
-        }
+        index_.unmap(info.device);
     }
 
     const VkDeviceSize inst_size =
         static_cast<VkDeviceSize>(sizeof(InstanceData)) * max_instances_;
-    create_buffer(device_, mem_props_, inst_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  instance_buffer_, instance_memory_);
-    vkMapMemory(device_, instance_memory_, 0, inst_size, 0, &mapped_instances_);
+    instance_ = buffers_->create(BufferDesc{
+        inst_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "cube.instances"});
+    mapped_instances_ = instance_.map(info.device);
     instance_count_ = 0;
 
-    create_buffer(device_, mem_props_, sizeof(UniformBufferObject),
-                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  uniform_buffer_, uniform_memory_);
+    uniform_ = buffers_->create(BufferDesc{
+        sizeof(UniformBufferObject), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, host, "frame.ubo"});
 }
 
 void FrameResources::destroy(VkDevice device)
 {
-    if (!device)
+    if (!buffers_)
         return;
 
-    if (mapped_instances_)
+    if (mapped_instances_ && instance_.valid())
     {
-        vkUnmapMemory(device, instance_memory_);
+        instance_.unmap(device);
         mapped_instances_ = nullptr;
     }
-    if (vertex_buffer_ != VK_NULL_HANDLE)
-        destroy_buffer(device, vertex_buffer_, vertex_memory_);
-    if (index_buffer_ != VK_NULL_HANDLE)
-        destroy_buffer(device, index_buffer_, index_memory_);
-    if (instance_buffer_ != VK_NULL_HANDLE)
-        destroy_buffer(device, instance_buffer_, instance_memory_);
-    if (uniform_buffer_ != VK_NULL_HANDLE)
-        destroy_buffer(device, uniform_buffer_, uniform_memory_);
-
-    vertex_buffer_ = index_buffer_ = instance_buffer_ = uniform_buffer_ = VK_NULL_HANDLE;
-    vertex_memory_ = index_memory_ = instance_memory_ = uniform_memory_ = VK_NULL_HANDLE;
+    buffers_->destroy(vertex_);
+    buffers_->destroy(index_);
+    buffers_->destroy(instance_);
+    buffers_->destroy(uniform_);
     instance_count_ = 0;
     max_instances_ = 0;
-    device_ = VK_NULL_HANDLE;
-    mem_props_ = nullptr;
+    buffers_ = nullptr;
 }
 
 size_t FrameResources::upload_instances(const GpuInstance* instances, size_t count)
@@ -112,14 +92,13 @@ void FrameResources::upload_camera(const CameraUBO& camera, glm::mat4* out_view_
     if (out_view_proj)
         *out_view_proj = ubo.proj * ubo.view;
 
-    if (uniform_memory_ == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE)
+    if (!uniform_.valid() || !buffers_ || !buffers_->device())
         return;
 
-    void* data = nullptr;
-    vkMapMemory(device_, uniform_memory_, 0, sizeof(ubo), 0, &data);
+    void* data = uniform_.map(buffers_->device());
     if (data)
     {
         std::memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(device_, uniform_memory_);
+        uniform_.unmap(buffers_->device());
     }
 }

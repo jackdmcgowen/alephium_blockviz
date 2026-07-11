@@ -191,6 +191,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     log_engine_startup(deviceProps, engine_id);
     create_device(instance, physicalDevice, surface, &device, &queues_);
+    buffer_manager_.reset(device, &deviceMemProps);
 
     swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -209,7 +210,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
         pr.width = width;
         pr.height = height;
         picker_.create_resources(pr);
-        picker_.create_staging(device, &deviceMemProps);
+        picker_.create_staging(&buffer_manager_);
     }
     picker_pipe_.create(device, frame_descriptors_.layout(), picker_.color_format(),
                         swapchain_targets_.depth_format(), width, height);
@@ -275,7 +276,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
 
 
     meshArena = new MeshArena();
-    if (!meshArena->create(device, &deviceMemProps, swapchainImageFormat, depth_fmt))
+    if (!meshArena->create(device, &deviceMemProps, &buffer_manager_, swapchainImageFormat, depth_fmt))
     {
         printf("Failed to create MeshArena for debug drawing\n");
     }
@@ -860,6 +861,7 @@ void VulkanEngine::create_frame_resources()
     FrameResourcesCreateInfo info{};
     info.device = device;
     info.mem_props = &deviceMemProps;
+    info.buffer_manager = &buffer_manager_;
     info.cube_vertices = CUBE_VERTICES;
     info.cube_vertex_bytes = sizeof(CUBE_VERTICES);
     info.cube_indices = CUBE_INDICES;

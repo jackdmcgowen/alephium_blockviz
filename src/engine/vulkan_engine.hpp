@@ -28,6 +28,7 @@
 #include "engine/sobel_compute.hpp"
 #include "engine/swapchain_targets.hpp"
 #include "engine/vertex_types.hpp"
+#include "graphics/buffer_manager.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
 #include "graphics/queue_types.hpp"
@@ -91,6 +92,7 @@ private:
     VkPhysicalDeviceMemoryProperties deviceMemProps;
     VkDevice device;
     DeviceQueues queues_{}; // indexed by QueueType {_3D, TX, CMP}
+    BufferManager buffer_manager_;
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     std::vector<VkImage> swapchainImages;

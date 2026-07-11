@@ -73,36 +73,30 @@ void Picker::recreate_resources(const PickerResourcesCreateInfo& info)
     create_resources(info);
 }
 
-void Picker::create_staging(VkDevice device, VkPhysicalDeviceMemoryProperties* mem_props)
+void Picker::create_staging(BufferManager* buffers)
 {
-    if (!device || !mem_props)
-        throw std::runtime_error("Picker::create_staging: invalid args");
-
-    create_buffer(
-        device, mem_props,
+    if (!buffers)
+        throw std::runtime_error("Picker::create_staging: null BufferManager");
+    destroy_staging();
+    buffers_ = buffers;
+    staging_ = buffers_->create(BufferDesc{
         kPickerReadExtent.width * kPickerReadExtent.height * sizeof(uint32_t),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        staging_buffer_,
-        staging_memory_);
+        "picker.staging"});
 }
 
-void Picker::destroy_staging(VkDevice device)
+void Picker::destroy_staging()
 {
-    if (!device)
-        return;
-    if (staging_buffer_ != VK_NULL_HANDLE)
-    {
-        destroy_buffer(device, staging_buffer_, staging_memory_);
-        staging_buffer_ = VK_NULL_HANDLE;
-        staging_memory_ = VK_NULL_HANDLE;
-    }
+    if (buffers_ && staging_.valid())
+        buffers_->destroy(staging_);
+    buffers_ = nullptr;
 }
 
 void Picker::destroy(VkDevice device)
 {
     destroy_resources(device);
-    destroy_staging(device);
+    destroy_staging();
 }
 
 void Picker::record_pass(const PickerRecordParams& p)
@@ -208,21 +202,21 @@ void Picker::record_pass(const PickerRecordParams& p)
     vkCmdCopyImageToBuffer(p.cmd,
         image_,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        staging_buffer_,
+        staging_.handle(),
         1, &copyRegion);
 }
 
 uint32_t Picker::read_object_id(VkDevice device) const
 {
-    if (!device || staging_memory_ == VK_NULL_HANDLE)
+    if (!device || !staging_.valid())
         return kPickerInvalidId;
 
     uint32_t* ptr = nullptr;
     std::vector<uint32_t> id(kPickerReadExtent.width * kPickerReadExtent.height);
 
-    vkMapMemory(device, staging_memory_, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&ptr));
+    vkMapMemory(device, staging_.memory(), 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&ptr));
     std::memcpy(id.data(), ptr, kPickerReadExtent.width * kPickerReadExtent.height * sizeof(uint32_t));
-    vkUnmapMemory(device, staging_memory_);
+    vkUnmapMemory(device, staging_.memory());
 
     return (id[0] == kPickerInvalidId) ? kPickerInvalidId : id[0];
 }

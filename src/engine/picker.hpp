@@ -3,6 +3,7 @@
 // GPU pick resources + record pass + CPU readback (E10).
 // Pick policy (when to pick, hash maps, selection) stays on VulkanEngine.
 #include "engine/vertex_types.hpp"
+#include "graphics/buffer_manager.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -50,8 +51,8 @@ public:
 
     void recreate_resources(const PickerResourcesCreateInfo& info);
 
-    void create_staging(VkDevice device, VkPhysicalDeviceMemoryProperties* mem_props);
-    void destroy_staging(VkDevice device);
+    void create_staging(BufferManager* buffers);
+    void destroy_staging();
 
     void destroy(VkDevice device); // resources + staging
 
@@ -66,6 +67,6 @@ private:
     VkImageView image_view_ = VK_NULL_HANDLE;
     VkDeviceMemory memory_ = VK_NULL_HANDLE;
 
-    VkBuffer staging_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory staging_memory_ = VK_NULL_HANDLE;
+    BufferManager* buffers_ = nullptr;
+    GpuBuffer staging_;
 };

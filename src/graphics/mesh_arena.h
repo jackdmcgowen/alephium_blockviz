@@ -1,5 +1,7 @@
 #pragma once
 
+#include "buffer_manager.hpp"
+
 #include <cstdint>
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -22,6 +24,7 @@ public:
 
     bool create(VkDevice device,
                 VkPhysicalDeviceMemoryProperties* mem_props,
+                BufferManager* buffer_manager,
                 VkFormat color_format,
                 VkFormat depth_format,
                 uint32_t max_vertices = kDefaultMaxVertices,
@@ -40,6 +43,7 @@ private:
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties* mem_props_ = nullptr;
+    BufferManager* buffers_ = nullptr;
     VkFormat color_format_ = VK_FORMAT_UNDEFINED;
     VkFormat depth_format_ = VK_FORMAT_UNDEFINED;
 
@@ -50,17 +54,12 @@ private:
     uint32_t uploaded_vertex_count_ = 0;
     uint32_t uploaded_line_count_ = 0;
 
-    VkBuffer       vertex_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory vertex_memory_ = VK_NULL_HANDLE;
-    void*          vertex_mapped_ = nullptr;
-
-    VkBuffer       index_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory index_memory_ = VK_NULL_HANDLE;
-    void*          index_mapped_ = nullptr;
-
-    VkBuffer       line_buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory line_memory_ = VK_NULL_HANDLE;
-    void*          line_mapped_ = nullptr;
+    GpuBuffer vertex_;
+    GpuBuffer index_;
+    GpuBuffer line_;
+    void* vertex_mapped_ = nullptr;
+    void* index_mapped_ = nullptr;
+    void* line_mapped_ = nullptr;
 
     VkPipelineLayout pipeline_layout_ = VK_NULL_HANDLE;
     VkPipeline       tri_pipeline_  = VK_NULL_HANDLE;
