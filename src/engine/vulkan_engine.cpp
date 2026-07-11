@@ -675,30 +675,16 @@ void VulkanEngine::render_loop()
 
 void VulkanEngine::render()
 {
-    static uint64_t s_frameCounter;
-    static uint32_t imageIndex;
-    static bool     resizing = false;
-
-    VkResult 		result;
-    VkCommandBuffer commandBuffer;
-    VkSemaphore     imageAvailableSemaphore;
-    VkSemaphore     renderFinishedSemaphore;
-
     std::lock_guard<std::mutex> lk(renderMutex);
 
-    currentFrame = s_frameCounter % MAX_FRAMES_IN_FLIGHT;
+    const FramePresenter::BeginResult begin =
+        frame_presenter_.begin(device, frame_sync_, MAX_FRAMES_IN_FLIGHT);
+    currentFrame = static_cast<int>(begin.frame_index);
 
-    FramesInFlight& frame = inFlightFrames[currentFrame];
-    commandBuffer = frame.commandBuffer;
-
-    frame_sync_.wait_frame(device, static_cast<uint32_t>(currentFrame));
-
-    if (resizing)
-    {
+    if (begin.run_deferred_resize)
         resize_internal();
-        resizing = false;
-    }
 
+    // Pick resolve for previous frame's pending GPU readback (engine policy).
     if (inFlightFrames[currentFrame].pendingPick)
     {
         const PickKind kind = inFlightFrames[currentFrame].pickKind;
@@ -727,60 +713,22 @@ void VulkanEngine::render()
     inFlightFrames[currentFrame].pick_map = pick_id_to_hash_;
     inFlightFrames[currentFrame].pick_frame_seq = gpu_frame_seq_;
 
-    imageAvailableSemaphore = frame_sync_.image_available(static_cast<uint32_t>(currentFrame));
-    result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
-        resizing = true;
-    renderFinishedSemaphore = frame_sync_.render_finished(imageIndex);
+    const FramePresenter::AcquireResult acq =
+        frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
 
+    VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
-    record_command_buffer(commandBuffer, imageIndex, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-    const uint64_t signalValues[] = { s_frameCounter + 1, 0 };
-
-    VkCommandBufferSubmitInfo cbSubmitInfo{};
-    cbSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cbSubmitInfo.commandBuffer = commandBuffer;
-
-    VkSemaphoreSubmitInfo waitInfo{};
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    waitInfo.semaphore = imageAvailableSemaphore;
-
-    VkSemaphoreSubmitInfo signalInfo[2]{};
-    signalInfo[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalInfo[0].semaphore = frame_sync_.timeline();
-    signalInfo[0].value = signalValues[0];
-    signalInfo[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    signalInfo[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalInfo[1].semaphore = renderFinishedSemaphore;
-    signalInfo[1].value = signalValues[1];
-    signalInfo[1].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-    VkSubmitInfo2 submitInfo2{};
-    submitInfo2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo2.commandBufferInfoCount = 1;
-    submitInfo2.pCommandBufferInfos = &cbSubmitInfo;
-    submitInfo2.signalSemaphoreInfoCount = 2;
-    submitInfo2.pSignalSemaphoreInfos = signalInfo;
-    submitInfo2.waitSemaphoreInfoCount = 1;
-    submitInfo2.pWaitSemaphoreInfos = &waitInfo;
-
-    if (vkQueueSubmit2(graphicsQueue, 1, &submitInfo2, VK_NULL_HANDLE) != VK_SUCCESS)
-        throw std::runtime_error("Failed to submit draw command buffer");
-
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &renderFinishedSemaphore;
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &swapchain;
-    presentInfo.pImageIndices = &imageIndex;
-
-    vkQueuePresentKHR(graphicsQueue, &presentInfo);
-
-    frame_sync_.set_frame_timeline_value(static_cast<uint32_t>(currentFrame), signalValues[0]);
-    s_frameCounter++;
+    frame_presenter_.submit_and_present(
+        graphicsQueue,
+        swapchain,
+        frame_sync_,
+        begin.frame_index,
+        acq.image_index,
+        commandBuffer,
+        acq.image_available,
+        acq.render_finished);
 
 }   /* render() */
 
