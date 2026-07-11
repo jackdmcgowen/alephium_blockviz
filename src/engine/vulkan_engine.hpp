@@ -20,6 +20,7 @@
 #include "engine/blockviz_engine_api.hpp"
 #include "engine/frame_resources.hpp"
 #include "engine/frame_sync.hpp"
+#include "engine/picker.hpp"
 #include "engine/pipelines/cube_pipeline.hpp"
 #include "engine/pipelines/picker_pipeline.hpp"
 #include "engine/swapchain_targets.hpp"
@@ -96,13 +97,7 @@ private:
     CubePipeline cube_pipe_;
     PickerPipeline picker_pipe_;
     FrameResources frame_resources_;
-
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingMemory;
-
-    VkImage picker_image;
-    VkImageView picker_imageView;
-    VkDeviceMemory picker_memory;
+    Picker picker_;
 
     VkCommandPool commandPool;
     FrameSync frame_sync_;
@@ -164,8 +159,6 @@ private:
     void render();
     void create_swapchain_targets();
     void create_descriptor_set_layout();
-    void create_picker_resources();
-    void create_picker_staging();
     void create_frame_resources();
     void create_descriptor_pool();
     void create_descriptor_sets();
@@ -200,9 +193,6 @@ private:
 
     mutable std::mutex ui_snap_mutex_;
     UiSnapshot ui_snap_;
-
-    void record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset = 0);
-    uint32_t read_picker_obj_id(VkDevice device);
 
     void cleanup();
 };

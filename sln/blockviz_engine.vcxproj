@@ -99,6 +99,7 @@
     <ClCompile Include="..\src\engine\frame_sync.cpp" />
     <ClCompile Include="..\src\engine\frame_resources.cpp" />
     <ClCompile Include="..\src\engine\swapchain_targets.cpp" />
+    <ClCompile Include="..\src\engine\picker.cpp" />
     <ClCompile Include="..\src\engine\pipelines\cube_pipeline.cpp" />
     <ClCompile Include="..\src\engine\pipelines\picker_pipeline.cpp" />
   </ItemGroup>
@@ -109,6 +110,7 @@
     <ClInclude Include="..\src\engine\frame_sync.hpp" />
     <ClInclude Include="..\src\engine\frame_resources.hpp" />
     <ClInclude Include="..\src\engine\swapchain_targets.hpp" />
+    <ClInclude Include="..\src\engine\picker.hpp" />
     <ClInclude Include="..\src\engine\vertex_types.hpp" />
     <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp" />
     <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp" />

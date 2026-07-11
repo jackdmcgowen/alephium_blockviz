@@ -44,12 +44,6 @@ static void check_vk_result(VkResult err)
 }   /* check_vk_result() */
 
 
-const VkFormat PICKING_FORMAT = VK_FORMAT_R32_UINT;
-const uint32_t INVALID_ID = ~0u;
-const VkExtent2D PICKING_EXT = { 1, 1 }; //smallest pow2 most drivers like
-static uint32_t pickMouseX;
-static uint32_t pickMouseY;
-
 static DebugDrawer debugDrawer;
 static MeshArena* meshArena = nullptr;
 glm::mat4 viewProj;
@@ -261,10 +255,17 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     create_descriptor_set_layout();
     cube_pipe_.create(device, descriptorSetLayout, swapchainImageFormat,
                       swapchain_targets_.depth_format(), width, height);
-    create_picker_resources();
-    picker_pipe_.create(device, descriptorSetLayout, PICKING_FORMAT,
+    {
+        PickerResourcesCreateInfo pr{};
+        pr.device = device;
+        pr.mem_props = &deviceMemProps;
+        pr.width = width;
+        pr.height = height;
+        picker_.create_resources(pr);
+        picker_.create_staging(device, &deviceMemProps);
+    }
+    picker_pipe_.create(device, descriptorSetLayout, picker_.color_format(),
                         swapchain_targets_.depth_format(), width, height);
-    create_picker_staging();
     create_command_pool();
     create_frame_resources();
     create_descriptor_pool();
@@ -742,11 +743,11 @@ void VulkanEngine::render()
         inFlightFrames[currentFrame].pendingPick = false;
         inFlightFrames[currentFrame].pickKind = PickKind::None;
 
-        const uint32_t picked = read_picker_obj_id(device);
+        const uint32_t picked = picker_.read_object_id(device);
         const auto& pick_map = inFlightFrames[currentFrame].pick_map;
 
         std::string resolved;
-        if (picked != INVALID_ID && picked < pick_map.size())
+        if (picked != kPickerInvalidId && picked < pick_map.size())
             resolved = pick_map[picked];
 
         if (kind == PickKind::Click)
@@ -862,13 +863,17 @@ void VulkanEngine::resize_internal()
 
     vkDeviceWaitIdle(device);
 
-    destroy_image_view(device, picker_imageView);
-    destroy_image(device, picker_image, picker_memory);
-
     swapchainExtent = { width, height };
     create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
     create_swapchain_targets();
-    create_picker_resources();
+    {
+        PickerResourcesCreateInfo pr{};
+        pr.device = device;
+        pr.mem_props = &deviceMemProps;
+        pr.width = width;
+        pr.height = height;
+        picker_.recreate_resources(pr);
+    }
 
     s_resized = true;
 
@@ -914,39 +919,6 @@ void VulkanEngine::create_descriptor_set_layout()
     }
 
 }   /* create_descriptor_set_layout() */
-
-
-void VulkanEngine::create_picker_resources()
-{
-    // 1. Picking image
-    create_image(
-        device,
-        width, height,
-        PICKING_FORMAT,
-        VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        picker_image,
-        picker_memory,
-        &deviceMemProps
-        );
-
-    picker_imageView = create_image_view(device, picker_image, PICKING_FORMAT, VK_IMAGE_ASPECT_COLOR_BIT);
-
-}   /* create_picker_resources() */
-
-
-void VulkanEngine::create_picker_staging()
-{
-    create_buffer(
-        device, &deviceMemProps,
-        PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer,
-        stagingMemory
-    );
-}
 
 
 void VulkanEngine::create_frame_resources()
@@ -1248,136 +1220,6 @@ void VulkanEngine::update_uniform_buffer()
 }
 
 
-uint32_t VulkanEngine::read_picker_obj_id(VkDevice device)
-{
-    uint32_t* ptr;
-    std::vector<uint32_t> id(PICKING_EXT.width * PICKING_EXT.height);
-
-    vkMapMemory(device, stagingMemory, 0, VK_WHOLE_SIZE, 0, (void**)&ptr);
-    memcpy(id.data(), ptr, PICKING_EXT.width * PICKING_EXT.height * sizeof(uint32_t));
-    vkUnmapMemory(device, stagingMemory);
-
-    return (id[0] == INVALID_ID) ? ~0u : id[0];
-
-}   /* read_picker_obj_id() */
-
-
-void VulkanEngine::record_picker_pass(VkCommandBuffer buffer, uint32_t mouseX, uint32_t mouseY, uint32_t instanceOffset)
-{
-    VkImageSubresourceRange         subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 };
-
-    // Transition to COLOR_ATTACHMENT_OPTIMAL (assume coming from UNDEFINED or TRANSFER_SRC)
-    if (s_resized)
-    {
-        pipeline_barrier(buffer, picker_image,
-            VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 });
-
-    }
-    else
-    {
-        pipeline_barrier(buffer, picker_image,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 });
-    }
-
-    // Begin rendering
-
-
-    VkRenderingAttachmentInfo colorAttachment{};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = picker_imageView,
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color.uint32[0] = INVALID_ID;
-
-    VkRenderingAttachmentInfo depthAttachment{};
-    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = swapchain_targets_.depth_view();
-    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
-
-    VkRenderingInfo renderInfo{};
-    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderInfo.renderArea = { { 0, 0 }, { width, height } };
-    renderInfo.layerCount = 1;
-    renderInfo.colorAttachmentCount = 1;
-    renderInfo.pColorAttachments = &colorAttachment;
-    renderInfo.pDepthAttachment = &depthAttachment;
-
-    vkCmdBeginRendering(buffer,  &renderInfo);
-
-    // Scissor = 1x1 at mouse position
-    VkRect2D scissor{};
-
-    scissor.offset = { (int32_t)mouseX, (int32_t)mouseY };
-    scissor.extent = { 1, 1 };
-    vkCmdSetScissor(buffer, 0, 1, &scissor);
-
-    // Viewport can stay full image
-    VkViewport vp{};
-    vp.x = 0;
-    vp.y = 0;
-    vp.width = (float)swapchainExtent.width;
-    vp.height = (float)swapchainExtent.height;
-    vp.minDepth = 0.0f;
-    vp.maxDepth = 1.0f;
-    vkCmdSetViewport(buffer, 0, 1, &vp);
-
-    // Bind your picking pipeline (color write only, no depth usually)
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipe_.pipeline);
-    vkCmdSetPrimitiveTopology(buffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-
-    // Push constants with mouse position
-    PickerPushConstants pc{};
-    pc.mouseX = mouseX;
-    pc.mouseY = mouseY;
-    pc.instanceOffset = instanceOffset;
-
-    vkCmdPushConstants(buffer, picker_pipe_.layout,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        0, sizeof(PickerPushConstants), &pc);
-
-    VkBuffer buffers[] = { frame_resources_.vertex_buffer(), frame_resources_.instance_buffer() };
-    VkDeviceSize offsets[] = { 0, 0 };
-    vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, picker_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
-    vkCmdBindIndexBuffer(buffer, frame_resources_.index_buffer(), 0, VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
-
-    //vkCmdEndRenderPass(buffer);
-    vkCmdEndRendering(buffer);
-
-    // Transition to TRANSFER_SRC (assume coming from UNDEFINED or TRANSFER_SRC)
-    pipeline_barrier(buffer, picker_image,
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 }
-    );
-
-    // Copy 4x4 (or whole small image) to staging
-    VkBufferImageCopy copyRegion{};
-    copyRegion.bufferOffset = 0;
-    copyRegion.bufferRowLength = 0;
-    copyRegion.bufferImageHeight = 0;
-    copyRegion.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copyRegion.imageOffset = { (int32_t)mouseX, (int32_t)mouseY, 0 };
-    copyRegion.imageExtent = { PICKING_EXT.width, PICKING_EXT.height, 1 };
-
-    vkCmdCopyImageToBuffer(buffer,
-        picker_image,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        stagingBuffer,
-        1, &copyRegion);
-
-}   /* record_picker_pass() */
-
-
 void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
     VkCommandBufferBeginInfo beginInfo{};
@@ -1500,9 +1342,23 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 
         if (request != PickKind::None)
         {
-            pickMouseX = static_cast<uint32_t>(mx);
-            pickMouseY = static_cast<uint32_t>(my);
-            record_picker_pass(buffer, pickMouseX, pickMouseY);
+            PickerRecordParams rp{};
+            rp.cmd = buffer;
+            rp.mouse_x = static_cast<uint32_t>(mx);
+            rp.mouse_y = static_cast<uint32_t>(my);
+            rp.width = width;
+            rp.height = height;
+            rp.viewport_extent = swapchainExtent;
+            rp.depth_view = swapchain_targets_.depth_view();
+            rp.image_layout_undefined = s_resized;
+            rp.pipeline = picker_pipe_.pipeline;
+            rp.pipeline_layout = picker_pipe_.layout;
+            rp.descriptor_set = descriptorSet;
+            rp.vertex_buffer = frame_resources_.vertex_buffer();
+            rp.instance_buffer = frame_resources_.instance_buffer();
+            rp.index_buffer = frame_resources_.index_buffer();
+            rp.instance_count = static_cast<uint32_t>(instanceCount);
+            picker_.record_pass(rp);
             inFlightFrames[currentFrame].pendingPick = true;
             inFlightFrames[currentFrame].pickKind = request;
         }
@@ -1538,8 +1394,6 @@ void VulkanEngine::cleanup()
     }
 
     frame_resources_.destroy(device);
-    destroy_buffer(device, stagingBuffer, stagingMemory);
-
 
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
@@ -1547,9 +1401,7 @@ void VulkanEngine::cleanup()
     frame_sync_.destroy(device);
     vkDestroyCommandPool(device, commandPool, nullptr);
 
-    destroy_image_view(device, picker_imageView);
-    destroy_image(device, picker_image, picker_memory);
-
+    picker_.destroy(device);
     picker_pipe_.destroy(device);
     cube_pipe_.destroy(device);
 
