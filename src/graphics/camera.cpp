@@ -100,10 +100,11 @@ CameraUBO Camera::to_ubo() const
     else
         f /= flen;
 
-    const glm::vec3 center = eye + f;
     cam.view = view_matrix();
     cam.proj = proj_matrix();
     cam.view_pos = eye;
-    cam.light_pos = center;
+    // Key light fixed relative to the Z-track (not look dir) so free-look does not
+    // swing the light. Offset: +X side, -Y "up" (camera up is (0,-1,0)), slightly +Z.
+    cam.light_pos = eye + glm::vec3(55.f, -90.f, 40.f);
     return cam;
 }

@@ -128,8 +128,11 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
 
     ImGui::Separator();
     ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+    int feed_i = 0;
     for (const FeedEntry& entry : ui.feed)
     {
+        // Index + hash: feed can list the same hash more than once.
+        ImGui::PushID(feed_i++);
         ImGui::PushID(entry.hash.c_str());
         const int shardId = entry.chain_idx() & 15;
         ImGui::TextColored(
@@ -142,11 +145,58 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
             ImGui::SetClipboardText(entry.hash.c_str());
         }
         ImGui::PopID();
+        ImGui::PopID();
     }
     ImGui::EndChild();
     ImGui::End();
     ImGui::PopStyleVar(2);
 }
+
+namespace
+{
+// Compact hash for tree labels (full id still available via link when expanded).
+void short_id(const std::string& s, char* buf, size_t buf_n)
+{
+    if (s.empty())
+    {
+        snprintf(buf, buf_n, "—");
+        return;
+    }
+    if (s.size() <= 14)
+    {
+        snprintf(buf, buf_n, "%s", s.c_str());
+        return;
+    }
+    snprintf(buf, buf_n, "%.6s…%.4s", s.c_str(), s.c_str() + s.size() - 4);
+}
+
+void explorer_url(char* buf, size_t n, const char* kind, const std::string& id)
+{
+    snprintf(buf, n, "https://explorer.alephium.org/%s/%s", kind, id.c_str());
+}
+
+// One UTXO row: link + amount (collapsed lists stay one line).
+void draw_utxo_row(UTXO& u, const char* kind, int index)
+{
+    ImGui::PushID(index);
+    char url[512];
+    char label[96];
+    short_id(u.address, label, sizeof(label));
+    explorer_url(url, sizeof(url), "addresses", u.address);
+
+    ImGui::Bullet();
+    ImGui::TextDisabled("%s", kind);
+    ImGui::SameLine();
+    ImGui::TextLinkOpenURL(u.address.empty() ? "##addr" : label, url);
+    if (ImGui::IsItemHovered() && !u.address.empty())
+        ImGui::SetTooltip("%s", u.address.c_str());
+    ImGui::SameLine();
+    ImGui::Text("%s ALPH", u.toAmount().c_str());
+    if (!u.key.empty() && ImGui::IsItemHovered())
+        ImGui::SetTooltip("key: %s\nhint: %d", u.key.c_str(), u.hint);
+    ImGui::PopID();
+}
+} // namespace
 
 void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h)
 {
@@ -170,58 +220,135 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
     ImGui::Begin("Block", nullptr, flags);
 
     char url[512];
+    char id_buf[64];
     if (!inspector.hash.empty())
     {
-        memset(url, 0, sizeof(url));
-        snprintf(url, sizeof(url), "https://explorer.alephium.org/blocks/%s",
-                 inspector.hash.c_str());
+        explorer_url(url, sizeof(url), "blocks", inspector.hash);
+        short_id(inspector.hash, id_buf, sizeof(id_buf));
 
-        ImGui::Text("hash:");
+        // ── Block header (always open, compact) ──
+        ImGui::TextDisabled("hash");
         ImGui::SameLine();
-        ImGui::TextLinkOpenURL(inspector.hash.c_str(), url);
-
-        ImGui::Text("height: %d", inspector.height);
+        ImGui::TextLinkOpenURL(id_buf, url);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s\n(click opens explorer)", inspector.hash.c_str());
 
         const int shardId = inspector.chain_idx() & 15;
-        ImGui::Text("chain:");
-        ImGui::SameLine();
+        ImGui::Text("height %d", inspector.height);
+        ImGui::SameLine(0.f, 16.f);
         ImGui::TextColored(
             ImVec4(kShardColors[shardId].r, kShardColors[shardId].g, kShardColors[shardId].b, 1.0f),
-            "[%d->%d]", inspector.chainFrom, inspector.chainTo);
+            "chain [%d→%d]", inspector.chainFrom, inspector.chainTo);
+
+        if (inspector.timestamp > 0)
+        {
+            const time_t t = static_cast<time_t>(inspector.timestamp / 1000);
+            char tbuf[40];
+            std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+            ImGui::TextDisabled("time %s", tbuf);
+        }
+
+        ImGui::TextDisabled("%d tx · %d deps · %d uncles",
+                            static_cast<int>(inspector.txns.size()),
+                            static_cast<int>(inspector.deps.size()),
+                            static_cast<int>(inspector.uncles.size()));
+
+        // ── Dependencies (collapsed by default) ──
+        if (!inspector.deps.empty() &&
+            ImGui::TreeNodeEx("##deps", ImGuiTreeNodeFlags_SpanAvailWidth,
+                              "Deps (%d)", static_cast<int>(inspector.deps.size())))
+        {
+            int di = 0;
+            for (const std::string& dep : inspector.deps)
+            {
+                ImGui::PushID(di++);
+                short_id(dep, id_buf, sizeof(id_buf));
+                explorer_url(url, sizeof(url), "blocks", dep);
+                ImGui::Bullet();
+                ImGui::TextLinkOpenURL(dep.empty() ? "##dep" : id_buf, url);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", dep.c_str());
+                ImGui::PopID();
+            }
+            ImGui::TreePop();
+        }
 
         ImGui::Separator();
+
+        // ── Transactions: one-line headers, expand for detail ──
         ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
+        if (inspector.txns.empty())
+            ImGui::TextDisabled("No transactions loaded (detail may still be fetching).");
 
-        for (auto& tx : inspector.txns)
+        // Lightweight: only clip closed rows when many txs (open rows still expand below).
+        const int txn_count = static_cast<int>(inspector.txns.size());
+        for (int tx_i = 0; tx_i < txn_count; ++tx_i)
         {
-            memset(url, 0, sizeof(url));
-            snprintf(url, sizeof(url), "https://explorer.alephium.org/transactions/%s",
-                     tx.txid.c_str());
+            AlphTxn& tx = inspector.txns[static_cast<size_t>(tx_i)];
+            ImGui::PushID(tx_i);
+            ImGui::PushID(tx.txid.c_str());
 
-            ImGui::Separator();
-            ImGui::Text("txid:");
-            ImGui::SameLine();
-            ImGui::TextLinkOpenURL(tx.txid.c_str(), url);
+            short_id(tx.txid, id_buf, sizeof(id_buf));
+            const int n_in = static_cast<int>(tx.inputs.size());
+            const int n_out = static_cast<int>(tx.outputs.size());
 
-            ImGui::Text("version: %d", tx.version);
-            ImGui::Text("networkId: %d", tx.networkId);
-            ImGui::Text("scriptOpt: %s", tx.scriptOpt.c_str());
-            ImGui::Text("gasAmount: %d", tx.gasAmount);
-            ImGui::Text("gasPrice: %s", tx.gasPrice.c_str());
-            ImGui::Text("inputs: %d  outputs: %d",
-                        static_cast<int>(tx.inputs.size()),
-                        static_cast<int>(tx.outputs.size()));
+            // Closed label: short id + io counts + gas (one line, no heavy widgets).
+            const bool open = ImGui::TreeNodeEx(
+                "##tx",
+                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
+                "%s  in %d · out %d · gas %d",
+                id_buf, n_in, n_out, tx.gasAmount);
 
-            for (auto& out : tx.outputs)
+            if (ImGui::IsItemHovered() && !tx.txid.empty())
+                ImGui::SetTooltip("%s", tx.txid.c_str());
+
+            if (open)
             {
-                memset(url, 0, sizeof(url));
-                snprintf(url, sizeof(url), "https://explorer.alephium.org/addresses/%s",
-                         out.address.c_str());
-                ImGui::Bullet();
-                ImGui::TextLinkOpenURL(out.address.c_str(), url);
+                explorer_url(url, sizeof(url), "transactions", tx.txid);
+                ImGui::TextDisabled("txid");
                 ImGui::SameLine();
-                ImGui::Text("(%s)", out.toAmount().c_str());
+                ImGui::TextLinkOpenURL(tx.txid.empty() ? "##txid" : id_buf, url);
+                if (ImGui::IsItemHovered() && !tx.txid.empty())
+                    ImGui::SetTooltip("%s", tx.txid.c_str());
+
+                ImGui::Text("v%d  net %d  gas %d", tx.version, tx.networkId, tx.gasAmount);
+                if (!tx.gasPrice.empty())
+                {
+                    ImGui::SameLine(0.f, 12.f);
+                    ImGui::TextDisabled("price %s", tx.gasPrice.c_str());
+                }
+                if (!tx.scriptOpt.empty())
+                {
+                    ImGui::TextDisabled("script");
+                    ImGui::SameLine();
+                    ImGui::TextWrapped("%s", tx.scriptOpt.c_str());
+                }
+
+                // Nested collapsible I/O (closed by default).
+                if (n_in > 0 &&
+                    ImGui::TreeNodeEx("##inputs", ImGuiTreeNodeFlags_SpanAvailWidth,
+                                      "Inputs (%d)", n_in))
+                {
+                    for (int i = 0; i < n_in; ++i)
+                        draw_utxo_row(tx.inputs[static_cast<size_t>(i)], "in", i);
+                    ImGui::TreePop();
+                }
+                if (n_out > 0 &&
+                    ImGui::TreeNodeEx("##outputs", ImGuiTreeNodeFlags_SpanAvailWidth,
+                                      "Outputs (%d)", n_out))
+                {
+                    for (int i = 0; i < n_out; ++i)
+                        draw_utxo_row(tx.outputs[static_cast<size_t>(i)], "out", i);
+                    ImGui::TreePop();
+                }
+                if (n_in == 0 && n_out == 0)
+                    ImGui::TextDisabled("No inputs/outputs in payload.");
+
+                ImGui::TreePop();
             }
+
+            ImGui::PopID();
+            ImGui::PopID();
         }
     }
     else
@@ -230,6 +357,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled("Camera: wheel/arrows scroll Z · RMB-drag look · short RMB clear");
+        ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();
 }

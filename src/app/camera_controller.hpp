@@ -66,9 +66,10 @@ public:
         look_engaged_ = false;
         free_look_ = true;
 
-        // Natural FPS: drag right → look right, drag up → look up (screen y grows downward).
-        yaw_target_   -= dx_px * kLookSens;
-        pitch_target_ -= dy_px * kLookSens;
+        // Natural FPS: drag right → look right, drag up → look up.
+        // Screen Y grows downward → add dy so drag-up (negative dy) raises pitch.
+        yaw_target_   += dx_px * kLookSens;
+        pitch_target_ += dy_px * kLookSens;
         pitch_target_  = std::clamp(pitch_target_, kPitchMin, kPitchMax);
 
         // Keep yaw in a reasonable range to avoid float growth.

@@ -10,65 +10,48 @@ layout(binding = 0) uniform UniformBufferObject {
     float pad1;
     vec3 viewPos;
     float pad2;
-    float meters;
 } ubo;
 
 layout(location = 0) out vec4 outColor;
 
 void main() {
-// ───────────────────────────────────────────────
-    //  Material / Lighting parameters
-    // ───────────────────────────────────────────────
-    vec3  lightColor       = vec3(1.00, 0.98, 0.92);  // slightly warm white
-    float ambientStrength  = 0.15;
-    float diffuseStrength  = 0.85;
-    float specularStrength = 0.45;
-    float shininess        = 16.0;                     // higher = smaller, sharper highlight
-
-    // Normalize inputs (usually already normalized, but safe)
     vec3 N = normalize(fragNormal);
-    vec3 L = normalize(ubo.lightPos - fragPos);        // light direction
-    vec3 V = normalize(ubo.viewPos  - fragPos);        // view direction
-    vec3 R = reflect(-L, N);                           // reflection direction
+    vec3 V = normalize(ubo.viewPos - fragPos);
 
-    // ───────────────────────────────────────────────
-    // Phong components
-    // ───────────────────────────────────────────────
+    // Two-tone key + cool fill (stable; lightPos is track-relative, not look-dir).
+    vec3 keyColor  = vec3(1.00, 0.97, 0.92);
+    vec3 fillColor = vec3(0.55, 0.62, 0.78);
 
-    // 1. Ambient
-    vec3 ambient = ambientStrength * lightColor;
+    vec3 L_key = normalize(ubo.lightPos - fragPos);
+    // Soft fill from opposite hemisphere (world -X / +Y-ish with our up).
+    vec3 L_fill = normalize(vec3(-0.45, 0.55, -0.25));
 
-    // 2. Diffuse
-    float NdotL   = max(dot(N, L), 0.0);
-    vec3  diffuse = diffuseStrength * NdotL * lightColor;
+    float wrap = 0.15; // slight wrap diffuse so far faces stay readable
+    float NdotK = max((dot(N, L_key) + wrap) / (1.0 + wrap), 0.0);
+    float NdotF = max(dot(N, L_fill), 0.0);
 
-    // Blinn-Phong specular
-    vec3 H = normalize(L + V);                // halfway vector
+    // Higher ambient keeps saturated shard colors from going muddy.
+    vec3 ambient = 0.32 * vec3(0.92, 0.94, 1.00);
+    vec3 diffuse = 0.72 * NdotK * keyColor + 0.22 * NdotF * fillColor;
+
+    // Soft specular on the key only (less glare on bright instance colors).
+    vec3 H = normalize(L_key + V);
     float NdotH = max(dot(N, H), 0.0);
-    float spec  = pow(NdotH, shininess * 4.0); // shininess usually needs higher exponent
-    vec3 specular = specularStrength * spec * lightColor;
-    
-    //float distance    = length(ubo.lightPos - fragPos);
-    //float attenuation = 1.0 / (1.0 + 0.09 * distance + 0.032 * distance * distance);
-    //diffuse  *= attenuation;
-    //specular *= attenuation;
+    float spec = pow(NdotH, 48.0);
+    // Reduce specular on very bright albedo so yellows/whites don't blow out.
+    float albedoLum = dot(fragColor, vec3(0.299, 0.587, 0.114));
+    vec3 specular = (0.28 * (1.0 - 0.55 * albedoLum)) * spec * keyColor;
 
-    // ───────────────────────────────────────────────
-    // Final color
-    // ───────────────────────────────────────────────
-    vec3 lighting = ambient + diffuse + specular;
+    // Subtle rim for silhouette separation against grey clear color.
+    float rim = pow(1.0 - max(dot(N, V), 0.0), 2.5);
+    vec3 rimLight = rim * 0.12 * fillColor;
 
-    // Apply material/instance color
-    vec3 finalColor = lighting * fragColor;
-    
-    // Rim / fresnel effect (optional – gives nice edge glow)
-    //float rim = 1.0 - max(dot(N, V), 0.0);
-    //rim = pow(rim, 3.0);                      // sharper rim
-    //vec3 rimLight = vec3(0.4, 0.6, 1.0) * rim * 0.6;
-    //finalColor += rimLight;
+    vec3 lit = ambient + diffuse + specular + rimLight;
+    vec3 finalColor = lit * fragColor;
 
-    // Optional: slight gamma-like correction or tone mapping
-    //finalColor = pow(finalColor, vec3(1.0/2.2));   // approx gamma 2.2 → sRGB
+    // Mild tone map so hot specular + bright albedo stay in range.
+    finalColor = finalColor / (finalColor + vec3(0.35)) * 1.15;
+    finalColor = clamp(finalColor, 0.0, 1.0);
 
     outColor = vec4(finalColor, 1.0);
 }
