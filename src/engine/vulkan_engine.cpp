@@ -212,6 +212,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
         pr.mem_props = &deviceMemProps;
         pr.width = width;
         pr.height = height;
+        pr.depth_format = swapchain_targets_.depth_format();
         picker_.create_resources(pr);
         picker_.create_staging(&buffer_manager_);
     }
@@ -861,6 +862,7 @@ void VulkanEngine::resize_internal()
         pr.mem_props = &deviceMemProps;
         pr.width = width;
         pr.height = height;
+        pr.depth_format = swapchain_targets_.depth_format();
         picker_.recreate_resources(pr);
     }
     {
@@ -1232,7 +1234,6 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             pick.width = width;
             pick.height = height;
             pick.viewport_extent = swapchainExtent;
-            pick.depth_view = swapchain_targets_.depth_view();
             pick.image_layout_undefined = s_resized;
             pick.pipeline = picker_pipe_.pipeline;
             pick.pipeline_layout = picker_pipe_.layout;

@@ -48,6 +48,20 @@ void Picker::create_resources(const PickerResourcesCreateInfo& info)
         info.mem_props);
 
     image_view_ = create_image_view(info.device, image_, kPickerColorFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // Always 1× depth (matches 1× color + 1× picker pipeline).
+    create_image(
+        info.device,
+        info.width, info.height,
+        info.depth_format,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        depth_image_,
+        depth_memory_,
+        info.mem_props);
+    depth_view_ = create_image_view(info.device, depth_image_, info.depth_format,
+                                    VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void Picker::destroy_resources(VkDevice device)
@@ -64,6 +78,17 @@ void Picker::destroy_resources(VkDevice device)
         destroy_image(device, image_, memory_);
         image_ = VK_NULL_HANDLE;
         memory_ = VK_NULL_HANDLE;
+    }
+    if (depth_view_ != VK_NULL_HANDLE)
+    {
+        destroy_image_view(device, depth_view_);
+        depth_view_ = VK_NULL_HANDLE;
+    }
+    if (depth_image_ != VK_NULL_HANDLE)
+    {
+        destroy_image(device, depth_image_, depth_memory_);
+        depth_image_ = VK_NULL_HANDLE;
+        depth_memory_ = VK_NULL_HANDLE;
     }
 }
 
@@ -122,6 +147,14 @@ void Picker::record_pass(const PickerRecordParams& p)
             { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
     }
 
+    // Private 1× depth always transitions from UNDEFINED each pick (cleared below).
+    pipeline_barrier(p.cmd, depth_image_,
+        VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+        { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
+
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     colorAttachment.imageView = image_view_;
@@ -132,9 +165,8 @@ void Picker::record_pass(const PickerRecordParams& p)
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = p.depth_view;
+    depthAttachment.imageView = depth_view_;
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    // Clear depth so pick works with 1× picker regardless of MSAA scene depth.
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.clearValue.depthStencil = { 1.0f, 0 };

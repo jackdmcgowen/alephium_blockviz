@@ -19,6 +19,8 @@ struct PickerResourcesCreateInfo
     VkPhysicalDeviceMemoryProperties* mem_props = nullptr;
     uint32_t width = 0;
     uint32_t height = 0;
+    // Always 1× depth for pick (must not share MSAA scene depth).
+    VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 };
 
 struct PickerRecordParams
@@ -29,7 +31,6 @@ struct PickerRecordParams
     uint32_t width = 0;
     uint32_t height = 0;
     VkExtent2D viewport_extent{ 0, 0 };
-    VkImageView depth_view = VK_NULL_HANDLE;
     bool image_layout_undefined = false; // true after resize / first use
 
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -66,6 +67,11 @@ private:
     VkImage image_ = VK_NULL_HANDLE;
     VkImageView image_view_ = VK_NULL_HANDLE;
     VkDeviceMemory memory_ = VK_NULL_HANDLE;
+
+    // Private 1× depth — never the MSAA scene depth (validation: sample counts must match).
+    VkImage depth_image_ = VK_NULL_HANDLE;
+    VkImageView depth_view_ = VK_NULL_HANDLE;
+    VkDeviceMemory depth_memory_ = VK_NULL_HANDLE;
 
     BufferManager* buffers_ = nullptr;
     GpuBuffer staging_;
