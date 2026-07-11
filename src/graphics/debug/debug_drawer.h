@@ -22,13 +22,15 @@ public:
     void clear();
 
     // World-space 3D arrow: cylindrical shaft + cone tip (absolute tip size).
+    // grow_u in [0,1]: 0 = invisible, 1 = full length. Tip marches start→end; alpha eases with grow.
     void add_arrow(const glm::vec3& start,
                    const glm::vec3& end,
                    const glm::vec4& color,
                    float tip_length,
                    float tip_radius,
                    float shaft_radius = -1.0f,
-                   uint32_t radial_segments = kDefaultRadialSegments);
+                   uint32_t radial_segments = kDefaultRadialSegments,
+                   float grow_u = 1.0f);
 
     // Append a mesh; indices are local (0 .. vert_count-1) and are rebased.
     void add_mesh(const DebugVertex* verts, uint32_t vert_count,

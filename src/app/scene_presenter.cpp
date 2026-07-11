@@ -37,6 +37,25 @@ ScenePresenter::ScenePresenter(BlockScene& scene)
 {
 }
 
+float ScenePresenter::arrow_grow_u_(const std::string& key, float stagger_delay,
+                                    std::unordered_set<std::string>& seen_this_frame)
+{
+    seen_this_frame.insert(key);
+    const float now = std::chrono::duration<float>(
+                          std::chrono::steady_clock::now() - clock0_)
+                          .count();
+    auto it = arrow_birth_sec_.find(key);
+    if (it == arrow_birth_sec_.end())
+    {
+        arrow_birth_sec_[key] = now + stagger_delay;
+        it = arrow_birth_sec_.find(key);
+    }
+    const float age = now - it->second;
+    if (age <= 0.f)
+        return 0.f;
+    return std::clamp(age / kArrowGrowSec, 0.f, 1.f);
+}
+
 void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                              DebugDrawer* debug)
 {
@@ -100,24 +119,38 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         constexpr uint32_t kDepRadial = 8;
         constexpr uint32_t kMaxDepArrows = 512;
         uint32_t arrow_count = 0;
+        std::unordered_set<std::string> arrows_seen;
 
-        auto add_dep_arrow = [&](const glm::vec3& from, const glm::vec3& to,
-                                 const glm::vec4& color, float tip_scale = 1.f) {
+        auto arrow_key = [](char kind, const std::string& from, const std::string& to) {
+            return std::string(1, kind) + '|' + from + '|' + to;
+        };
+
+        auto add_dep_arrow = [&](char kind, const std::string& from_hash,
+                                 const std::string& to_hash,
+                                 const glm::vec3& from, const glm::vec3& to,
+                                 const glm::vec4& color, float tip_scale, int stagger_i) {
             if (arrow_count >= kMaxDepArrows)
                 return;
             glm::vec3 from_inset, to_inset;
             if (!inset_segment(from, to, clearance, from_inset, to_inset))
                 return;
+            const std::string key = arrow_key(kind, from_hash, to_hash);
+            const float grow = arrow_grow_u_(key, kArrowStagger * static_cast<float>(stagger_i),
+                                             arrows_seen);
+            if (grow <= 0.f)
+                return;
             debug->add_arrow(from_inset, to_inset, color,
                              tip_len * tip_scale, tip_rad * tip_scale,
-                             shaft_r * tip_scale, kDepRadial);
+                             shaft_r * tip_scale, kDepRadial, grow);
             ++arrow_count;
         };
 
-        auto draw_deps_of = [&](const AlphBlock& block, const glm::vec4& color, float tip_scale) {
+        auto draw_deps_of = [&](char kind, const AlphBlock& block, const glm::vec4& color,
+                                float tip_scale) {
             auto to_it = block_positions.find(block.hash);
             if (to_it == block_positions.end())
                 return;
+            int stagger_i = 0;
             for (const std::string& dep_hash : block.deps)
             {
                 if (arrow_count >= kMaxDepArrows)
@@ -125,14 +158,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 auto from_it = block_positions.find(dep_hash);
                 if (from_it == block_positions.end())
                     continue;
-                add_dep_arrow(from_it->second, to_it->second, color, tip_scale);
+                add_dep_arrow(kind, dep_hash, block.hash, from_it->second, to_it->second,
+                              color, tip_scale, stagger_i++);
             }
         };
 
         for (const NodeId& tip_hash : scene_.tip_ids())
         {
             if (auto d = scene_.detail_store().get(tip_hash))
-                draw_deps_of(*d, kActiveArrowColor, 1.f);
+                draw_deps_of('t', *d, kActiveArrowColor, 1.f);
         }
 
         const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
@@ -145,13 +179,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const glm::vec3& to_pos = to_it->second;
             const int parent_lane = block.chain_idx();
             int missing_i = 0;
+            int stagger_i = 0;
 
             for (const std::string& dep_hash : block.deps)
             {
                 auto from_it = block_positions.find(dep_hash);
                 if (from_it != block_positions.end())
                 {
-                    add_dep_arrow(from_it->second, to_pos, kSelectionArrowColor, 1.15f);
+                    add_dep_arrow('s', dep_hash, block.hash, from_it->second, to_pos,
+                                  kSelectionArrowColor, 1.15f, stagger_i++);
                     continue;
                 }
 
@@ -182,7 +218,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash)
         {
             if (auto d = scene_.detail_store().get(in.hovered_hash))
-                draw_deps_of(*d, kHoverArrowColor, 1.05f);
+                draw_deps_of('h', *d, kHoverArrowColor, 1.05f);
+        }
+
+        // Drop birth times for arrows no longer drawn (re-grow when they return).
+        for (auto it = arrow_birth_sec_.begin(); it != arrow_birth_sec_.end(); )
+        {
+            if (arrows_seen.find(it->first) == arrows_seen.end())
+                it = arrow_birth_sec_.erase(it);
+            else
+                ++it;
         }
     }
 

@@ -80,8 +80,15 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
                             float tip_length,
                             float tip_radius,
                             float shaft_radius,
-                            uint32_t radial_segments)
+                            uint32_t radial_segments,
+                            float grow_u)
 {
+    // Smoothstep grow + early out
+    float u = std::clamp(grow_u, 0.0f, 1.0f);
+    if (u <= 1e-4f)
+        return;
+    u = u * u * (3.0f - 2.0f * u);
+
     const glm::vec3 dir = end - start;
     const float total = glm::length(dir);
     if (total < 1e-4f)
@@ -100,12 +107,23 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
     if (shaft_radius < 0.0f)
         shaft_radius = 0.0f;
 
-    float tip_len = std::min(tip_length, total * kMaxTipFraction);
-    if (tip_len < 1e-5f && total > 1e-4f)
-        tip_len = std::min(total * 0.25f, tip_length > 0.0f ? tip_length : total * 0.25f);
+    // Grow: tip marches start→end; only a prefix of the segment is drawn.
+    const float drawn_len = total * u;
+    if (drawn_len < 1e-4f)
+        return;
 
-    const float shaft_len = std::max(0.0f, total - tip_len);
     const glm::vec3 forward = dir / total;
+    const glm::vec3 tip_pos = start + forward * drawn_len;
+
+    float tip_len = std::min(tip_length, drawn_len * kMaxTipFraction);
+    if (tip_len < 1e-5f && drawn_len > 1e-4f)
+        tip_len = std::min(drawn_len * 0.25f, tip_length > 0.0f ? tip_length : drawn_len * 0.25f);
+
+    const float shaft_len = std::max(0.0f, drawn_len - tip_len);
+
+    // Fade in with grow (keeps early frames soft).
+    glm::vec4 col = color;
+    col.a *= (0.2f + 0.8f * u);
 
     glm::vec3 right, up;
     build_basis(forward, right, up);
@@ -124,21 +142,21 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
 
     // 0 .. N-1: shaft base
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(start, shaft_radius, i), color });
+        verts_.push_back({ ring_point(start, shaft_radius, i), col });
 
     // N .. 2N-1: shaft top
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(shaft_top_center, shaft_radius, i), color });
+        verts_.push_back({ ring_point(shaft_top_center, shaft_radius, i), col });
 
     // 2N .. 3N-1: tip base (same plane as shaft top, wider radius)
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(shaft_top_center, tip_radius, i), color });
+        verts_.push_back({ ring_point(shaft_top_center, tip_radius, i), col });
 
     const uint32_t i_apex = base + 3 * N;
-    verts_.push_back({ end, color });
+    verts_.push_back({ tip_pos, col });
 
     const uint32_t i_butt = base + 3 * N + 1;
-    verts_.push_back({ start, color });
+    verts_.push_back({ start, col });
 
     auto idx = [base](uint32_t local) -> uint32_t
     {
