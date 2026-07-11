@@ -101,6 +101,7 @@
     <ClCompile Include="..\src\engine\frame_descriptors.cpp" />
     <ClCompile Include="..\src\engine\frame_recorder.cpp" />
     <ClCompile Include="..\src\engine\frame_presenter.cpp" />
+    <ClCompile Include="..\src\engine\frame_graph\frame_task_graph.cpp" />
     <ClCompile Include="..\src\engine\swapchain_targets.cpp" />
     <ClCompile Include="..\src\engine\picker.cpp" />
     <ClCompile Include="..\src\engine\sobel_compute.cpp" />
@@ -116,6 +117,7 @@
     <ClInclude Include="..\src\engine\frame_descriptors.hpp" />
     <ClInclude Include="..\src\engine\frame_recorder.hpp" />
     <ClInclude Include="..\src\engine\frame_presenter.hpp" />
+    <ClInclude Include="..\src\engine\frame_graph\frame_task_graph.hpp" />
     <ClInclude Include="..\src\engine\swapchain_targets.hpp" />
     <ClInclude Include="..\src\engine\picker.hpp" />
     <ClInclude Include="..\src\engine\sobel_compute.hpp" />

@@ -10,7 +10,8 @@ void PickerPipeline::create(VkDevice device,
                             VkFormat color_format,
                             VkFormat depth_format,
                             uint32_t viewport_width,
-                            uint32_t viewport_height)
+                            uint32_t viewport_height,
+                            VkSampleCountFlagBits samples)
 {
     destroy(device);
 
@@ -114,7 +115,7 @@ void PickerPipeline::create(VkDevice device,
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = samples;
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

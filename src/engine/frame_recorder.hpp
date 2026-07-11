@@ -27,6 +27,12 @@ struct FrameRecordParams
     VkImage depth_image = VK_NULL_HANDLE;
     VkImageView depth_view = VK_NULL_HANDLE;
 
+    // G4 MSAA: when samples > 1, color_view/depth_view are MSAA targets;
+    // resolve_color_view is the single-sample swapchain view.
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+    VkImageView resolve_color_view = VK_NULL_HANDLE;
+    VkImage resolve_color_image = VK_NULL_HANDLE; // for present transition
+
     VkPipeline cube_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout cube_layout = VK_NULL_HANDLE;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;

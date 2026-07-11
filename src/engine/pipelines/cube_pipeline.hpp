@@ -12,6 +12,8 @@ struct CubePipeline
                 VkFormat color_format,
                 VkFormat depth_format,
                 uint32_t viewport_width,
-                uint32_t viewport_height);
+                uint32_t viewport_height,
+                VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
+                bool alpha_to_coverage = false);
     void destroy(VkDevice device);
 };

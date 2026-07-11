@@ -8,6 +8,7 @@
 #include <string>
 #include "engine/vulkan_engine.hpp"
 #include "engine/engine_identity.hpp"
+#include "engine/frame_graph/frame_task_graph.hpp"
 #include "app/ui_chrome.hpp"
 #include "commands.h"
 #include "graphics/engine_requirements.hpp"
@@ -202,7 +203,9 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     create_frame_resources();
     create_frame_descriptors();
     cube_pipe_.create(device, frame_descriptors_.layout(), swapchainImageFormat,
-                      swapchain_targets_.depth_format(), width, height);
+                      swapchain_targets_.depth_format(), width, height,
+                      swapchain_targets_.sample_count(),
+                      swapchain_targets_.alpha_to_coverage());
     {
         PickerResourcesCreateInfo pr{};
         pr.device = device;
@@ -212,8 +215,10 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
         picker_.create_resources(pr);
         picker_.create_staging(&buffer_manager_);
     }
+    // Picker is 1×; selection pick uses cleared depth (independent of MSAA scene depth).
     picker_pipe_.create(device, frame_descriptors_.layout(), picker_.color_format(),
-                        swapchain_targets_.depth_format(), width, height);
+                        swapchain_targets_.depth_format(), width, height,
+                        VK_SAMPLE_COUNT_1_BIT);
     create_command_pool();
     create_sync_objects();
 
@@ -276,9 +281,48 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
 
 
     meshArena = new MeshArena();
-    if (!meshArena->create(device, &deviceMemProps, &buffer_manager_, swapchainImageFormat, depth_fmt))
+    if (!meshArena->create(device, &deviceMemProps, &buffer_manager_, swapchainImageFormat, depth_fmt,
+                           swapchain_targets_.sample_count()))
     {
         printf("Failed to create MeshArena for debug drawing\n");
+    }
+
+    // G2: document frame pass DAG topology (barriers live on edges).
+    {
+        using namespace frame_graph;
+        FrameTaskGraph g;
+        const uint32_t main_p = g.add_pass(PassNode{ "MainColorDepth", QueueType::_3D, {} });
+        const uint32_t pick_p = g.add_pass(PassNode{ "Picker", QueueType::_3D, {} });
+        const uint32_t sel_p  = g.add_pass(PassNode{ "SelectionDepth", QueueType::_3D, {} });
+        const uint32_t sob_p  = g.add_pass(PassNode{ "SobelCompute", QueueType::CMP, {} });
+        const uint32_t ovl_p  = g.add_pass(PassNode{ "EdgeOverlay", QueueType::_3D, {} });
+        const uint32_t pre_p  = g.add_pass(PassNode{ "Present", QueueType::_3D, {} });
+        ImageBarrierEdge e{};
+        e.resource = ResourceId::SwapchainColor;
+        e.from_access = ResourceAccess::ColorAttachment;
+        e.to_access = ResourceAccess::ColorAttachment;
+        g.add_edge(main_p, pick_p, e);
+        e.resource = ResourceId::SelectionDepth;
+        e.from_access = ResourceAccess::None;
+        e.to_access = ResourceAccess::DepthAttachment;
+        g.add_edge(main_p, sel_p, e);
+        e.resource = ResourceId::SelectionDepth;
+        e.from_access = ResourceAccess::DepthAttachment;
+        e.to_access = ResourceAccess::DepthSampled;
+        g.add_edge(sel_p, sob_p, e);
+        e.resource = ResourceId::SobelEdges;
+        e.from_access = ResourceAccess::ComputeStorageWrite;
+        e.to_access = ResourceAccess::ShaderRead;
+        g.add_edge(sob_p, ovl_p, e);
+        e.resource = ResourceId::SwapchainColor;
+        e.from_access = ResourceAccess::ColorAttachment;
+        e.to_access = ResourceAccess::Present;
+        g.add_edge(ovl_p, pre_p, e);
+        e.from_access = ResourceAccess::ColorAttachment;
+        e.to_access = ResourceAccess::Present;
+        g.add_edge(main_p, pre_p, e);
+        g.compile(&queues_);
+        std::printf("[engine] frame DAG: %s\n", g.debug_order_string().c_str());
     }
 
 }   /* Init() */
@@ -723,6 +767,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
         sobel_.record_overlay(s_overlay_cb, width, height, highlight);
         vkCmdEndRendering(s_overlay_cb);
 
+        // Overlay composites onto resolved (1×) swapchain color
         frame_recorder_.transition_color_to_present(s_overlay_cb, swapchainImages[image_index]);
         vkEndCommandBuffer(s_overlay_cb);
 
@@ -1129,10 +1174,15 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     rp.width = width;
     rp.height = height;
     rp.scissor_extent = swapchainExtent;
-    rp.color_image = swapchainImages[imageIndex];
-    rp.color_view = swapchain_targets_.color_view(imageIndex);
+    const bool msaa = swapchain_targets_.msaa_enabled();
+    rp.color_image = msaa ? swapchain_targets_.msaa_color_image() : swapchainImages[imageIndex];
+    rp.color_view = msaa ? swapchain_targets_.msaa_color_view()
+                         : swapchain_targets_.color_view(imageIndex);
     rp.depth_image = swapchain_targets_.depth_image();
     rp.depth_view = swapchain_targets_.depth_view();
+    rp.samples = swapchain_targets_.sample_count();
+    rp.resolve_color_view = msaa ? swapchain_targets_.color_view(imageIndex) : VK_NULL_HANDLE;
+    rp.resolve_color_image = msaa ? swapchainImages[imageIndex] : VK_NULL_HANDLE;
     rp.cube_pipeline = cube_pipe_.pipeline;
     rp.cube_layout = cube_pipe_.layout;
     rp.descriptor_set = frame_descriptors_.set();

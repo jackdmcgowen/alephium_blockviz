@@ -10,7 +10,9 @@ void CubePipeline::create(VkDevice device,
                           VkFormat color_format,
                           VkFormat depth_format,
                           uint32_t viewport_width,
-                          uint32_t viewport_height)
+                          uint32_t viewport_height,
+                          VkSampleCountFlagBits samples,
+                          bool alpha_to_coverage)
 {
     destroy(device);
 
@@ -114,7 +116,8 @@ void CubePipeline::create(VkDevice device,
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = samples;
+    multisampling.alphaToCoverageEnable = alpha_to_coverage ? VK_TRUE : VK_FALSE;
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

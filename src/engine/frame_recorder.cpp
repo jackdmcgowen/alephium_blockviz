@@ -43,13 +43,21 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
     if (vkBeginCommandBuffer(p.cmd, &beginInfo) != VK_SUCCESS)
         throw std::runtime_error("Failed to begin recording command buffer");
 
+    const bool msaa = p.samples > VK_SAMPLE_COUNT_1_BIT && p.resolve_color_view != VK_NULL_HANDLE;
+
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     colorAttachment.imageView = p.color_view;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.storeOp = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.clearValue.color = { { 0.7f, 0.7f, 0.7f, 1.0f } };
+    if (msaa)
+    {
+        colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+        colorAttachment.resolveImageView = p.resolve_color_view;
+        colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -67,14 +75,26 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
     renderInfo.pColorAttachments = &colorAttachment;
     renderInfo.pDepthAttachment = &depthAttachment;
 
-    if (p.after_resize)
+    // Barriers for MSAA color / resolve / depth
+    if (p.after_resize || msaa)
     {
-        pipeline_barrier(p.cmd, p.color_image,
-            VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
-
+        if (msaa && p.color_image != VK_NULL_HANDLE)
+        {
+            pipeline_barrier(p.cmd, p.color_image,
+                VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+        }
+        if (p.resolve_color_image != VK_NULL_HANDLE || (!msaa && p.color_image != VK_NULL_HANDLE))
+        {
+            VkImage img = msaa ? p.resolve_color_image : p.color_image;
+            pipeline_barrier(p.cmd, img,
+                VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+        }
         pipeline_barrier(p.cmd, p.depth_image,
             VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -83,6 +103,7 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
             { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
     }
 
+    // --- Pass A: scene (cubes + debug) into MSAA or 1× color ---
     vkCmdBeginRendering(p.cmd, &renderInfo);
     vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_pipeline);
     vkCmdSetPrimitiveTopology(p.cmd, p.topology);
@@ -115,13 +136,37 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
         p.mesh_arena->draw(p.cmd, *p.view_proj);
     }
 
-    if (p.imgui_draw_data)
-        ImGui_ImplVulkan_RenderDrawData(p.imgui_draw_data, p.cmd);
-
     vkCmdEndRendering(p.cmd);
 
+    // --- Pass B: ImGui on resolved 1× swapchain color (after MSAA resolve) ---
+    if (p.imgui_draw_data)
+    {
+        VkImageView ui_view = msaa ? p.resolve_color_view : p.color_view;
+        VkRenderingAttachmentInfo uiColor{};
+        uiColor.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        uiColor.imageView = ui_view;
+        uiColor.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        uiColor.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        uiColor.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        VkRenderingInfo uiInfo{};
+        uiInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        uiInfo.renderArea = { { 0, 0 }, { p.width, p.height } };
+        uiInfo.layerCount = 1;
+        uiInfo.colorAttachmentCount = 1;
+        uiInfo.pColorAttachments = &uiColor;
+        vkCmdBeginRendering(p.cmd, &uiInfo);
+        vkCmdSetViewport(p.cmd, 0, 1, &viewport);
+        vkCmdSetScissor(p.cmd, 0, 1, &scissor);
+        ImGui_ImplVulkan_RenderDrawData(p.imgui_draw_data, p.cmd);
+        vkCmdEndRendering(p.cmd);
+    }
+
     if (p.transition_color_to_present)
-        transition_color_to_present(p.cmd, p.color_image);
+    {
+        VkImage present_img = msaa ? p.resolve_color_image : p.color_image;
+        transition_color_to_present(p.cmd, present_img);
+    }
 }
 
 void FrameRecorder::transition_color_to_present(VkCommandBuffer cmd, VkImage color_image)

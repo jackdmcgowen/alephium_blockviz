@@ -16,6 +16,7 @@ bool MeshArena::create(VkDevice device,
                        BufferManager* buffer_manager,
                        VkFormat color_format,
                        VkFormat depth_format,
+                       VkSampleCountFlagBits samples,
                        uint32_t max_vertices,
                        uint32_t max_indices,
                        uint32_t max_line_verts)
@@ -30,6 +31,7 @@ bool MeshArena::create(VkDevice device,
     buffers_      = buffer_manager;
     color_format_ = color_format;
     depth_format_ = depth_format;
+    samples_      = samples;
     max_vertices_ = max_vertices;
     max_indices_  = max_indices;
     max_line_verts_ = max_line_verts;
@@ -177,7 +179,7 @@ bool MeshArena::create_pipelines()
     viewport_state.scissorCount = 1;
 
     VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = samples_;
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
     depth_stencil.depthTestEnable = VK_TRUE;

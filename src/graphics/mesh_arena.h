@@ -27,6 +27,7 @@ public:
                 BufferManager* buffer_manager,
                 VkFormat color_format,
                 VkFormat depth_format,
+                VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
                 uint32_t max_vertices = kDefaultMaxVertices,
                 uint32_t max_indices  = kDefaultMaxIndices,
                 uint32_t max_line_verts = kDefaultMaxLineVerts);
@@ -46,6 +47,7 @@ private:
     BufferManager* buffers_ = nullptr;
     VkFormat color_format_ = VK_FORMAT_UNDEFINED;
     VkFormat depth_format_ = VK_FORMAT_UNDEFINED;
+    VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
 
     uint32_t max_vertices_ = 0;
     uint32_t max_indices_  = 0;
