@@ -25,4 +25,9 @@ private:
     CameraController& camera_;
     IBlockvizEngine&  engine_;
     int64_t           session_start_ms_ = 0;
+
+    // RMB free-look: drag vs click-to-clear-selection
+    bool  rmb_down_over_scene_ = false;
+    bool  rmb_dragged_         = false;
+    float rmb_drag_dist_px_    = 0.f;
 };

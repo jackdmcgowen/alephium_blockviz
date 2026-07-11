@@ -42,7 +42,19 @@ void BlockflowOverlay::draw()
     ImGuiIO& io = ImGui::GetIO();
     const float dt_sec = (io.DeltaTime > 0.f) ? io.DeltaTime : (1.f / 60.f);
 
-    // Camera motion — CameraController (keys + scroll wheel)
+    const float ui_w = io.DisplaySize.x;
+    const float ui_h = io.DisplaySize.y;
+    const float inspector_w = ui_chrome::inspector_width(ui_w);
+    const float toolbar_h = ui_chrome::kToolbarHeight;
+    const float mx = io.MousePos.x;
+    const float my = io.MousePos.y;
+    const bool over_scene =
+        !io.WantCaptureMouse &&
+        mx >= 0.f && my >= 0.f &&
+        mx < ui_w - inspector_w &&
+        my < ui_h - toolbar_h;
+
+    // Camera motion — Z-track (keys + wheel)
     if (!io.WantCaptureKeyboard)
     {
         if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
@@ -50,14 +62,39 @@ void BlockflowOverlay::draw()
         if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
             camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
     }
-    // Wheel over the 3D scene (not ImGui panels): same axis as Up/Down.
     // Positive MouseWheel = scroll up → +scroll_z (matches Up arrow).
-    if (!io.WantCaptureMouse && io.MouseWheel != 0.f)
+    if (over_scene && io.MouseWheel != 0.f)
         camera_.nudge_scroll(io.MouseWheel * CameraController::kWheelStep);
 
+    // Right-click drag: free look (smoothed in CameraController::tick).
+    // Short RMB click (no drag): clear selection + home look (handled on release).
+    constexpr float kRmbDragThresholdPx = 4.f;
+    if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        rmb_down_over_scene_ = true;
+        rmb_dragged_ = false;
+        rmb_drag_dist_px_ = 0.f;
+    }
+    if (rmb_down_over_scene_ && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        const float dx = io.MouseDelta.x;
+        const float dy = io.MouseDelta.y;
+        rmb_drag_dist_px_ += std::sqrt(dx * dx + dy * dy);
+        if (rmb_drag_dist_px_ >= kRmbDragThresholdPx)
+            rmb_dragged_ = true;
+        if (rmb_dragged_ && (dx != 0.f || dy != 0.f))
+            camera_.add_look_delta(dx, dy);
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+    {
+        if (rmb_down_over_scene_ && !rmb_dragged_)
+            engine_.clear_selection(); // also homes look via controller
+        rmb_down_over_scene_ = false;
+        rmb_dragged_ = false;
+        rmb_drag_dist_px_ = 0.f;
+    }
+
     const UiSnapshot ui = engine_.copy_ui_snapshot();
-    const float ui_w = io.DisplaySize.x;
-    const float ui_h = io.DisplaySize.y;
 
     draw_toolbar(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
@@ -192,7 +229,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextWrapped(
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
-        ImGui::TextDisabled("Camera: Up/Down or mouse wheel scroll Z");
+        ImGui::TextDisabled("Camera: wheel/arrows scroll Z · RMB-drag look · short RMB clear");
     }
     ImGui::End();
 }

@@ -1118,9 +1118,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             mx < static_cast<float>(width) - inspector_w &&
             my < static_cast<float>(height) - toolbar_h;
 
-        // Right-click scene: clear selection + rotate camera home to original forward
-        if (over_scene && io.MouseClicked[ImGuiMouseButton_Right])
-            clear_selection();
+        // RMB clear-selection is handled in BlockflowOverlay (short click vs look-drag).
 
         PickKind request = PickKind::None;
         if (over_scene && io.MouseClicked[ImGuiMouseButton_Left])

@@ -1,7 +1,7 @@
 #pragma once
 
-// Render-thread camera controller: manual Z scroll + selection look-aim.
-// Eye Z is user scroll_z only (no auto-scroll rate — that distorted world Z).
+// Render-thread camera: Z-track scroll + free look (RMB drag) + selection look-aim.
+// Eye stays on (0, 0, scroll_z). Look uses smoothed yaw/pitch (exp tween).
 #include "alph_block.hpp"
 #include "graphics/camera.hpp"
 
@@ -11,6 +11,7 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
 
@@ -19,9 +20,12 @@ class CameraController
 public:
     static constexpr float kEyeZMin   = -2000.f;
     static constexpr float kEyeZMax   =  2000.f;
-    static constexpr float kEyeZStep  = 40.f;  // world units / second while key held
-    static constexpr float kWheelStep = 25.f;  // world units per mouse-wheel notch
-    static constexpr float kLookOmega = 10.f;  // slerp ease rate
+    static constexpr float kEyeZStep  = 40.f;   // world units / second while key held
+    static constexpr float kWheelStep = 25.f;   // world units per mouse-wheel notch
+    static constexpr float kLookOmega = 12.f;   // look slerp / angle tween rate
+    static constexpr float kLookSens  = 0.0045f; // radians per mouse pixel
+    static constexpr float kPitchMin  = -1.35f;  // ~±77°
+    static constexpr float kPitchMax  =  1.35f;
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
@@ -55,7 +59,26 @@ public:
         scroll_z_ = std::clamp(scroll_z_ + world_delta, kEyeZMin, kEyeZMax);
     }
 
-    // Hard-aim at world target (frozen direction until clear / new target).
+    // RMB drag: adjust look targets (eye stays on Z track). Smoothing happens in tick().
+    void add_look_delta(float dx_px, float dy_px)
+    {
+        // Free look takes over from selection auto-aim.
+        look_engaged_ = false;
+        free_look_ = true;
+
+        // Natural FPS: drag right → look right, drag up → look up (screen y grows downward).
+        yaw_target_   -= dx_px * kLookSens;
+        pitch_target_ -= dy_px * kLookSens;
+        pitch_target_  = std::clamp(pitch_target_, kPitchMin, kPitchMax);
+
+        // Keep yaw in a reasonable range to avoid float growth.
+        if (yaw_target_ >  glm::pi<float>())
+            yaw_target_ -= glm::two_pi<float>();
+        if (yaw_target_ < -glm::pi<float>())
+            yaw_target_ += glm::two_pi<float>();
+    }
+
+    // Hard-aim at world target (selection); tweened via same yaw/pitch smoother.
     void set_look_target(const glm::vec3& world_pos, const std::string& hash)
     {
         if (hash.empty())
@@ -67,21 +90,28 @@ public:
             dir = kForward;
         else
             dir /= len;
-        look_aim_dir_ = dir;
+
         look_aim_hash_ = hash;
         look_engaged_ = true;
+        free_look_ = false;
+        dir_to_yaw_pitch_(dir, yaw_target_, pitch_target_);
+        pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
     }
 
+    // Clear selection aim and tween look home along +Z.
     void clear_look_target()
     {
         look_engaged_ = false;
         look_aim_hash_.clear();
+        free_look_ = false;
+        yaw_target_ = 0.f;
+        pitch_target_ = 0.f;
     }
 
     const std::string& look_aim_hash() const { return look_aim_hash_; }
     bool look_engaged() const { return look_engaged_; }
 
-    // Advance look slerp; rebuild Camera pose / matrices (no Z auto-scroll).
+    // Tween look angles + rebuild Camera (eye on Z track).
     const Camera& tick(float dt_sec)
     {
         update_look_(dt_sec);
@@ -104,42 +134,52 @@ private:
         return glm::vec3(0.f, 0.f, scroll_z_);
     }
 
+    static void dir_to_yaw_pitch_(const glm::vec3& dir, float& yaw, float& pitch)
+    {
+        const glm::vec3 d = glm::normalize(dir);
+        // Inverse of yaw_pitch_to_dir_: y = -sin(pitch), xz from yaw around +Z.
+        pitch = std::asin(std::clamp(-d.y, -1.f, 1.f));
+        yaw = std::atan2(d.x, d.z);
+    }
+
+    static glm::vec3 yaw_pitch_to_dir_(float yaw, float pitch)
+    {
+        const float cp = std::cos(pitch);
+        const float sp = std::sin(pitch);
+        const float cy = std::cos(yaw);
+        const float sy = std::sin(yaw);
+        // yaw=0,pitch=0 → (0,0,1); pitch up (positive) → -Y (matches camera up (0,-1,0)).
+        return glm::normalize(glm::vec3(sy * cp, -sp, cy * cp));
+    }
+
+    static float exp_smooth_(float current, float target, float dt, float omega)
+    {
+        const float alpha = 1.f - std::exp(-omega * std::max(dt, 1e-4f));
+        return current + (target - current) * std::clamp(alpha, 0.f, 1.f);
+    }
+
     void update_look_(float dt)
     {
-        glm::vec3 desired = look_engaged_ ? look_aim_dir_ : kForward;
-        const float dlen = glm::length(desired);
-        if (dlen < 1e-4f)
-            desired = kForward;
-        else
-            desired /= dlen;
+        // Selection aim keeps targets on the selected block each frame is handled by
+        // set_look_target when selection changes; free look keeps user targets.
+        // When neither free-look nor selection: home targets already set by clear_look_target.
+
+        // Shortest-path yaw blend (avoid spinning the long way).
+        float dyaw = yaw_target_ - yaw_;
+        if (dyaw >  glm::pi<float>())
+            dyaw -= glm::two_pi<float>();
+        if (dyaw < -glm::pi<float>())
+            dyaw += glm::two_pi<float>();
+        const float yaw_goal = yaw_ + dyaw;
+
+        yaw_   = exp_smooth_(yaw_, yaw_goal, dt, kLookOmega);
+        pitch_ = exp_smooth_(pitch_, pitch_target_, dt, kLookOmega);
+        pitch_ = std::clamp(pitch_, kPitchMin, kPitchMax);
 
         if (!look_dir_init_)
-        {
-            look_dir_ = desired;
             look_dir_init_ = true;
-            return;
-        }
 
-        glm::vec3 from = look_dir_;
-        const float flen = glm::length(from);
-        if (flen < 1e-4f)
-            from = kForward;
-        else
-            from /= flen;
-
-        float alpha = 1.f - std::exp(-kLookOmega * std::max(dt, 1e-4f));
-        alpha = std::clamp(alpha, 0.f, 1.f);
-
-        const float dot = glm::clamp(glm::dot(from, desired), -1.f, 1.f);
-        if (dot > 0.9995f)
-        {
-            look_dir_ = desired;
-            return;
-        }
-
-        const glm::quat q_delta = glm::rotation(from, desired);
-        const glm::quat q_step = glm::slerp(glm::identity<glm::quat>(), q_delta, alpha);
-        look_dir_ = glm::normalize(q_step * from);
+        look_dir_ = yaw_pitch_to_dir_(yaw_, pitch_);
     }
 
     void rebuild_camera_()
@@ -157,11 +197,17 @@ private:
 
     float scroll_z_ = 0.f;
 
+    // Smoothed look (radians) and targets for tween.
+    float yaw_ = 0.f;
+    float pitch_ = 0.f;
+    float yaw_target_ = 0.f;
+    float pitch_target_ = 0.f;
+
     glm::vec3 look_dir_{ 0.f, 0.f, 1.f };
     bool      look_dir_init_ = false;
-    glm::vec3 look_aim_dir_{ 0.f, 0.f, 1.f };
     std::string look_aim_hash_;
-    bool      look_engaged_ = false;
+    bool      look_engaged_ = false; // selection auto-aim
+    bool      free_look_ = false;    // user RMB-drag (do not auto-home)
 
     Camera camera_{};
 };
