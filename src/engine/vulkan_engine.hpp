@@ -18,6 +18,7 @@
 #include "domain/layout.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
+#include "engine/frame_descriptors.hpp"
 #include "engine/frame_resources.hpp"
 #include "engine/frame_sync.hpp"
 #include "engine/picker.hpp"
@@ -92,7 +93,7 @@ private:
     VkFormat swapchainImageFormat;
     VkExtent2D swapchainExtent;
     SwapchainTargets swapchain_targets_;
-    VkDescriptorSetLayout descriptorSetLayout;
+    FrameDescriptors frame_descriptors_;
 
     CubePipeline cube_pipe_;
     PickerPipeline picker_pipe_;
@@ -115,8 +116,6 @@ private:
 
     int currentFrame;
     size_t instanceCount = 0;
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSet descriptorSet;
 
     std::thread renderThread;
     std::mutex  renderMutex;
@@ -158,10 +157,8 @@ private:
     void render_loop();
     void render();
     void create_swapchain_targets();
-    void create_descriptor_set_layout();
     void create_frame_resources();
-    void create_descriptor_pool();
-    void create_descriptor_sets();
+    void create_frame_descriptors();
     void create_command_pool();
     void create_sync_objects();
     void update_uniform_buffer();

@@ -147,13 +147,10 @@ VulkanEngine::VulkanEngine()
     , graphicsQueue(VK_NULL_HANDLE)
     , surface(VK_NULL_HANDLE)
     , swapchain(VK_NULL_HANDLE)
-    , descriptorSetLayout(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
     , inFlightFrames{}
     , currentFrame(0)
     , instanceCount(0)
-    , descriptorPool(VK_NULL_HANDLE)
-    , descriptorSet(VK_NULL_HANDLE)
     , running(false)
     , elapsedSeconds(0.0f)
     , width(0)
@@ -252,8 +249,9 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     s_resized = true;
     create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
     create_swapchain_targets();
-    create_descriptor_set_layout();
-    cube_pipe_.create(device, descriptorSetLayout, swapchainImageFormat,
+    create_frame_resources();
+    create_frame_descriptors();
+    cube_pipe_.create(device, frame_descriptors_.layout(), swapchainImageFormat,
                       swapchain_targets_.depth_format(), width, height);
     {
         PickerResourcesCreateInfo pr{};
@@ -264,12 +262,9 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
         picker_.create_resources(pr);
         picker_.create_staging(device, &deviceMemProps);
     }
-    picker_pipe_.create(device, descriptorSetLayout, picker_.color_format(),
+    picker_pipe_.create(device, frame_descriptors_.layout(), picker_.color_format(),
                         swapchain_targets_.depth_format(), width, height);
     create_command_pool();
-    create_frame_resources();
-    create_descriptor_pool();
-    create_descriptor_sets();
     create_sync_objects();
 
     // Setup Dear ImGui context
@@ -299,7 +294,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     imgui_vk.Device = device;
     imgui_vk.QueueFamily = 0;
     imgui_vk.Queue = graphicsQueue;
-    imgui_vk.DescriptorPool = descriptorPool;
+    imgui_vk.DescriptorPool = frame_descriptors_.pool();
     imgui_vk.PipelineCache = VK_NULL_HANDLE;
     imgui_vk.RenderPass = VK_NULL_HANDLE;
     imgui_vk.UseDynamicRendering = true;
@@ -900,27 +895,6 @@ void VulkanEngine::create_swapchain_targets()
 }
 
 
-void VulkanEngine::create_descriptor_set_layout()
-{
-    VkDescriptorSetLayoutBinding uboLayoutBinding{};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &uboLayoutBinding;
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create descriptor set layout");
-    }
-
-}   /* create_descriptor_set_layout() */
-
-
 void VulkanEngine::create_frame_resources()
 {
     FrameResourcesCreateInfo info{};
@@ -936,59 +910,16 @@ void VulkanEngine::create_frame_resources()
 }
 
 
-void VulkanEngine::create_descriptor_pool()
+void VulkanEngine::create_frame_descriptors()
 {
-    VkDescriptorPoolSize pool_sizes[] = 
-    {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-    };
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = _countof(pool_sizes);
-    poolInfo.pPoolSizes = pool_sizes;
-    poolInfo.maxSets = 2;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create descriptor pool");
-    }
-
-}   /* create_descriptor_pool() */
-
-
-void VulkanEngine::create_descriptor_sets()
-{
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &descriptorSetLayout;
-
-    if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to allocate descriptor sets");
-    }
-
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = frame_resources_.uniform_buffer();
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(UniformBufferObject);
-
-    VkWriteDescriptorSet descriptorWrite{};
-    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrite.dstSet = descriptorSet;
-    descriptorWrite.dstBinding = 0;
-    descriptorWrite.dstArrayElement = 0;
-    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrite.descriptorCount = 1;
-    descriptorWrite.pBufferInfo = &bufferInfo;
-
-    vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
-
-}   /* create_descriptor_sets() */
+    FrameDescriptorsCreateInfo info{};
+    info.device = device;
+    info.ubo_buffer = frame_resources_.uniform_buffer();
+    info.ubo_range = sizeof(UniformBufferObject);
+    info.combined_image_sampler_count = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE;
+    info.max_sets = 2;
+    frame_descriptors_.create(info);
+}
 
 
 void VulkanEngine::create_command_pool()
@@ -1290,7 +1221,8 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     VkBuffer buffers[] = { frame_resources_.vertex_buffer(), frame_resources_.instance_buffer() };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.layout, 0, 1, &descriptorSet, 0, nullptr);
+    VkDescriptorSet frame_set = frame_descriptors_.set();
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.layout, 0, 1, &frame_set, 0, nullptr);
     vkCmdBindIndexBuffer(buffer, frame_resources_.index_buffer(), 0, VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
 
@@ -1353,7 +1285,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             rp.image_layout_undefined = s_resized;
             rp.pipeline = picker_pipe_.pipeline;
             rp.pipeline_layout = picker_pipe_.layout;
-            rp.descriptor_set = descriptorSet;
+            rp.descriptor_set = frame_descriptors_.set();
             rp.vertex_buffer = frame_resources_.vertex_buffer();
             rp.instance_buffer = frame_resources_.instance_buffer();
             rp.index_buffer = frame_resources_.index_buffer();
@@ -1393,10 +1325,9 @@ void VulkanEngine::cleanup()
         meshArena = nullptr;
     }
 
+    // Descriptors reference UBO in frame_resources — free pool before buffers.
+    frame_descriptors_.destroy(device);
     frame_resources_.destroy(device);
-
-    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
     frame_sync_.destroy(device);
     vkDestroyCommandPool(device, commandPool, nullptr);
