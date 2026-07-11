@@ -46,8 +46,11 @@ public:
     // Transition sel_depth_ DEPTH_ATTACHMENT → SHADER_READ (and queue release if needed).
     void record_sel_depth_release_for_compute(VkCommandBuffer cmd);
 
-    // Compute: sample sel_depth_, write edge image.
+    // Compute: sample sel_depth_, write edge image (CMP-queue-safe stages only).
     void record_dispatch(VkCommandBuffer cmd, float strength, float threshold);
+
+    // Graphics: acquire edge image + GENERAL → SHADER_READ before overlay sample.
+    void record_edge_acquire_for_graphics(VkCommandBuffer cmd);
 
     // Fullscreen edge overlay into current color attachment (additive blend).
     void record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
@@ -55,14 +58,18 @@ public:
 
     VkImage sel_depth_image() const { return sel_depth_image_; }
     VkImageView sel_depth_view() const { return sel_depth_view_; }
-    VkSemaphore compute_finished() const { return compute_finished_; }
-    VkSemaphore graphics_to_compute() const { return graphics_to_compute_; }
+
+    // Per-frame binary semaphores (must match engine frames-in-flight).
+    static constexpr uint32_t kMaxFrames = 3;
+    VkSemaphore graphics_to_compute(uint32_t frame_index) const;
+    VkSemaphore compute_finished(uint32_t frame_index) const;
 
     bool ready() const { return pipeline_ != VK_NULL_HANDLE && depth_only_pipeline_ != VK_NULL_HANDLE; }
 
 private:
     void create_images(const SobelComputeCreateInfo& info);
     void create_descriptors(VkDevice device);
+    void write_static_descriptors_();
     void create_compute_pipeline(VkDevice device);
     void create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
                                     VkDescriptorSetLayout ubo_layout);
@@ -103,6 +110,6 @@ private:
     VkPipelineLayout overlay_layout_ = VK_NULL_HANDLE;
     VkPipeline overlay_pipeline_ = VK_NULL_HANDLE;
 
-    VkSemaphore compute_finished_ = VK_NULL_HANDLE;
-    VkSemaphore graphics_to_compute_ = VK_NULL_HANDLE;
+    VkSemaphore compute_finished_[kMaxFrames]{};
+    VkSemaphore graphics_to_compute_[kMaxFrames]{};
 };

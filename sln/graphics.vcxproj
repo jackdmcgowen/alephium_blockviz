@@ -106,6 +106,7 @@
   <ItemGroup>
     <ClCompile Include="..\src\graphics\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
+    <ClCompile Include="..\src\graphics\camera.cpp" />
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp" />
     <ClCompile Include="..\src\graphics\mesh_arena.cpp" />
     <ClCompile Include="..\src\graphics\device.cpp" />
@@ -118,6 +119,7 @@
     <ClCompile Include="..\src\graphics\validation.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\graphics\camera.hpp" />
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h" />
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h" />
     <ClInclude Include="..\src\graphics\queue_types.hpp" />

@@ -44,7 +44,7 @@
     <ClInclude Include="..\src\config.h" />
     <ClInclude Include="..\src\app\app_identity.hpp" />
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
-    <ClInclude Include="..\src\app\camera_state.hpp" />
+    <ClInclude Include="..\src\app\camera_controller.hpp" />
     <ClInclude Include="..\src\app\scene_presenter.hpp" />
     <ClInclude Include="..\src\app\ui_chrome.hpp" />
     <ClInclude Include="..\src\app\ui_snapshot.hpp" />

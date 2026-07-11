@@ -113,7 +113,7 @@
     <ClInclude Include="..\src\app\blockflow_overlay.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\app\camera_state.hpp">
+    <ClInclude Include="..\src\app\camera_controller.hpp">
       <Filter>Header Files\app</Filter>
     </ClInclude>
     <ClInclude Include="..\src\app\ui_chrome.hpp">

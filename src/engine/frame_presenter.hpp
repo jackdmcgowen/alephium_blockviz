@@ -20,6 +20,7 @@ public:
 
     struct AcquireResult
     {
+        bool     ok = false; // false if OUT_OF_DATE / failed — skip submit this frame
         uint32_t image_index = 0;
         VkSemaphore image_available = VK_NULL_HANDLE;
         VkSemaphore render_finished = VK_NULL_HANDLE;

@@ -6,7 +6,7 @@
 #include "config.h"
 #include "app/app_identity.hpp"
 #include "app/blockflow_overlay.hpp"
-#include "app/camera_state.hpp"
+#include "app/camera_controller.hpp"
 #include "app/scene_presenter.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
@@ -27,7 +27,7 @@ const char* baseUrl;
 
 static volatile bool keepRunning = true;
 static BlockScene scene;
-static CameraState camera;
+static CameraController camera;
 static IBlockvizEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
 static ScenePresenter* scene_presenter = nullptr;

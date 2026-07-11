@@ -22,16 +22,23 @@ FramePresenter::AcquireResult FramePresenter::acquire(VkDevice device, VkSwapcha
 {
     AcquireResult out{};
     out.image_available = sync.image_available(frame_index);
+    out.render_finished = sync.render_finished(frame_index);
 
     const VkResult result = vkAcquireNextImageKHR(
         device, swapchain, UINT64_MAX, out.image_available, VK_NULL_HANDLE, &out.image_index);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        pending_resize_ = true;
+        out.ok = false; // do not submit/present this frame
+        return out;
+    }
+    if (result == VK_SUBOPTIMAL_KHR)
         pending_resize_ = true;
     else if (result != VK_SUCCESS)
         throw std::runtime_error("Failed to acquire swapchain image");
 
-    out.render_finished = sync.render_finished(out.image_index);
+    out.ok = true;
     return out;
 }
 
@@ -53,6 +60,7 @@ void FramePresenter::submit_and_present(VkQueue queue,
     VkSemaphoreSubmitInfo wait_info{};
     wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
     wait_info.semaphore = image_available;
+    wait_info.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSemaphoreSubmitInfo signal_info[2]{};
     signal_info[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;

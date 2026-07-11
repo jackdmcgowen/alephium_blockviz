@@ -45,6 +45,9 @@
     <ClCompile Include="..\src\graphics\buffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\graphics\camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp">
       <Filter>Source Files\debug</Filter>
     </ClCompile>
@@ -53,6 +56,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\graphics\camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -12,7 +12,7 @@ void FrameSync::create(const FrameSyncCreateInfo& info)
     frames_in_flight_ = info.frames_in_flight;
     swapchain_images_ = info.swapchain_image_count;
     image_available_.assign(frames_in_flight_, VK_NULL_HANDLE);
-    render_finished_.assign(swapchain_images_, VK_NULL_HANDLE);
+    render_finished_.assign(frames_in_flight_, VK_NULL_HANDLE);
     frame_timeline_value_.assign(frames_in_flight_, 0);
 
     VkSemaphoreTypeCreateInfo semaphoreTypeCI{};
@@ -24,14 +24,10 @@ void FrameSync::create(const FrameSyncCreateInfo& info)
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     semaphoreInfo.pNext = &semaphoreTypeCI;
 
-    for (uint32_t i = 0; i < swapchain_images_; ++i)
+    for (uint32_t i = 0; i < frames_in_flight_; ++i)
     {
         if (vkCreateSemaphore(info.device, &semaphoreInfo, nullptr, &render_finished_[i]) != VK_SUCCESS)
             throw std::runtime_error("Failed to create render-finished semaphore");
-    }
-
-    for (uint32_t i = 0; i < frames_in_flight_; ++i)
-    {
         if (vkCreateSemaphore(info.device, &semaphoreInfo, nullptr, &image_available_[i]) != VK_SUCCESS)
             throw std::runtime_error("Failed to create image-available semaphore");
     }
@@ -93,9 +89,9 @@ VkSemaphore FrameSync::image_available(uint32_t frame_index) const
     return image_available_.at(frame_index);
 }
 
-VkSemaphore FrameSync::render_finished(uint32_t image_index) const
+VkSemaphore FrameSync::render_finished(uint32_t frame_index) const
 {
-    return render_finished_.at(image_index);
+    return render_finished_.at(frame_index);
 }
 
 void FrameSync::set_frame_timeline_value(uint32_t frame_index, uint64_t value)

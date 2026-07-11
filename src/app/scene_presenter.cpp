@@ -65,6 +65,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     out.instances.reserve(layout.placements.size());
     out.pick_map.reserve(layout.placements.size());
+    const glm::vec3 half = in.instance_half_extents;
     for (const PlacedBlock& placed : layout.placements)
     {
         if (out.instances.size() >= kMaxInstances)
@@ -72,6 +73,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             std::printf("Instance buffer full\n");
             break;
         }
+
+        // Frustum cull before GPU submit (pick_map stays index-aligned with instances).
+        if (in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
+            continue;
 
         glm::vec3 color = placed.color;
         if (!in.selected_hash.empty() && placed.hash == in.selected_hash)

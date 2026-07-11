@@ -8,11 +8,13 @@ void create_swapchain(
     VkFormat format,
     VkExtent2D extent)
 {
+    const VkSwapchainKHR old_swapchain = (swapchain != nullptr) ? *swapchain : VK_NULL_HANDLE;
+
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = surface;
     createInfo.minImageCount = MAX_SWAPCHAIN_IMAGES;
-    createInfo.oldSwapchain = *swapchain;
+    createInfo.oldSwapchain = old_swapchain;
     createInfo.imageFormat = format;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent = extent;
@@ -24,12 +26,17 @@ void create_swapchain(
     createInfo.clipped = VK_TRUE;
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateSwapchainKHR(device, &createInfo, nullptr, swapchain) != VK_SUCCESS)
-    {
+    VkSwapchainKHR new_swapchain = VK_NULL_HANDLE;
+    if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &new_swapchain) != VK_SUCCESS)
         throw std::runtime_error("Failed to create swapchain");
-    }
 
-    uint32_t imageCount;
+    // Retire old swapchain after successful create (was leaked every resize).
+    if (old_swapchain != VK_NULL_HANDLE)
+        vkDestroySwapchainKHR(device, old_swapchain, nullptr);
+
+    *swapchain = new_swapchain;
+
+    uint32_t imageCount = 0;
     vkGetSwapchainImagesKHR(device, *swapchain, &imageCount, nullptr);
     swapchainImages.resize(imageCount);
     vkGetSwapchainImagesKHR(device, *swapchain, &imageCount, swapchainImages.data());
@@ -39,6 +46,7 @@ void create_swapchain(
 
 void destroy_swapchain(VkDevice device, VkSwapchainKHR swapchain)
 {
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
+    if (swapchain != VK_NULL_HANDLE)
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
 
 }   /* destroy_swapchain() */

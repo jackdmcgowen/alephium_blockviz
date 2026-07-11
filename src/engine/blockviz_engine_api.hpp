@@ -6,6 +6,7 @@
 
 #include "alph_block.hpp"
 #include "app/ui_snapshot.hpp"
+#include "graphics/camera.hpp"
 #include "graphics/gpu_pub_lib.h"
 
 #include <string>
@@ -14,7 +15,7 @@
 #include <glm/glm.hpp>
 
 class BlockScene;
-class CameraState;
+class CameraController;
 class DebugDrawer; // graphics debug draw; filled on render thread (E14)
 
 // Selection/hover snapshot the engine passes into the host frame builder (E14).
@@ -23,6 +24,10 @@ struct FrameSourceInput
     std::string selected_hash;
     std::string hovered_hash;
     AlphBlock   selected_detail;
+    // Optional frustum cull before instance submit (null = no cull).
+    const Frustum* frustum = nullptr;
+    // World half-extents of each cube instance (mesh vertices at ±1 → 1,1,1).
+    glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };
 };
 
 // Domain → GPU/UI products built on the render thread by the host (E14).
@@ -53,7 +58,7 @@ public:
     ~IBlockvizEngine() override = default;
 
     virtual void set_scene(BlockScene* scene) = 0;
-    virtual void set_camera(CameraState* camera) = 0;
+    virtual void set_camera(CameraController* camera) = 0;
     virtual void set_frame_source(IFrameSource* source) = 0; // not owned; nullptr = empty scene path
 
     virtual void set_selection(const std::string& hash) = 0;

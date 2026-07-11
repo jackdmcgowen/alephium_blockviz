@@ -30,7 +30,7 @@ static const glm::vec3 kShardColors[16] = {
     glm::vec3(0.00f, 1.00f, 0.00f)
 };
 
-BlockflowOverlay::BlockflowOverlay(CameraState& camera, IBlockvizEngine& engine)
+BlockflowOverlay::BlockflowOverlay(CameraController& camera, IBlockvizEngine& engine)
     : camera_(camera)
     , engine_(engine)
 {
@@ -42,18 +42,18 @@ void BlockflowOverlay::draw()
     ImGuiIO& io = ImGui::GetIO();
     const float dt_sec = (io.DeltaTime > 0.f) ? io.DeltaTime : (1.f / 60.f);
 
-    // Camera motion — client-owned CameraState (keys + scroll wheel)
+    // Camera motion — CameraController (keys + scroll wheel)
     if (!io.WantCaptureKeyboard)
     {
         if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
-            camera_.nudge_eye_z(CameraState::kEyeZStep * dt_sec);
+            camera_.nudge_scroll(CameraController::kEyeZStep * dt_sec);
         if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
-            camera_.nudge_eye_z(-CameraState::kEyeZStep * dt_sec);
+            camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
     }
     // Wheel over the 3D scene (not ImGui panels): same axis as Up/Down.
-    // Positive MouseWheel = scroll up → +eye_z (matches Up arrow).
+    // Positive MouseWheel = scroll up → +scroll_z (matches Up arrow).
     if (!io.WantCaptureMouse && io.MouseWheel != 0.f)
-        camera_.nudge_eye_z(io.MouseWheel * CameraState::kWheelStep);
+        camera_.nudge_scroll(io.MouseWheel * CameraController::kWheelStep);
 
     const UiSnapshot ui = engine_.copy_ui_snapshot();
     const float ui_w = io.DisplaySize.x;
@@ -78,20 +78,19 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.f, 8.f));
     ImGui::Begin("Blockflow", nullptr, flags);
 
-    const CameraState::Snapshot cam = camera_.snapshot();
-    float mps = cam.meters_per_second;
+    float mps = camera_.meters_per_second();
 
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
     const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
     const float bps = ui.total_blocks / (0.001f * elapsed_ms);
 
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
-    if (ImGui::SliderFloat("Scroll speed", &mps, CameraState::kMpsMin, CameraState::kMpsMax, "%.1f"))
+    if (ImGui::SliderFloat("Scroll speed", &mps, CameraController::kMpsMin, CameraController::kMpsMax, "%.1f"))
         camera_.set_meters_per_second(mps);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Camera auto-scroll rate along the chain axis");
 
-    ImGui::Text("z: %.1f  (Up/Down / wheel)", cam.eye_z);
+    ImGui::Text("z: %.1f  (Up/Down / wheel)", camera_.scroll_z());
     ImGui::SameLine(0.f, 24.f);
     ImGui::Text("blocks: %d", ui.total_blocks);
     ImGui::SameLine(0.f, 24.f);

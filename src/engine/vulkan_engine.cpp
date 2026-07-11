@@ -13,10 +13,6 @@
 #include "commands.h"
 #include "graphics/engine_requirements.hpp"
 
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/quaternion.hpp>
-
 #include "graphics/debug/debug_drawer.h"
 #include "graphics/mesh_arena.h"
 
@@ -49,8 +45,6 @@ static DebugDrawer debugDrawer;
 static MeshArena* meshArena = nullptr;
 glm::mat4 viewProj;
 
-static const float FOV = glm::radians(45.0f);
-
 static constexpr bool kHoverPickEnabled = true;
 
 const VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
@@ -75,11 +69,6 @@ const uint16_t VulkanEngine::CUBE_INDICES[36] = {
 
 static bool s_resized;
 
-// Camera rotate-into (selection) / rotate-home (right-click clear)
-static constexpr float kLookOmega = 10.0f; // slerp ease rate (higher = snappier)
-static const glm::vec3 kCamUp(0.0f, -1.0f, 0.0f);
-static const glm::vec3 kCamForward(0.0f, 0.0f, 1.0f); // original free view
-
 VulkanEngine::VulkanEngine()
     : hInstance(nullptr)
     , hwnd(nullptr)
@@ -92,12 +81,10 @@ VulkanEngine::VulkanEngine()
     , swapchain(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
     , computeCommandPool(VK_NULL_HANDLE)
-    , computeCommandBuffer(VK_NULL_HANDLE)
     , inFlightFrames{}
     , currentFrame(0)
     , instanceCount(0)
     , running(false)
-    , elapsedSeconds(0.0f)
     , width(0)
     , height(0)
 {
@@ -113,7 +100,7 @@ void VulkanEngine::set_ui_overlay(IUiOverlay* overlay)
     overlay_ = overlay;
 }
 
-void VulkanEngine::set_camera(CameraState* camera)
+void VulkanEngine::set_camera(CameraController* camera)
 {
     camera_ = camera;
 }
@@ -351,7 +338,8 @@ void VulkanEngine::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
-    end_look_aim();
+    if (camera_)
+        camera_->clear_look_target();
     if (scene_)
         scene_->detail_store().set_full_detail_pin({});
 }
@@ -494,32 +482,54 @@ void VulkanEngine::render_loop()
         UiSnapshot frame_ui{};
         std::vector<std::string> frame_pick_map;
 
+        // Camera: aspect → look-aim → tick → frustum (before geometry submit).
+        if (camera_)
+        {
+            const float aspect = (height > 0) ? static_cast<float>(width) / static_cast<float>(height) : 1.f;
+            camera_->set_aspect(aspect);
+        }
+
         if (frame_source_)
         {
             FrameSourceInput fin{};
             fin.selected_hash = selected_hash_local;
             fin.hovered_hash = hovered_hash_local;
             fin.selected_detail = selected_detail_local;
+            // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
+            fin.instance_half_extents = glm::vec3(1.05f);
+
+            // Look target from layout is still needed for aim; run a thin prepare after
+            // tick if we need positions — look aim uses fout after prepare below.
+            // Tick camera first without new aim so frustum matches previous look;
+            // then set aim when selection changes (target from prepare).
 
             FrameSourceOutput fout{};
             // Host ScenePresenter locks scene; must not hold scene mutex here.
+            // First prepare pass needs frustum — tick camera, then cull.
+            Frustum frame_frustum{};
+            if (camera_)
+            {
+                camera_->tick(last_frame_dt_sec_);
+                frame_frustum = camera_->frustum();
+                fin.frustum = &frame_frustum;
+            }
+
             frame_source_->prepare(fin, fout, &debugDrawer);
 
-            has_look_target_ = fout.has_look_target;
-            if (fout.has_look_target)
-                selected_look_pos_ = fout.look_target_pos;
-
-            const glm::vec3 eye = camera_eye();
-            if (has_look_target_ && selected_hash_local != look_aim_hash_)
-                begin_look_aim(eye, selected_look_pos_, selected_hash_local);
-            else if (selected_hash_local.empty() && look_engaged_)
-                end_look_aim();
-            update_look_direction(last_frame_dt_sec_, eye);
+            if (camera_)
+            {
+                if (fout.has_look_target && selected_hash_local != camera_->look_aim_hash())
+                    camera_->set_look_target(fout.look_target_pos, selected_hash_local);
+                else if (selected_hash_local.empty() && camera_->look_engaged())
+                    camera_->clear_look_target();
+                // Re-tick look slerp after aim change for this frame's UBO.
+                camera_->tick(0.f);
+            }
 
             FrameSubmit submit{};
             submit.instances = fout.instances.empty() ? nullptr : fout.instances.data();
             submit.instance_count = fout.instances.size();
-            submit.camera = build_camera_ubo();
+            submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             publish_frame(submit, fout.pick_map);
 
@@ -530,11 +540,10 @@ void VulkanEngine::render_loop()
         }
         else
         {
-            has_look_target_ = false;
-            const glm::vec3 eye = camera_eye();
-            update_look_direction(last_frame_dt_sec_, eye);
+            if (camera_)
+                camera_->tick(last_frame_dt_sec_);
             FrameSubmit submit{};
-            submit.camera = build_camera_ubo();
+            submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             publish_frame(submit, frame_pick_map);
             frame_ui.selected_hash = selected_hash_local;
@@ -550,8 +559,6 @@ void VulkanEngine::render_loop()
 
         ImGui::Render();
         render();
-
-        elapsedSeconds += static_cast<float>(dt) * 0.001f;
 
         do
         {
@@ -610,6 +617,8 @@ void VulkanEngine::render()
 
     const FramePresenter::AcquireResult acq =
         frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
+    if (!acq.ok)
+        return; // OUT_OF_DATE: resize next begin; do not submit/present
 
     // Map selected hash → instance index in this frame's pick map (for single-instance depth).
     uint32_t selected_instance = ~0u;
@@ -636,8 +645,8 @@ void VulkanEngine::render()
 
     if (want_sobel)
     {
-        submit_frame_with_async_sobel(acq.image_index, commandBuffer, acq.image_available,
-                                      acq.render_finished, selected_instance);
+        submit_frame_with_async_sobel(begin.frame_index, acq.image_index, commandBuffer,
+                                      acq.image_available, acq.render_finished, selected_instance);
     }
     else
     {
@@ -654,12 +663,27 @@ void VulkanEngine::render()
 
 }   /* render() */
 
-void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
+void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
                                                  VkCommandBuffer graphics_cb,
                                                  VkSemaphore image_available,
                                                  VkSemaphore render_finished,
                                                  uint32_t selected_instance_index)
 {
+    // Wait for prior Sobel chain: shared sel_depth/edge must not be rewritten while sampled.
+    if (sobel_fence_in_flight_ && sobel_done_fence_ != VK_NULL_HANDLE)
+    {
+        vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &sobel_done_fence_);
+        sobel_fence_in_flight_ = false;
+    }
+
+    // Slot is idle: FramePresenter::begin already wait_frame(frame_index) for this timeline slot.
+    FramesInFlight& slot = inFlightFrames[frame_index % MAX_FRAMES_IN_FLIGHT];
+    VkCommandBuffer compute_cb = slot.computeCommandBuffer;
+    VkCommandBuffer overlay_cb = slot.overlayCommandBuffer;
+    const VkSemaphore g2c = sobel_.graphics_to_compute(frame_index);
+    const VkSemaphore cfin = sobel_.compute_finished(frame_index);
+
     // After main+pick: depth-only redraw of the selected instance into sel_depth_,
     // then release that depth for async CMP Sobel (scene depth is not used).
     {
@@ -685,7 +709,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
         wait.semaphore = image_available;
         wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        sig.semaphore = sobel_.graphics_to_compute();
+        sig.semaphore = g2c;
         sig.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
         submit.commandBufferInfoCount = 1;
@@ -700,21 +724,21 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
 
     // Compute (CMP): wait g→c, Sobel on selection depth only, signal compute_finished
     {
-        vkResetCommandBuffer(computeCommandBuffer, 0);
+        vkResetCommandBuffer(compute_cb, 0);
         VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(computeCommandBuffer, &bi);
+        vkBeginCommandBuffer(compute_cb, &bi);
 
-        sobel_.record_dispatch(computeCommandBuffer, /*strength=*/14.0f, /*threshold=*/0.001f);
-        vkEndCommandBuffer(computeCommandBuffer);
+        sobel_.record_dispatch(compute_cb, /*strength=*/14.0f, /*threshold=*/0.001f);
+        vkEndCommandBuffer(compute_cb);
 
         VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-        cb.commandBuffer = computeCommandBuffer;
+        cb.commandBuffer = compute_cb;
         VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        wait.semaphore = sobel_.graphics_to_compute();
+        wait.semaphore = g2c;
         wait.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        sig.semaphore = sobel_.compute_finished();
+        sig.semaphore = cfin;
         sig.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
         submit.commandBufferInfoCount = 1;
@@ -729,27 +753,14 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
 
     // Graphics overlay + present: wait compute, composite edges, present
     {
-        VkCommandBuffer overlay_cb = inFlightFrames[(currentFrame + 1) % MAX_FRAMES_IN_FLIGHT].commandBuffer;
-        // Reuse a free slot's buffer is wrong if still in flight — allocate one-shot from pool
-        // Use computeCommandBuffer is busy; allocate temporary from _3D pool each frame is heavy.
-        // Safer: use frame's same buffer only after GPU finished — we submitted it already.
-        // Secondary buffer from _3D pool:
-        static thread_local VkCommandBuffer s_overlay_cb = VK_NULL_HANDLE;
-        if (s_overlay_cb == VK_NULL_HANDLE)
-        {
-            VkCommandBufferAllocateInfo ai{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-            ai.commandPool = commandPool;
-            ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            ai.commandBufferCount = 1;
-            vkAllocateCommandBuffers(device, &ai, &s_overlay_cb);
-        }
-        (void)overlay_cb;
-        vkResetCommandBuffer(s_overlay_cb, 0);
+        vkResetCommandBuffer(overlay_cb, 0);
         VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(s_overlay_cb, &bi);
+        vkBeginCommandBuffer(overlay_cb, &bi);
 
-        // Color still COLOR_ATTACHMENT — load and draw edges
+        sobel_.record_edge_acquire_for_graphics(overlay_cb);
+
+        // Color still COLOR_ATTACHMENT — load and draw edges (1× resolved swapchain)
         VkRenderingAttachmentInfo color{};
         color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         color.imageView = swapchain_targets_.color_view(image_index);
@@ -762,23 +773,21 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
         ri.layerCount = 1;
         ri.colorAttachmentCount = 1;
         ri.pColorAttachments = &color;
-        vkCmdBeginRendering(s_overlay_cb, &ri);
+        vkCmdBeginRendering(overlay_cb, &ri);
 
         const float highlight[4] = { 1.0f, 0.85f, 0.15f, 1.35f }; // gold selection edges
-        sobel_.record_overlay(s_overlay_cb, width, height, highlight);
-        vkCmdEndRendering(s_overlay_cb);
+        sobel_.record_overlay(overlay_cb, width, height, highlight);
+        vkCmdEndRendering(overlay_cb);
 
-        // Overlay composites onto resolved (1×) swapchain color
-        frame_recorder_.transition_color_to_present(s_overlay_cb, swapchainImages[image_index]);
-        vkEndCommandBuffer(s_overlay_cb);
+        frame_recorder_.transition_color_to_present(overlay_cb, swapchainImages[image_index]);
+        vkEndCommandBuffer(overlay_cb);
 
-        // Submit via presenter-like path: wait compute_finished + timeline bookkeeping
         const uint64_t signal_value = frame_presenter_.frame_counter() + 1;
         VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-        cb.commandBuffer = s_overlay_cb;
+        cb.commandBuffer = overlay_cb;
         VkSemaphoreSubmitInfo waits[1]{};
         waits[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        waits[0].semaphore = sobel_.compute_finished();
+        waits[0].semaphore = cfin;
         waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
                              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         VkSemaphoreSubmitInfo sigs[2]{};
@@ -796,8 +805,9 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
         submit.pWaitSemaphoreInfos = waits;
         submit.signalSemaphoreInfoCount = 2;
         submit.pSignalSemaphoreInfos = sigs;
-        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, sobel_done_fence_) != VK_SUCCESS)
             throw std::runtime_error("async sobel: overlay submit failed");
+        sobel_fence_in_flight_ = true;
 
         VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
         present.waitSemaphoreCount = 1;
@@ -807,7 +817,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
         present.pImageIndices = &image_index;
         vkQueuePresentKHR(queues_.get(QueueType::_3D), &present);
 
-        frame_sync_.set_frame_timeline_value(static_cast<uint32_t>(currentFrame), signal_value);
+        frame_sync_.set_frame_timeline_value(frame_index, signal_value);
         frame_presenter_.notify_submitted_and_presented();
     }
 }
@@ -955,12 +965,17 @@ void VulkanEngine::create_command_pool()
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].commandBuffer) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate _3D command buffers");
+            throw std::runtime_error("Failed to allocate _3D main command buffers");
+        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].overlayCommandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate _3D overlay command buffers");
     }
 
     allocInfo.commandPool = computeCommandPool;
-    if (vkAllocateCommandBuffers(device, &allocInfo, &computeCommandBuffer) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate CMP command buffer");
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].computeCommandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate CMP command buffers");
+    }
 }   /* create_command_pool() */
 
 
@@ -971,118 +986,13 @@ void VulkanEngine::create_sync_objects()
     info.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
     info.swapchain_image_count = MAX_SWAPCHAIN_IMAGES;
     frame_sync_.create(info);
+
+    VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    if (vkCreateFence(device, &fci, nullptr, &sobel_done_fence_) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create sobel completion fence");
+    sobel_fence_in_flight_ = false;
 }
 
-
-glm::vec3 VulkanEngine::camera_eye() const
-{
-    float eye_z = static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS);
-    float meters_per_second = 1.f;
-    if (camera_)
-    {
-        const CameraState::Snapshot s = camera_->snapshot();
-        eye_z = s.eye_z;
-        meters_per_second = s.meters_per_second;
-    }
-    const float cam_z = eye_z - meters_per_second * elapsedSeconds;
-    return glm::vec3(0.0f, 0.0f, cam_z);
-}
-
-void VulkanEngine::begin_look_aim(const glm::vec3& eye, const glm::vec3& target_pos,
-                                  const std::string& hash)
-{
-    if (hash.empty())
-        return;
-
-    glm::vec3 dir = target_pos - eye;
-    const float len = glm::length(dir);
-    if (len < 0.05f)
-        dir = kCamForward;
-    else
-        dir /= len;
-
-    // Full hard-lookAt angle, frozen at click (hold until right-click / clear)
-    look_aim_dir_ = dir;
-    look_aim_hash_ = hash;
-    look_engaged_ = true;
-}
-
-void VulkanEngine::end_look_aim()
-{
-    look_engaged_ = false;
-    look_aim_hash_.clear();
-    // look_dir_ slerps toward kCamForward in update_look_direction
-}
-
-void VulkanEngine::update_look_direction(float dt, const glm::vec3& eye)
-{
-    (void)eye;
-
-    // Engaged: hold full rotate-into aim. Disengaged: rotate home to original +Z.
-    glm::vec3 desired_dir = look_engaged_ ? look_aim_dir_ : kCamForward;
-    const float dlen = glm::length(desired_dir);
-    if (dlen < 1e-4f)
-        desired_dir = kCamForward;
-    else
-        desired_dir /= dlen;
-
-    if (!look_dir_init_)
-    {
-        look_dir_ = desired_dir;
-        look_dir_init_ = true;
-        return;
-    }
-
-    glm::vec3 from = look_dir_;
-    const float flen = glm::length(from);
-    if (flen < 1e-4f)
-        from = kCamForward;
-    else
-        from /= flen;
-
-    float alpha = 1.0f - std::exp(-kLookOmega * std::max(dt, 1e-4f));
-    alpha = std::clamp(alpha, 0.0f, 1.0f);
-
-    const float dot = glm::clamp(glm::dot(from, desired_dir), -1.0f, 1.0f);
-    if (dot > 0.9995f)
-    {
-        look_dir_ = desired_dir;
-        return;
-    }
-
-    const glm::quat q_delta = glm::rotation(from, desired_dir);
-    const glm::quat q_step = glm::slerp(glm::identity<glm::quat>(), q_delta, alpha);
-    look_dir_ = glm::normalize(q_step * from);
-}
-
-CameraUBO VulkanEngine::build_camera_ubo() const
-{
-    CameraUBO cam{};
-
-    float meters_per_second = 1.f;
-    if (camera_)
-        meters_per_second = camera_->snapshot().meters_per_second;
-
-    const glm::vec3 eye = camera_eye();
-    glm::vec3 dir = look_dir_init_ ? look_dir_ : kCamForward;
-    const float dlen = glm::length(dir);
-    if (dlen < 1e-4f)
-        dir = kCamForward;
-    else
-        dir /= dlen;
-
-    glm::vec3 center = eye + dir;
-    if (glm::length(center - eye) < 0.05f)
-        center = eye + kCamForward;
-
-    const float aspect = (height > 0) ? (float)width / (float)height : 1.f;
-    cam.view = glm::lookAt(eye, center, kCamUp);
-    cam.proj = glm::perspective(FOV, aspect, NEAR_PLANE, FAR_PLANE);
-    cam.view_pos = eye;
-    cam.light_pos = center;
-    cam.meters = meters_per_second;
-    return cam;
-}
 
 int VulkanEngine::find_free_gpu_slot_unlocked() const
 {
@@ -1157,13 +1067,6 @@ UiSnapshot VulkanEngine::copy_ui_snapshot() const
     std::lock_guard<std::mutex> lock(ui_snap_mutex_);
     return ui_snap_;
 }
-
-void VulkanEngine::update_uniform_buffer()
-{
-    CameraUBO cam = build_camera_ubo();
-    frame_resources_.upload_camera(cam, &viewProj);
-}
-
 
 void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                          VkPrimitiveTopology topology, bool defer_present)
@@ -1282,16 +1185,29 @@ void VulkanEngine::cleanup()
     frame_resources_.destroy(device);
 
     frame_sync_.destroy(device);
+    if (sobel_done_fence_ != VK_NULL_HANDLE)
+    {
+        if (sobel_fence_in_flight_)
+            vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(device, sobel_done_fence_, nullptr);
+        sobel_done_fence_ = VK_NULL_HANDLE;
+        sobel_fence_in_flight_ = false;
+    }
     if (computeCommandPool != VK_NULL_HANDLE)
     {
         vkDestroyCommandPool(device, computeCommandPool, nullptr);
         computeCommandPool = VK_NULL_HANDLE;
-        computeCommandBuffer = VK_NULL_HANDLE;
     }
     if (commandPool != VK_NULL_HANDLE)
     {
         vkDestroyCommandPool(device, commandPool, nullptr);
         commandPool = VK_NULL_HANDLE;
+    }
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        inFlightFrames[i].commandBuffer = VK_NULL_HANDLE;
+        inFlightFrames[i].computeCommandBuffer = VK_NULL_HANDLE;
+        inFlightFrames[i].overlayCommandBuffer = VK_NULL_HANDLE;
     }
 
     picker_.destroy(device);

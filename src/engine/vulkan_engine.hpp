@@ -13,7 +13,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "alph_block.hpp"
-#include "app/camera_state.hpp"
+#include "app/camera_controller.hpp"
 #include "app/ui_snapshot.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
@@ -37,9 +37,6 @@
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
 
-#define NEAR_PLANE  ( 1.0f )
-#define FAR_PLANE ( 5000.0f )
-
 // Concrete engine: IRenderEngine + IBlockvizEngine (E6); FrameResources (E8).
 class VulkanEngine : public IBlockvizEngine
 {
@@ -62,7 +59,7 @@ public:
 
     // IBlockvizEngine
     void set_scene(BlockScene* scene) override;
-    void set_camera(CameraState* camera) override;
+    void set_camera(CameraController* camera) override;
     void set_frame_source(IFrameSource* source) override;
     void set_selection(const std::string& hash) override;
     void clear_selection() override;
@@ -111,14 +108,18 @@ private:
 
     VkCommandPool commandPool = VK_NULL_HANDLE;       // _3D family
     VkCommandPool computeCommandPool = VK_NULL_HANDLE; // CMP family
-    VkCommandBuffer computeCommandBuffer = VK_NULL_HANDLE;
+    // Serializes async Sobel so shared sel_depth/edge are not rewritten mid-flight (VUID-09600).
+    VkFence sobel_done_fence_ = VK_NULL_HANDLE;
+    bool    sobel_fence_in_flight_ = false;
     FrameSync frame_sync_;
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
 
     struct FramesInFlight
     {
-        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE; // main scene + pick + sel depth
+        VkCommandBuffer computeCommandBuffer = VK_NULL_HANDLE; // async Sobel CMP
+        VkCommandBuffer overlayCommandBuffer = VK_NULL_HANDLE; // edge overlay + present
         bool            pendingPick = false;
         PickKind        pickKind = PickKind::None;
         std::vector<std::string> pick_map;
@@ -132,22 +133,15 @@ private:
     std::mutex  renderMutex;
     mutable std::mutex  selection_mutex_;
 
-    BlockScene*    scene_        = nullptr;
-    IUiOverlay*    overlay_      = nullptr;
-    CameraState*   camera_       = nullptr;
-    IFrameSource*  frame_source_ = nullptr;
+    BlockScene*       scene_        = nullptr;
+    IUiOverlay*       overlay_      = nullptr;
+    CameraController* camera_       = nullptr;
+    IFrameSource*     frame_source_ = nullptr;
 
     std::string selected_hash_;
     AlphBlock   selected_block;
     std::string hovered_hash_;
-    bool      has_look_target_ = false;
-    glm::vec3 selected_look_pos_{ 0.f };
-    glm::vec3 look_dir_{ 0.f, 0.f, 1.f };
-    bool      look_dir_init_ = false;
     float     last_frame_dt_sec_ = 1.f / 60.f;
-    std::string look_aim_hash_;
-    glm::vec3   look_aim_dir_{ 0.f, 0.f, 1.f };
-    bool        look_engaged_ = false;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0;
 
@@ -161,7 +155,6 @@ private:
     void pin_and_maybe_refill(const std::string& hash, bool has_txns);
 
     bool running;
-    float elapsedSeconds;
     uint32_t width;
     uint32_t height;
 
@@ -172,17 +165,11 @@ private:
     void create_frame_descriptors();
     void create_command_pool();
     void create_sync_objects();
-    void update_uniform_buffer();
-    glm::vec3 camera_eye() const;
-    void begin_look_aim(const glm::vec3& eye, const glm::vec3& target_pos,
-                        const std::string& hash);
-    void end_look_aim();
-    void update_look_direction(float dt, const glm::vec3& eye);
-    CameraUBO build_camera_ubo() const;
     // when defer_present: leave color as attachment for async Sobel overlay
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
-    void submit_frame_with_async_sobel(uint32_t image_index, VkCommandBuffer graphics_cb,
+    void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
+                                       VkCommandBuffer graphics_cb,
                                        VkSemaphore image_available,
                                        VkSemaphore render_finished,
                                        uint32_t selected_instance_index);
