@@ -19,6 +19,7 @@
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
 #include "engine/frame_descriptors.hpp"
+#include "engine/frame_recorder.hpp"
 #include "engine/frame_resources.hpp"
 #include "engine/frame_sync.hpp"
 #include "engine/picker.hpp"
@@ -94,6 +95,7 @@ private:
     VkExtent2D swapchainExtent;
     SwapchainTargets swapchain_targets_;
     FrameDescriptors frame_descriptors_;
+    FrameRecorder frame_recorder_;
 
     CubePipeline cube_pipe_;
     PickerPipeline picker_pipe_;

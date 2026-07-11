@@ -103,39 +103,6 @@ static constexpr float kLookOmega = 10.0f; // slerp ease rate (higher = snappier
 static const glm::vec3 kCamUp(0.0f, -1.0f, 0.0f);
 static const glm::vec3 kCamForward(0.0f, 0.0f, 1.0f); // original free view
 
-static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
-    VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
-    VkImageLayout newLayout, VkAccessFlags2 dstAccessMask, VkPipelineStageFlags2 dstStageMask,
-    VkImageSubresourceRange subresourceRange
-)
-{
-
-    VkImageMemoryBarrier2 barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    barrier.srcAccessMask = srcAccessMask;
-    barrier.srcStageMask = srcStageMask;
-
-    barrier.dstAccessMask = dstAccessMask;
-    barrier.dstStageMask = dstStageMask;
-
-    barrier.oldLayout = oldLayout; // or UNDEFINED first time
-    barrier.newLayout = newLayout;
-
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-    barrier.image = image;
-    barrier.subresourceRange = subresourceRange;
-
-    VkDependencyInfo depInfo{};
-    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    depInfo.imageMemoryBarrierCount = 1;
-    depInfo.pImageMemoryBarriers = &barrier;
-
-    vkCmdPipelineBarrier2(buffer, &depInfo);
-
-}   /* pipeline_barrier() */
-
 VulkanEngine::VulkanEngine()
     : hInstance(nullptr)
     , hwnd(nullptr)
@@ -1153,101 +1120,33 @@ void VulkanEngine::update_uniform_buffer()
 
 void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
 {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    FrameRecordParams rp{};
+    rp.cmd = buffer;
+    rp.image_index = imageIndex;
+    rp.topology = topology;
+    rp.after_resize = s_resized;
+    rp.width = width;
+    rp.height = height;
+    rp.scissor_extent = swapchainExtent;
+    rp.color_image = swapchainImages[imageIndex];
+    rp.color_view = swapchain_targets_.color_view(imageIndex);
+    rp.depth_image = swapchain_targets_.depth_image();
+    rp.depth_view = swapchain_targets_.depth_view();
+    rp.cube_pipeline = cube_pipe_.pipeline;
+    rp.cube_layout = cube_pipe_.layout;
+    rp.descriptor_set = frame_descriptors_.set();
+    rp.vertex_buffer = frame_resources_.vertex_buffer();
+    rp.instance_buffer = frame_resources_.instance_buffer();
+    rp.index_buffer = frame_resources_.index_buffer();
+    rp.instance_count = static_cast<uint32_t>(instanceCount);
+    rp.mesh_arena = meshArena;
+    rp.debug_drawer = &debugDrawer;
+    rp.view_proj = &viewProj;
+    rp.imgui_draw_data = ImGui::GetDrawData();
 
-    if (vkBeginCommandBuffer(buffer, &beginInfo) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to begin recording command buffer");
-    }
+    frame_recorder_.record_main(rp);
 
-    VkRenderingAttachmentInfo colorAttachment{};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = swapchain_targets_.color_view(imageIndex);
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { { 0.7f, 0.7f, 0.7f, 1.0f } };
-
-    VkRenderingAttachmentInfo depthAttachment{};
-    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = swapchain_targets_.depth_view();
-    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
-
-    VkRenderingInfo renderInfo{};
-    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderInfo.renderArea = { { 0, 0 }, { width, height } };
-    renderInfo.layerCount = 1;
-    renderInfo.colorAttachmentCount = 1;
-    renderInfo.pColorAttachments = &colorAttachment;
-    renderInfo.pDepthAttachment = &depthAttachment;
-
-    if (s_resized)
-    {
-        pipeline_barrier(buffer, swapchainImages[imageIndex],
-            VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 }
-        );
-
-        pipeline_barrier(buffer, swapchain_targets_.depth_image(),
-            VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-            { VK_IMAGE_ASPECT_DEPTH_BIT, 0,1,0,1 }
-        );
-    }
-
-    vkCmdBeginRendering(buffer, &renderInfo);
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.pipeline);
-    vkCmdSetPrimitiveTopology(buffer, topology);
-
-    VkViewport viewport;
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)width;
-    viewport.height = (float)height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(buffer, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = swapchainExtent;
-    vkCmdSetScissor(buffer, 0, 1, &scissor);
-
-    VkBuffer buffers[] = { frame_resources_.vertex_buffer(), frame_resources_.instance_buffer() };
-    VkDeviceSize offsets[] = { 0, 0 };
-    vkCmdBindVertexBuffers(buffer, 0, 2, buffers, offsets);
-    VkDescriptorSet frame_set = frame_descriptors_.set();
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipe_.layout, 0, 1, &frame_set, 0, nullptr);
-    vkCmdBindIndexBuffer(buffer, frame_resources_.index_buffer(), 0, VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(buffer, 36, static_cast<uint32_t>(instanceCount), 0, 0, 0); // 36 indices per cube
-
-    // Debug meshes share the main pass (depth LOAD) — single batched draw of frame stream
-    if (meshArena)
-    {
-        meshArena->upload(debugDrawer);
-        meshArena->draw(buffer, viewProj);
-    }
-
-    ImDrawData* data = ImGui::GetDrawData();
-    if (data)
-    {
-        ImGui_ImplVulkan_RenderDrawData(data, buffer);
-    }
-    vkCmdEndRendering(buffer);
-
-
-    //transition swapchain image to present
-    pipeline_barrier(buffer, swapchainImages[imageIndex],
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-        { VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1 }
-    );
-
+    // Pick policy stays on the engine (after main pass, same command buffer).
     {
         ImGuiIO& io = ImGui::GetIO();
 
@@ -1274,23 +1173,23 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 
         if (request != PickKind::None)
         {
-            PickerRecordParams rp{};
-            rp.cmd = buffer;
-            rp.mouse_x = static_cast<uint32_t>(mx);
-            rp.mouse_y = static_cast<uint32_t>(my);
-            rp.width = width;
-            rp.height = height;
-            rp.viewport_extent = swapchainExtent;
-            rp.depth_view = swapchain_targets_.depth_view();
-            rp.image_layout_undefined = s_resized;
-            rp.pipeline = picker_pipe_.pipeline;
-            rp.pipeline_layout = picker_pipe_.layout;
-            rp.descriptor_set = frame_descriptors_.set();
-            rp.vertex_buffer = frame_resources_.vertex_buffer();
-            rp.instance_buffer = frame_resources_.instance_buffer();
-            rp.index_buffer = frame_resources_.index_buffer();
-            rp.instance_count = static_cast<uint32_t>(instanceCount);
-            picker_.record_pass(rp);
+            PickerRecordParams pick{};
+            pick.cmd = buffer;
+            pick.mouse_x = static_cast<uint32_t>(mx);
+            pick.mouse_y = static_cast<uint32_t>(my);
+            pick.width = width;
+            pick.height = height;
+            pick.viewport_extent = swapchainExtent;
+            pick.depth_view = swapchain_targets_.depth_view();
+            pick.image_layout_undefined = s_resized;
+            pick.pipeline = picker_pipe_.pipeline;
+            pick.pipeline_layout = picker_pipe_.layout;
+            pick.descriptor_set = frame_descriptors_.set();
+            pick.vertex_buffer = frame_resources_.vertex_buffer();
+            pick.instance_buffer = frame_resources_.instance_buffer();
+            pick.index_buffer = frame_resources_.index_buffer();
+            pick.instance_count = static_cast<uint32_t>(instanceCount);
+            picker_.record_pass(pick);
             inFlightFrames[currentFrame].pendingPick = true;
             inFlightFrames[currentFrame].pickKind = request;
         }
@@ -1299,13 +1198,9 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             std::lock_guard<std::mutex> slock(selection_mutex_);
             hovered_hash_.clear();
         }
-
     }
 
-    if (vkEndCommandBuffer(buffer) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to record command buffer");
-    }
+    frame_recorder_.end(buffer);
 
 }   /* record_command_buffer() */
 
