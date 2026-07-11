@@ -223,6 +223,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
         sci.width = width;
         sci.height = height;
         sci.depth_format = swapchain_targets_.depth_format();
+        sci.frame_ubo_layout = frame_descriptors_.layout();
         sci.graphics_family = queues_.family_index(QueueType::_3D);
         sci.compute_family = queues_.family_index(QueueType::CMP);
         sobel_.create(sci);
@@ -564,11 +565,23 @@ void VulkanEngine::render()
     const FramePresenter::AcquireResult acq =
         frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
 
-    bool want_sobel = false;
+    // Map selected hash → instance index in this frame's pick map (for single-instance depth).
+    uint32_t selected_instance = ~0u;
     {
         std::lock_guard<std::mutex> slock(selection_mutex_);
-        want_sobel = sobel_.ready() && !selected_hash_.empty();
+        if (sobel_.ready() && !selected_hash_.empty())
+        {
+            for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
+            {
+                if (pick_id_to_hash_[i] == selected_hash_)
+                {
+                    selected_instance = static_cast<uint32_t>(i);
+                    break;
+                }
+            }
+        }
     }
+    const bool want_sobel = selected_instance != ~0u;
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
@@ -578,7 +591,7 @@ void VulkanEngine::render()
     if (want_sobel)
     {
         submit_frame_with_async_sobel(acq.image_index, commandBuffer, acq.image_available,
-                                      acq.render_finished);
+                                      acq.render_finished, selected_instance);
     }
     else
     {
@@ -598,33 +611,27 @@ void VulkanEngine::render()
 void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
                                                  VkCommandBuffer graphics_cb,
                                                  VkSemaphore image_available,
-                                                 VkSemaphore render_finished)
+                                                 VkSemaphore render_finished,
+                                                 uint32_t selected_instance_index)
 {
-    // After main+pick: barrier depth for compute sampling, signal g→c.
+    // After main+pick: depth-only redraw of the selected instance into sel_depth_,
+    // then release that depth for async CMP Sobel (scene depth is not used).
     {
-        VkImageMemoryBarrier2 depth_b{};
-        depth_b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        depth_b.srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-        depth_b.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        depth_b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        depth_b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        depth_b.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        depth_b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        depth_b.image = swapchain_targets_.depth_image();
-        depth_b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-        if (!queues_.same_family(QueueType::_3D, QueueType::CMP))
-        {
-            depth_b.srcQueueFamilyIndex = queues_.family_index(QueueType::_3D);
-            depth_b.dstQueueFamilyIndex = queues_.family_index(QueueType::CMP);
-        }
-        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers = &depth_b;
-        vkCmdPipelineBarrier2(graphics_cb, &dep);
+        SelectionDepthDrawParams sp{};
+        sp.cmd = graphics_cb;
+        sp.ubo_set = frame_descriptors_.set();
+        sp.vertex_buffer = frame_resources_.vertex_buffer();
+        sp.instance_buffer = frame_resources_.instance_buffer();
+        sp.index_buffer = frame_resources_.index_buffer();
+        sp.first_instance = selected_instance_index;
+        sp.width = width;
+        sp.height = height;
+        sobel_.record_selection_depth(sp);
+        sobel_.record_sel_depth_release_for_compute(graphics_cb);
     }
     frame_recorder_.end(graphics_cb);
 
-    // Submit graphics (_3D): wait image-available, signal g→c + timeline half-step not used
+    // Submit graphics (_3D): wait image-available, signal g→c
     {
         VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
         cb.commandBuffer = graphics_cb;
@@ -645,35 +652,14 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
             throw std::runtime_error("async sobel: graphics submit failed");
     }
 
-    // Compute (CMP): wait g→c, Sobel dispatch, signal compute_finished
+    // Compute (CMP): wait g→c, Sobel on selection depth only, signal compute_finished
     {
         vkResetCommandBuffer(computeCommandBuffer, 0);
         VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(computeCommandBuffer, &bi);
 
-        if (!queues_.same_family(QueueType::_3D, QueueType::CMP))
-        {
-            // Acquire depth on compute family
-            VkImageMemoryBarrier2 depth_b{};
-            depth_b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            depth_b.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            depth_b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-            depth_b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-            depth_b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            depth_b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            depth_b.srcQueueFamilyIndex = queues_.family_index(QueueType::_3D);
-            depth_b.dstQueueFamilyIndex = queues_.family_index(QueueType::CMP);
-            depth_b.image = swapchain_targets_.depth_image();
-            depth_b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-            VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            dep.imageMemoryBarrierCount = 1;
-            dep.pImageMemoryBarriers = &depth_b;
-            vkCmdPipelineBarrier2(computeCommandBuffer, &dep);
-        }
-
-        sobel_.record_dispatch(computeCommandBuffer, swapchain_targets_.depth_view(),
-                               /*strength=*/12.0f, /*threshold=*/0.002f);
+        sobel_.record_dispatch(computeCommandBuffer, /*strength=*/14.0f, /*threshold=*/0.001f);
         vkEndCommandBuffer(computeCommandBuffer);
 
         VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
@@ -838,6 +824,7 @@ void VulkanEngine::resize_internal()
         sci.width = width;
         sci.height = height;
         sci.depth_format = swapchain_targets_.depth_format();
+        sci.frame_ubo_layout = frame_descriptors_.layout();
         sci.graphics_family = queues_.family_index(QueueType::_3D);
         sci.compute_family = queues_.family_index(QueueType::CMP);
         sobel_.recreate(sci);

@@ -1,6 +1,7 @@
 #pragma once
 
-// Async depth-Sobel on CMP queue + edge overlay composite on _3D (selection highlight).
+// Selection-only depth pass + async Sobel on CMP + edge overlay on _3D.
+// Scene depth is not used — only the selected instance is redrawn into sel_depth_.
 #include "graphics/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
@@ -14,8 +15,22 @@ struct SobelComputeCreateInfo
     uint32_t width = 0;
     uint32_t height = 0;
     VkFormat depth_format = VK_FORMAT_UNDEFINED;
+    VkDescriptorSetLayout frame_ubo_layout = VK_NULL_HANDLE; // same as cube UBO set
     uint32_t graphics_family = 0;
     uint32_t compute_family = 0;
+};
+
+struct SelectionDepthDrawParams
+{
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkDescriptorSet ubo_set = VK_NULL_HANDLE;
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VkBuffer instance_buffer = VK_NULL_HANDLE;
+    VkBuffer index_buffer = VK_NULL_HANDLE;
+    uint32_t first_instance = 0; // instance index of selected cube in the instance buffer
+    uint32_t index_count = 36;
+    uint32_t width = 0;
+    uint32_t height = 0;
 };
 
 class SobelCompute
@@ -25,26 +40,33 @@ public:
     void destroy(VkDevice device);
     void recreate(const SobelComputeCreateInfo& info);
 
-    // Record compute dispatch: sample depthView, write edge image.
-    // depth must be in SHADER_READ_ONLY_OPTIMAL for graphics family (caller barriers).
-    void record_dispatch(VkCommandBuffer cmd, VkImageView depth_view,
-                         float strength, float threshold);
+    // Clear + redraw one instance into sel_depth_ (depth-only). Leaves sel_depth_ as DEPTH_ATTACHMENT.
+    void record_selection_depth(const SelectionDepthDrawParams& p);
+
+    // Transition sel_depth_ DEPTH_ATTACHMENT → SHADER_READ (and queue release if needed).
+    void record_sel_depth_release_for_compute(VkCommandBuffer cmd);
+
+    // Compute: sample sel_depth_, write edge image.
+    void record_dispatch(VkCommandBuffer cmd, float strength, float threshold);
 
     // Fullscreen edge overlay into current color attachment (additive blend).
     void record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
                         const float highlight_rgba[4]);
 
-    VkImage edge_image() const { return edge_image_; }
-    VkImageView edge_view() const { return edge_view_; }
+    VkImage sel_depth_image() const { return sel_depth_image_; }
+    VkImageView sel_depth_view() const { return sel_depth_view_; }
     VkSemaphore compute_finished() const { return compute_finished_; }
+    VkSemaphore graphics_to_compute() const { return graphics_to_compute_; }
 
-    bool ready() const { return pipeline_ != VK_NULL_HANDLE; }
+    bool ready() const { return pipeline_ != VK_NULL_HANDLE && depth_only_pipeline_ != VK_NULL_HANDLE; }
 
 private:
-    void create_edge_image(const SobelComputeCreateInfo& info);
+    void create_images(const SobelComputeCreateInfo& info);
     void create_descriptors(VkDevice device);
     void create_compute_pipeline(VkDevice device);
-    void create_overlay_pipeline(VkDevice device, VkFormat color_format, VkFormat depth_format);
+    void create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
+                                    VkDescriptorSetLayout ubo_layout);
+    void create_overlay_pipeline(VkDevice device, VkFormat color_format);
     void create_sync(VkDevice device);
 
     VkDevice device_ = VK_NULL_HANDLE;
@@ -52,27 +74,35 @@ private:
     uint32_t height_ = 0;
     uint32_t graphics_family_ = 0;
     uint32_t compute_family_ = 0;
+    VkFormat depth_format_ = VK_FORMAT_UNDEFINED;
+
+    // Selection-only depth (not the scene depth)
+    VkImage sel_depth_image_ = VK_NULL_HANDLE;
+    VkDeviceMemory sel_depth_memory_ = VK_NULL_HANDLE;
+    VkImageView sel_depth_view_ = VK_NULL_HANDLE;
 
     VkImage edge_image_ = VK_NULL_HANDLE;
     VkDeviceMemory edge_memory_ = VK_NULL_HANDLE;
     VkImageView edge_view_ = VK_NULL_HANDLE;
 
     VkSampler depth_sampler_ = VK_NULL_HANDLE;
+    VkSampler edge_sampler_ = VK_NULL_HANDLE;
+
     VkDescriptorSetLayout compute_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
     VkDescriptorSet compute_set_ = VK_NULL_HANDLE;
     VkPipelineLayout compute_layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 
+    // Depth-only redraw of selected instance
+    VkPipelineLayout depth_only_layout_ = VK_NULL_HANDLE;
+    VkPipeline depth_only_pipeline_ = VK_NULL_HANDLE;
+
     VkDescriptorSetLayout overlay_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorSet overlay_set_ = VK_NULL_HANDLE;
     VkPipelineLayout overlay_layout_ = VK_NULL_HANDLE;
     VkPipeline overlay_pipeline_ = VK_NULL_HANDLE;
-    VkSampler edge_sampler_ = VK_NULL_HANDLE;
 
     VkSemaphore compute_finished_ = VK_NULL_HANDLE;
     VkSemaphore graphics_to_compute_ = VK_NULL_HANDLE;
-
-public:
-    VkSemaphore graphics_to_compute() const { return graphics_to_compute_; }
 };

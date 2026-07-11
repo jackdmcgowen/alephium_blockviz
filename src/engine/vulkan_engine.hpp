@@ -182,7 +182,8 @@ private:
                                VkPrimitiveTopology topology, bool defer_present);
     void submit_frame_with_async_sobel(uint32_t image_index, VkCommandBuffer graphics_cb,
                                        VkSemaphore image_available,
-                                       VkSemaphore render_finished);
+                                       VkSemaphore render_finished,
+                                       uint32_t selected_instance_index);
 
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot

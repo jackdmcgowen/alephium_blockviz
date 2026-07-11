@@ -1,8 +1,8 @@
 #include "engine/sobel_compute.hpp"
+#include "engine/vertex_types.hpp"
 
 #include "graphics/gpu_prv_lib.h"
 
-#include <array>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -21,40 +21,67 @@ struct OverlayPC
 {
     float highlight[4];
 };
+
+void image_barrier(VkCommandBuffer cmd, VkImage image,
+                   VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access,
+                   VkImageLayout old_layout, VkImageLayout new_layout,
+                   VkImageAspectFlags aspect,
+                   uint32_t src_family = VK_QUEUE_FAMILY_IGNORED,
+                   uint32_t dst_family = VK_QUEUE_FAMILY_IGNORED)
+{
+    VkImageMemoryBarrier2 b{};
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    b.srcStageMask = src_stage;
+    b.srcAccessMask = src_access;
+    b.dstStageMask = dst_stage;
+    b.dstAccessMask = dst_access;
+    b.oldLayout = old_layout;
+    b.newLayout = new_layout;
+    b.srcQueueFamilyIndex = src_family;
+    b.dstQueueFamilyIndex = dst_family;
+    b.image = image;
+    b.subresourceRange = { aspect, 0, 1, 0, 1 };
+    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
 } // namespace
 
-void SobelCompute::create_edge_image(const SobelComputeCreateInfo& info)
+void SobelCompute::create_images(const SobelComputeCreateInfo& info)
 {
     create_image(
-        info.device,
-        info.width, info.height,
-        VK_FORMAT_R8_UNORM,
+        info.device, info.width, info.height, info.depth_format,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        sel_depth_image_, sel_depth_memory_, info.mem_props);
+    sel_depth_view_ = create_image_view(info.device, sel_depth_image_, info.depth_format,
+                                        VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    create_image(
+        info.device, info.width, info.height, VK_FORMAT_R8_UNORM,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        edge_image_,
-        edge_memory_,
-        info.mem_props);
-    edge_view_ = create_image_view(info.device, edge_image_, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+        edge_image_, edge_memory_, info.mem_props);
+    edge_view_ = create_image_view(info.device, edge_image_, VK_FORMAT_R8_UNORM,
+                                   VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void SobelCompute::create_descriptors(VkDevice device)
 {
-    // Depth sampler (compute)
-    VkSamplerCreateInfo samp{};
-    samp.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    VkSamplerCreateInfo samp{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     samp.magFilter = VK_FILTER_NEAREST;
     samp.minFilter = VK_FILTER_NEAREST;
     samp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    if (vkCreateSampler(device, &samp, nullptr, &depth_sampler_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: depth sampler");
+    if (vkCreateSampler(device, &samp, nullptr, &depth_sampler_) != VK_SUCCESS ||
+        vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS)
+        throw std::runtime_error("SobelCompute: samplers");
 
-    if (vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: edge sampler");
-
-    // Compute set: 0 = depth combined, 1 = edge storage
     VkDescriptorSetLayoutBinding binds[2]{};
     binds[0].binding = 0;
     binds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -65,21 +92,18 @@ void SobelCompute::create_descriptors(VkDevice device)
     binds[1].descriptorCount = 1;
     binds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layout_ci{};
-    layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    VkDescriptorSetLayoutCreateInfo layout_ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layout_ci.bindingCount = 2;
     layout_ci.pBindings = binds;
     if (vkCreateDescriptorSetLayout(device, &layout_ci, nullptr, &compute_set_layout_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: compute set layout");
 
-    // Overlay set: 0 = edge sampled
     VkDescriptorSetLayoutBinding ob{};
     ob.binding = 0;
     ob.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     ob.descriptorCount = 1;
     ob.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo olayout{};
-    olayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    VkDescriptorSetLayoutCreateInfo olayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     olayout.bindingCount = 1;
     olayout.pBindings = &ob;
     if (vkCreateDescriptorSetLayout(device, &olayout, nullptr, &overlay_set_layout_) != VK_SUCCESS)
@@ -89,8 +113,7 @@ void SobelCompute::create_descriptors(VkDevice device)
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
     };
-    VkDescriptorPoolCreateInfo pool_ci{};
-    pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    VkDescriptorPoolCreateInfo pool_ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pool_ci.maxSets = 4;
     pool_ci.poolSizeCount = 2;
     pool_ci.pPoolSizes = sizes;
@@ -98,14 +121,12 @@ void SobelCompute::create_descriptors(VkDevice device)
     if (vkCreateDescriptorPool(device, &pool_ci, nullptr, &descriptor_pool_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: descriptor pool");
 
-    VkDescriptorSetAllocateInfo alloc{};
-    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     alloc.descriptorPool = descriptor_pool_;
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &compute_set_layout_;
     if (vkAllocateDescriptorSets(device, &alloc, &compute_set_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: compute set");
-
     alloc.pSetLayouts = &overlay_set_layout_;
     if (vkAllocateDescriptorSets(device, &alloc, &overlay_set_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: overlay set");
@@ -120,11 +141,9 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
 
     VkPushConstantRange pcr{};
     pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pcr.offset = 0;
     pcr.size = sizeof(SobelPC);
 
-    VkPipelineLayoutCreateInfo plci{};
-    plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     plci.setLayoutCount = 1;
     plci.pSetLayouts = &compute_set_layout_;
     plci.pushConstantRangeCount = 1;
@@ -132,14 +151,12 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
     if (vkCreatePipelineLayout(device, &plci, nullptr, &compute_layout_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: compute layout");
 
-    VkPipelineShaderStageCreateInfo stage{};
-    stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    VkPipelineShaderStageCreateInfo stage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     stage.module = mod;
     stage.pName = "main";
 
-    VkComputePipelineCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    VkComputePipelineCreateInfo ci{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
     ci.stage = stage;
     ci.layout = compute_layout_;
     if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_) != VK_SUCCESS)
@@ -148,28 +165,21 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
     destroy_shader_module(device, mod);
 }
 
-void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_format, VkFormat /*depth_format*/)
+void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
+                                              VkDescriptorSetLayout ubo_layout)
 {
     std::vector<uint8_t> vert_code, frag_code;
-    load_shader_source("edge_overlay_vert.spv", vert_code);
-    load_shader_source("edge_overlay_frag.spv", frag_code);
+    load_shader_source("vert.spv", vert_code);
+    load_shader_source("depth_only_frag.spv", frag_code);
     VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
     create_shader_module(device, vert, vert_code);
     create_shader_module(device, frag, frag_code);
 
-    VkPushConstantRange pcr{};
-    pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    pcr.offset = 0;
-    pcr.size = sizeof(OverlayPC);
-
-    VkPipelineLayoutCreateInfo plci{};
-    plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     plci.setLayoutCount = 1;
-    plci.pSetLayouts = &overlay_set_layout_;
-    plci.pushConstantRangeCount = 1;
-    plci.pPushConstantRanges = &pcr;
-    if (vkCreatePipelineLayout(device, &plci, nullptr, &overlay_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: overlay layout");
+    plci.pSetLayouts = &ubo_layout;
+    if (vkCreatePipelineLayout(device, &plci, nullptr, &depth_only_layout_) != VK_SUCCESS)
+        throw std::runtime_error("SobelCompute: depth-only layout");
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -181,33 +191,117 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
     stages[1].module = frag;
     stages[1].pName = "main";
 
-    VkPipelineVertexInputStateCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VkVertexInputBindingDescription binds[2]{};
+    binds[0].binding = 0;
+    binds[0].stride = sizeof(VertexNormal);
+    binds[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    binds[1].binding = 1;
+    binds[1].stride = sizeof(InstanceData);
+    binds[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    VkPipelineInputAssemblyStateCreateInfo ia{};
-    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    VkVertexInputAttributeDescription attrs[4]{};
+    attrs[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexNormal, pos) };
+    attrs[1] = { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexNormal, normal) };
+    attrs[2] = { 2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, pos) };
+    attrs[3] = { 3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, color) };
+
+    VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vi.vertexBindingDescriptionCount = 2;
+    vi.pVertexBindingDescriptions = binds;
+    vi.vertexAttributeDescriptionCount = 4;
+    vi.pVertexAttributeDescriptions = attrs;
+
+    VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    VkPipelineViewportStateCreateInfo vp{};
-    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    VkPipelineViewportStateCreateInfo vp{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
     vp.viewportCount = 1;
     vp.scissorCount = 1;
 
-    VkPipelineRasterizationStateCreateInfo rs{};
-    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
     rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_NONE;
+    rs.cullMode = VK_CULL_MODE_BACK_BIT;
     rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rs.lineWidth = 1.0f;
+    rs.lineWidth = 1.f;
 
-    VkPipelineMultisampleStateCreateInfo ms{};
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkPipelineDepthStencilStateCreateInfo ds{};
-    ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    ds.depthTestEnable = VK_FALSE;
-    ds.depthWriteEnable = VK_FALSE;
+    VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    ds.depthTestEnable = VK_TRUE;
+    ds.depthWriteEnable = VK_TRUE;
+    ds.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dyn{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dyn.dynamicStateCount = 2;
+    dyn.pDynamicStates = dyn_states;
+
+    // Depth-only dynamic rendering (no color attachments)
+    VkPipelineRenderingCreateInfo rendering{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    rendering.colorAttachmentCount = 0;
+    rendering.depthAttachmentFormat = depth_format;
+
+    VkGraphicsPipelineCreateInfo gci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    gci.pNext = &rendering;
+    gci.stageCount = 2;
+    gci.pStages = stages;
+    gci.pVertexInputState = &vi;
+    gci.pInputAssemblyState = &ia;
+    gci.pViewportState = &vp;
+    gci.pRasterizationState = &rs;
+    gci.pMultisampleState = &ms;
+    gci.pDepthStencilState = &ds;
+    gci.pDynamicState = &dyn;
+    gci.layout = depth_only_layout_;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gci, nullptr, &depth_only_pipeline_) != VK_SUCCESS)
+        throw std::runtime_error("SobelCompute: depth-only pipeline");
+
+    destroy_shader_module(device, vert);
+    destroy_shader_module(device, frag);
+}
+
+void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_format)
+{
+    std::vector<uint8_t> vert_code, frag_code;
+    load_shader_source("edge_overlay_vert.spv", vert_code);
+    load_shader_source("edge_overlay_frag.spv", frag_code);
+    VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
+    create_shader_module(device, vert, vert_code);
+    create_shader_module(device, frag, frag_code);
+
+    VkPushConstantRange pcr{};
+    pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pcr.size = sizeof(OverlayPC);
+
+    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    plci.setLayoutCount = 1;
+    plci.pSetLayouts = &overlay_set_layout_;
+    plci.pushConstantRangeCount = 1;
+    plci.pPushConstantRanges = &pcr;
+    if (vkCreatePipelineLayout(device, &plci, nullptr, &overlay_layout_) != VK_SUCCESS)
+        throw std::runtime_error("SobelCompute: overlay layout");
+
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+                  VK_SHADER_STAGE_VERTEX_BIT, vert, "main", nullptr };
+    stages[1] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+                  VK_SHADER_STAGE_FRAGMENT_BIT, frag, "main", nullptr };
+
+    VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_NONE;
+    rs.lineWidth = 1.f;
+    VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 
     VkPipelineColorBlendAttachmentState blend{};
     blend.blendEnable = VK_TRUE;
@@ -217,30 +311,21 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
     blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blend.alphaBlendOp = VK_BLEND_OP_ADD;
-    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendStateCreateInfo cb{};
-    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend.colorWriteMask = 0xF;
+    VkPipelineColorBlendStateCreateInfo cb{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
     cb.attachmentCount = 1;
     cb.pAttachments = &blend;
 
-    VkDynamicState dyn_states[] = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
-    };
-    VkPipelineDynamicStateCreateInfo dyn{};
-    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dyn{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dyn.dynamicStateCount = 2;
     dyn.pDynamicStates = dyn_states;
 
-    VkPipelineRenderingCreateInfo rendering{};
-    rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    VkPipelineRenderingCreateInfo rendering{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachmentFormats = &color_format;
 
-    VkGraphicsPipelineCreateInfo gci{};
-    gci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    VkGraphicsPipelineCreateInfo gci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     gci.pNext = &rendering;
     gci.stageCount = 2;
     gci.pStages = stages;
@@ -259,20 +344,6 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
 
     destroy_shader_module(device, vert);
     destroy_shader_module(device, frag);
-
-    // Bind edge image to overlay set (static write; view recreated on resize → rewrite)
-    VkDescriptorImageInfo img{};
-    img.sampler = edge_sampler_;
-    img.imageView = edge_view_;
-    img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet w{};
-    w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    w.dstSet = overlay_set_;
-    w.dstBinding = 0;
-    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    w.descriptorCount = 1;
-    w.pImageInfo = &img;
-    vkUpdateDescriptorSets(device, 1, &w, 0, nullptr);
 }
 
 void SobelCompute::create_sync(VkDevice device)
@@ -285,7 +356,8 @@ void SobelCompute::create_sync(VkDevice device)
 
 void SobelCompute::create(const SobelComputeCreateInfo& info)
 {
-    if (!info.device || !info.mem_props || info.width == 0 || info.height == 0)
+    if (!info.device || !info.mem_props || !info.frame_ubo_layout ||
+        info.width == 0 || info.height == 0)
         throw std::runtime_error("SobelCompute::create: invalid args");
 
     device_ = info.device;
@@ -293,11 +365,13 @@ void SobelCompute::create(const SobelComputeCreateInfo& info)
     height_ = info.height;
     graphics_family_ = info.graphics_family;
     compute_family_ = info.compute_family;
+    depth_format_ = info.depth_format;
 
-    create_edge_image(info);
+    create_images(info);
     create_descriptors(info.device);
     create_compute_pipeline(info.device);
-    create_overlay_pipeline(info.device, VK_FORMAT_R8G8B8A8_SRGB, info.depth_format);
+    create_depth_only_pipeline(info.device, info.depth_format, info.frame_ubo_layout);
+    create_overlay_pipeline(info.device, VK_FORMAT_R8G8B8A8_SRGB);
     create_sync(info.device);
 }
 
@@ -306,74 +380,31 @@ void SobelCompute::destroy(VkDevice device)
     if (!device)
         return;
 
-    if (graphics_to_compute_ != VK_NULL_HANDLE)
-    {
-        vkDestroySemaphore(device, graphics_to_compute_, nullptr);
-        graphics_to_compute_ = VK_NULL_HANDLE;
-    }
-    if (compute_finished_ != VK_NULL_HANDLE)
-    {
-        vkDestroySemaphore(device, compute_finished_, nullptr);
-        compute_finished_ = VK_NULL_HANDLE;
-    }
-    if (overlay_pipeline_ != VK_NULL_HANDLE)
-    {
-        vkDestroyPipeline(device, overlay_pipeline_, nullptr);
-        overlay_pipeline_ = VK_NULL_HANDLE;
-    }
-    if (overlay_layout_ != VK_NULL_HANDLE)
-    {
-        vkDestroyPipelineLayout(device, overlay_layout_, nullptr);
-        overlay_layout_ = VK_NULL_HANDLE;
-    }
-    if (pipeline_ != VK_NULL_HANDLE)
-    {
-        vkDestroyPipeline(device, pipeline_, nullptr);
-        pipeline_ = VK_NULL_HANDLE;
-    }
-    if (compute_layout_ != VK_NULL_HANDLE)
-    {
-        vkDestroyPipelineLayout(device, compute_layout_, nullptr);
-        compute_layout_ = VK_NULL_HANDLE;
-    }
-    if (descriptor_pool_ != VK_NULL_HANDLE)
-    {
+    auto destroy_sem = [&](VkSemaphore& s) {
+        if (s != VK_NULL_HANDLE) { vkDestroySemaphore(device, s, nullptr); s = VK_NULL_HANDLE; }
+    };
+    destroy_sem(graphics_to_compute_);
+    destroy_sem(compute_finished_);
+
+    if (overlay_pipeline_) { vkDestroyPipeline(device, overlay_pipeline_, nullptr); overlay_pipeline_ = VK_NULL_HANDLE; }
+    if (overlay_layout_) { vkDestroyPipelineLayout(device, overlay_layout_, nullptr); overlay_layout_ = VK_NULL_HANDLE; }
+    if (depth_only_pipeline_) { vkDestroyPipeline(device, depth_only_pipeline_, nullptr); depth_only_pipeline_ = VK_NULL_HANDLE; }
+    if (depth_only_layout_) { vkDestroyPipelineLayout(device, depth_only_layout_, nullptr); depth_only_layout_ = VK_NULL_HANDLE; }
+    if (pipeline_) { vkDestroyPipeline(device, pipeline_, nullptr); pipeline_ = VK_NULL_HANDLE; }
+    if (compute_layout_) { vkDestroyPipelineLayout(device, compute_layout_, nullptr); compute_layout_ = VK_NULL_HANDLE; }
+    if (descriptor_pool_) {
         vkDestroyDescriptorPool(device, descriptor_pool_, nullptr);
         descriptor_pool_ = VK_NULL_HANDLE;
-        compute_set_ = VK_NULL_HANDLE;
-        overlay_set_ = VK_NULL_HANDLE;
+        compute_set_ = overlay_set_ = VK_NULL_HANDLE;
     }
-    if (compute_set_layout_ != VK_NULL_HANDLE)
-    {
-        vkDestroyDescriptorSetLayout(device, compute_set_layout_, nullptr);
-        compute_set_layout_ = VK_NULL_HANDLE;
-    }
-    if (overlay_set_layout_ != VK_NULL_HANDLE)
-    {
-        vkDestroyDescriptorSetLayout(device, overlay_set_layout_, nullptr);
-        overlay_set_layout_ = VK_NULL_HANDLE;
-    }
-    if (depth_sampler_ != VK_NULL_HANDLE)
-    {
-        vkDestroySampler(device, depth_sampler_, nullptr);
-        depth_sampler_ = VK_NULL_HANDLE;
-    }
-    if (edge_sampler_ != VK_NULL_HANDLE)
-    {
-        vkDestroySampler(device, edge_sampler_, nullptr);
-        edge_sampler_ = VK_NULL_HANDLE;
-    }
-    if (edge_view_ != VK_NULL_HANDLE)
-    {
-        destroy_image_view(device, edge_view_);
-        edge_view_ = VK_NULL_HANDLE;
-    }
-    if (edge_image_ != VK_NULL_HANDLE)
-    {
-        destroy_image(device, edge_image_, edge_memory_);
-        edge_image_ = VK_NULL_HANDLE;
-        edge_memory_ = VK_NULL_HANDLE;
-    }
+    if (compute_set_layout_) { vkDestroyDescriptorSetLayout(device, compute_set_layout_, nullptr); compute_set_layout_ = VK_NULL_HANDLE; }
+    if (overlay_set_layout_) { vkDestroyDescriptorSetLayout(device, overlay_set_layout_, nullptr); overlay_set_layout_ = VK_NULL_HANDLE; }
+    if (depth_sampler_) { vkDestroySampler(device, depth_sampler_, nullptr); depth_sampler_ = VK_NULL_HANDLE; }
+    if (edge_sampler_) { vkDestroySampler(device, edge_sampler_, nullptr); edge_sampler_ = VK_NULL_HANDLE; }
+    if (edge_view_) { destroy_image_view(device, edge_view_); edge_view_ = VK_NULL_HANDLE; }
+    if (edge_image_) { destroy_image(device, edge_image_, edge_memory_); edge_image_ = VK_NULL_HANDLE; edge_memory_ = VK_NULL_HANDLE; }
+    if (sel_depth_view_) { destroy_image_view(device, sel_depth_view_); sel_depth_view_ = VK_NULL_HANDLE; }
+    if (sel_depth_image_) { destroy_image(device, sel_depth_image_, sel_depth_memory_); sel_depth_image_ = VK_NULL_HANDLE; sel_depth_memory_ = VK_NULL_HANDLE; }
 }
 
 void SobelCompute::recreate(const SobelComputeCreateInfo& info)
@@ -382,13 +413,86 @@ void SobelCompute::recreate(const SobelComputeCreateInfo& info)
     create(info);
 }
 
-void SobelCompute::record_dispatch(VkCommandBuffer cmd, VkImageView depth_view,
-                                   float strength, float threshold)
+void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
 {
-    // Update compute descriptors for this frame's depth view
+    // sel_depth → DEPTH_ATTACHMENT
+    image_barrier(p.cmd, sel_depth_image_,
+                  VK_PIPELINE_STAGE_2_NONE, 0,
+                  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    VkRenderingAttachmentInfo depth_att{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    depth_att.imageView = sel_depth_view_;
+    depth_att.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depth_att.clearValue.depthStencil = { 1.0f, 0 };
+
+    VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea = { { 0, 0 }, { p.width, p.height } };
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 0;
+    ri.pDepthAttachment = &depth_att;
+    vkCmdBeginRendering(p.cmd, &ri);
+
+    vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_only_pipeline_);
+    VkViewport vp{};
+    vp.width = static_cast<float>(p.width);
+    vp.height = static_cast<float>(p.height);
+    vp.minDepth = 0.f;
+    vp.maxDepth = 1.f;
+    vkCmdSetViewport(p.cmd, 0, 1, &vp);
+    VkRect2D sc{ { 0, 0 }, { p.width, p.height } };
+    vkCmdSetScissor(p.cmd, 0, 1, &sc);
+
+    VkBuffer bufs[] = { p.vertex_buffer, p.instance_buffer };
+    VkDeviceSize offs[] = { 0, 0 };
+    vkCmdBindVertexBuffers(p.cmd, 0, 2, bufs, offs);
+    vkCmdBindIndexBuffer(p.cmd, p.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_only_layout_,
+                            0, 1, &p.ubo_set, 0, nullptr);
+
+    // Redraw only the selected instance (same mesh, one instance slot).
+    vkCmdDrawIndexed(p.cmd, p.index_count, 1, 0, 0, p.first_instance);
+
+    vkCmdEndRendering(p.cmd);
+}
+
+void SobelCompute::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
+{
+    const bool split = (graphics_family_ != compute_family_);
+    image_barrier(cmd, sel_depth_image_,
+                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_IMAGE_ASPECT_DEPTH_BIT,
+                  split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED,
+                  split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
+}
+
+void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float threshold)
+{
+    // Acquire sel_depth on compute if needed
+    if (graphics_family_ != compute_family_)
+    {
+        image_barrier(cmd, sel_depth_image_,
+                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0,
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_IMAGE_ASPECT_DEPTH_BIT,
+                      graphics_family_, compute_family_);
+    }
+
     VkDescriptorImageInfo depth_info{};
     depth_info.sampler = depth_sampler_;
-    depth_info.imageView = depth_view;
+    depth_info.imageView = sel_depth_view_;
     depth_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkDescriptorImageInfo edge_info{};
@@ -410,23 +514,11 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, VkImageView depth_view,
     writes[1].pImageInfo = &edge_info;
     vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
 
-    // Edge image → GENERAL for storage write
-    {
-        VkImageMemoryBarrier2 b{};
-        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        b.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        b.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        b.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        b.image = edge_image_;
-        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers = &b;
-        vkCmdPipelineBarrier2(cmd, &dep);
-    }
+    image_barrier(cmd, edge_image_,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                  VK_IMAGE_ASPECT_COLOR_BIT);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_layout_, 0, 1,
@@ -439,44 +531,27 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, VkImageView depth_view,
     pc.inv_height = 1.0f / static_cast<float>(height_);
     vkCmdPushConstants(cmd, compute_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
-    const uint32_t gx = (width_ + 7) / 8;
-    const uint32_t gy = (height_ + 7) / 8;
-    vkCmdDispatch(cmd, gx, gy, 1);
+    vkCmdDispatch(cmd, (width_ + 7) / 8, (height_ + 7) / 8, 1);
 
-    // Edge image → SHADER_READ for overlay
-    {
-        VkImageMemoryBarrier2 b{};
-        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        b.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        b.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        b.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b.image = edge_image_;
-        b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        if (graphics_family_ != compute_family_)
-        {
-            b.srcQueueFamilyIndex = compute_family_;
-            b.dstQueueFamilyIndex = graphics_family_;
-        }
-        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers = &b;
-        vkCmdPipelineBarrier2(cmd, &dep);
-    }
+    // Edge → SHADER_READ for overlay (release to graphics if split)
+    const bool split = (graphics_family_ != compute_family_);
+    image_barrier(cmd, edge_image_,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_IMAGE_ASPECT_COLOR_BIT,
+                  split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED,
+                  split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 }
 
 void SobelCompute::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
                                   const float highlight_rgba[4])
 {
-    // Rewrite overlay set in case edge view changed
     VkDescriptorImageInfo img{};
     img.sampler = edge_sampler_;
     img.imageView = edge_view_;
     img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet w{};
-    w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    VkWriteDescriptorSet w{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     w.dstSet = overlay_set_;
     w.dstBinding = 0;
     w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -491,7 +566,6 @@ void SobelCompute::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t 
     VkViewport vp{};
     vp.width = static_cast<float>(width);
     vp.height = static_cast<float>(height);
-    vp.minDepth = 0.f;
     vp.maxDepth = 1.f;
     vkCmdSetViewport(cmd, 0, 1, &vp);
     VkRect2D sc{ { 0, 0 }, { width, height } };
@@ -500,6 +574,5 @@ void SobelCompute::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t 
     OverlayPC pc{};
     std::memcpy(pc.highlight, highlight_rgba, sizeof(pc.highlight));
     vkCmdPushConstants(cmd, overlay_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
