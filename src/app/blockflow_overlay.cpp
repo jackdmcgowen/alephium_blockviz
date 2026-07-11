@@ -66,9 +66,33 @@ void BlockflowOverlay::draw()
     if (over_scene && io.MouseWheel != 0.f)
         camera_.nudge_scroll(io.MouseWheel * CameraController::kWheelStep);
 
-    // Right-click drag: free look (smoothed in CameraController::tick).
-    // Short RMB click (no drag): clear selection + home look (handled on release).
-    constexpr float kRmbDragThresholdPx = 4.f;
+    constexpr float kDragThresholdPx = 4.f;
+
+    // Left-click drag: pan camera (smoothed). Short LMB click still picks (engine).
+    if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        lmb_down_over_scene_ = true;
+        lmb_dragged_ = false;
+        lmb_drag_dist_px_ = 0.f;
+    }
+    if (lmb_down_over_scene_ && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        const float dx = io.MouseDelta.x;
+        const float dy = io.MouseDelta.y;
+        lmb_drag_dist_px_ += std::sqrt(dx * dx + dy * dy);
+        if (lmb_drag_dist_px_ >= kDragThresholdPx)
+            lmb_dragged_ = true;
+        if (lmb_dragged_ && (dx != 0.f || dy != 0.f))
+            camera_.add_pan_delta(dx, dy);
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+    {
+        lmb_down_over_scene_ = false;
+        lmb_dragged_ = false;
+        lmb_drag_dist_px_ = 0.f;
+    }
+
+    // Right-click drag: free look. Short RMB click: clear selection + home look.
     if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         rmb_down_over_scene_ = true;
@@ -80,7 +104,7 @@ void BlockflowOverlay::draw()
         const float dx = io.MouseDelta.x;
         const float dy = io.MouseDelta.y;
         rmb_drag_dist_px_ += std::sqrt(dx * dx + dy * dy);
-        if (rmb_drag_dist_px_ >= kRmbDragThresholdPx)
+        if (rmb_drag_dist_px_ >= kDragThresholdPx)
             rmb_dragged_ = true;
         if (rmb_dragged_ && (dx != 0.f || dy != 0.f))
             camera_.add_look_delta(dx, dy);
@@ -88,7 +112,7 @@ void BlockflowOverlay::draw()
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         if (rmb_down_over_scene_ && !rmb_dragged_)
-            engine_.clear_selection(); // also homes look via controller
+            engine_.clear_selection();
         rmb_down_over_scene_ = false;
         rmb_dragged_ = false;
         rmb_drag_dist_px_ = 0.f;
@@ -356,7 +380,8 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextWrapped(
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
-        ImGui::TextDisabled("Camera: wheel/arrows scroll Z · RMB-drag look · short RMB clear");
+        ImGui::TextDisabled(
+            "Camera: wheel/arrows Z · LMB-drag pan · short LMB pick · RMB-drag look · short RMB clear");
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();

@@ -30,4 +30,9 @@ private:
     bool  rmb_down_over_scene_ = false;
     bool  rmb_dragged_         = false;
     float rmb_drag_dist_px_    = 0.f;
+
+    // LMB pan: drag vs short-click pick (pick stays on engine via MouseDragMaxDistance)
+    bool  lmb_down_over_scene_ = false;
+    bool  lmb_dragged_         = false;
+    float lmb_drag_dist_px_    = 0.f;
 };

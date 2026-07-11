@@ -241,16 +241,18 @@ void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_fo
     binds[1].stride = sizeof(InstanceData);
     binds[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    VkVertexInputAttributeDescription attrs[4]{};
+    VkVertexInputAttributeDescription attrs[6]{};
     attrs[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexNormal, pos) };
     attrs[1] = { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexNormal, normal) };
     attrs[2] = { 2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, pos) };
-    attrs[3] = { 3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, color) };
+    attrs[3] = { 3, 1, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, scale) };
+    attrs[4] = { 4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, color) };
+    attrs[5] = { 5, 1, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, alpha) };
 
     VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     vi.vertexBindingDescriptionCount = 2;
     vi.pVertexBindingDescriptions = binds;
-    vi.vertexAttributeDescriptionCount = 4;
+    vi.vertexAttributeDescriptionCount = 6;
     vi.pVertexAttributeDescriptions = attrs;
 
     VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };

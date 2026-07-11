@@ -38,13 +38,22 @@ struct CameraUBO
     float     pad1 = 0.0f;
     glm::vec3 view_pos{};
     float     pad2 = 0.0f;
+    // Global tween multipliers (1 = identity). Instance scale/alpha multiply these.
+    float     anim_scale = 1.0f;
+    float     anim_alpha = 1.0f;
+    float     anim_time  = 0.0f; // seconds (host/engine may advance)
+    float     pad3       = 0.0f;
 };
 
-// v1 instance path: position + color only (no scale)
+// Instance: world pos + uniform scale + color + alpha (32 bytes).
+inline constexpr float kDefaultBlockScale = 1.0f;
+
 struct GpuInstance
 {
-    glm::vec3 pos{};
-    glm::vec3 color{};
+    glm::vec3 pos{ 0.f };
+    float     scale = kDefaultBlockScale; // uniform XYZ scale (mesh verts at ±1)
+    glm::vec3 color{ 1.f };
+    float     alpha = 1.0f;               // for fade tweens
 };
 
 struct FrameSubmit

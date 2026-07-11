@@ -57,26 +57,35 @@ void PickerPipeline::create(VkDevice device,
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[1].offset = offsetof(VertexNormal, normal.x);
 
-    VkVertexInputAttributeDescription instanceAttributes[2];
+    VkVertexInputAttributeDescription instanceAttributes[4];
     instanceAttributes[0].binding = 1;
     instanceAttributes[0].location = 2;
     instanceAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     instanceAttributes[0].offset = offsetof(InstanceData, pos);
     instanceAttributes[1].binding = 1;
     instanceAttributes[1].location = 3;
-    instanceAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    instanceAttributes[1].offset = offsetof(InstanceData, color);
+    instanceAttributes[1].format = VK_FORMAT_R32_SFLOAT;
+    instanceAttributes[1].offset = offsetof(InstanceData, scale);
+    instanceAttributes[2].binding = 1;
+    instanceAttributes[2].location = 4;
+    instanceAttributes[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+    instanceAttributes[2].offset = offsetof(InstanceData, color);
+    instanceAttributes[3].binding = 1;
+    instanceAttributes[3].location = 5;
+    instanceAttributes[3].format = VK_FORMAT_R32_SFLOAT;
+    instanceAttributes[3].offset = offsetof(InstanceData, alpha);
 
     VkVertexInputAttributeDescription attributes[] = {
         attributeDescriptions[0], attributeDescriptions[1],
-        instanceAttributes[0], instanceAttributes[1]
+        instanceAttributes[0], instanceAttributes[1],
+        instanceAttributes[2], instanceAttributes[3]
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 2;
     vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
-    vertexInputInfo.vertexAttributeDescriptionCount = 4;
+    vertexInputInfo.vertexAttributeDescriptionCount = 6;
     vertexInputInfo.pVertexAttributeDescriptions = attributes;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};

@@ -1120,11 +1120,15 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 
         // RMB clear-selection is handled in BlockflowOverlay (short click vs look-drag).
 
+        // Short LMB click = pick; LMB drag is camera pan (overlay). Use ImGui drag distance.
+        constexpr float kPickMaxDragSqr = 4.f * 4.f;
         PickKind request = PickKind::None;
-        if (over_scene && io.MouseClicked[ImGuiMouseButton_Left])
+        if (over_scene && io.MouseReleased[ImGuiMouseButton_Left] &&
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < kPickMaxDragSqr)
             request = PickKind::Click;
-        else if (kHoverPickEnabled && over_scene)
-            request = PickKind::Hover; // continuous readback each frame while over scene
+        else if (kHoverPickEnabled && over_scene &&
+                 !io.MouseDown[ImGuiMouseButton_Left] && !io.MouseDown[ImGuiMouseButton_Right])
+            request = PickKind::Hover; // skip hover pick while dragging camera
 
         if (request != PickKind::None)
         {

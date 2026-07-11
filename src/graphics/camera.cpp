@@ -106,5 +106,8 @@ CameraUBO Camera::to_ubo() const
     // Key light fixed relative to the Z-track (not look dir) so free-look does not
     // swing the light. Offset: +X side, -Y "up" (camera up is (0,-1,0)), slightly +Z.
     cam.light_pos = eye + glm::vec3(55.f, -90.f, 40.f);
+    cam.anim_scale = 1.0f;
+    cam.anim_alpha = 1.0f;
+    cam.anim_time = 0.0f;
     return cam;
 }

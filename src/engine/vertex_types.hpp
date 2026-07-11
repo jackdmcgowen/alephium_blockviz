@@ -13,10 +13,13 @@ struct VertexNormal
     glm::vec3 normal;
 };
 
+// Must match GpuInstance / cube + picker vertex inputs (32 bytes).
 struct InstanceData
 {
     glm::vec3 pos;
+    float     scale;
     glm::vec3 color;
+    float     alpha;
 };
 
 struct UniformBufferObject
@@ -27,6 +30,10 @@ struct UniformBufferObject
     glm::float32 pad1;
     glm::vec3 viewPos;
     glm::float32 pad2;
+    float anim_scale;
+    float anim_alpha;
+    float anim_time;
+    float pad3;
 };
 
 struct PickerPushConstants
