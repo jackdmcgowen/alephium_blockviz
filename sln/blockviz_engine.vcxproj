@@ -103,6 +103,7 @@
     <ClCompile Include="..\src\engine\frame_presenter.cpp" />
     <ClCompile Include="..\src\engine\swapchain_targets.cpp" />
     <ClCompile Include="..\src\engine\picker.cpp" />
+    <ClCompile Include="..\src\engine\sobel_compute.cpp" />
     <ClCompile Include="..\src\engine\pipelines\cube_pipeline.cpp" />
     <ClCompile Include="..\src\engine\pipelines\picker_pipeline.cpp" />
   </ItemGroup>
@@ -117,6 +118,7 @@
     <ClInclude Include="..\src\engine\frame_presenter.hpp" />
     <ClInclude Include="..\src\engine\swapchain_targets.hpp" />
     <ClInclude Include="..\src\engine\picker.hpp" />
+    <ClInclude Include="..\src\engine\sobel_compute.hpp" />
     <ClInclude Include="..\src\engine\vertex_types.hpp" />
     <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp" />
     <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp" />

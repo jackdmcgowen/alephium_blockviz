@@ -25,10 +25,12 @@
 #include "engine/picker.hpp"
 #include "engine/pipelines/cube_pipeline.hpp"
 #include "engine/pipelines/picker_pipeline.hpp"
+#include "engine/sobel_compute.hpp"
 #include "engine/swapchain_targets.hpp"
 #include "engine/vertex_types.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
+#include "graphics/queue_types.hpp"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
@@ -88,7 +90,7 @@ private:
     VkPhysicalDeviceProperties deviceProps;
     VkPhysicalDeviceMemoryProperties deviceMemProps;
     VkDevice device;
-    VkQueue graphicsQueue;
+    DeviceQueues queues_{}; // indexed by QueueType {_3D, TX, CMP}
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     std::vector<VkImage> swapchainImages;
@@ -103,8 +105,11 @@ private:
     PickerPipeline picker_pipe_;
     FrameResources frame_resources_;
     Picker picker_;
+    SobelCompute sobel_;
 
-    VkCommandPool commandPool;
+    VkCommandPool commandPool = VK_NULL_HANDLE;       // _3D family
+    VkCommandPool computeCommandPool = VK_NULL_HANDLE; // CMP family
+    VkCommandBuffer computeCommandBuffer = VK_NULL_HANDLE;
     FrameSync frame_sync_;
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
@@ -172,7 +177,12 @@ private:
     void end_look_aim();
     void update_look_direction(float dt, const glm::vec3& eye);
     CameraUBO build_camera_ubo() const;
-    void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology);
+    // when defer_present: leave color as attachment for async Sobel overlay
+    void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
+                               VkPrimitiveTopology topology, bool defer_present);
+    void submit_frame_with_async_sobel(uint32_t image_index, VkCommandBuffer graphics_cb,
+                                       VkSemaphore image_available,
+                                       VkSemaphore render_finished);
 
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot

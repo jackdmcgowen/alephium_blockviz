@@ -39,12 +39,13 @@ void SwapchainTargets::create_depth(VkDevice device, VkPhysicalDeviceMemoryPrope
     if (depth_format_ == VK_FORMAT_UNDEFINED)
         depth_format_ = find_depth_format(physical_device_);
 
+    // SAMPLED: async depth-Sobel on CMP reads depth as a texture.
     create_image(
         device,
         width, height,
         depth_format_,
         VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         depth_image_,
         depth_memory_,

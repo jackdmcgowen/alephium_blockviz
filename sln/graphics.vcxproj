@@ -119,6 +119,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h" />
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h" />
+    <ClInclude Include="..\src\graphics\queue_types.hpp" />
     <ClInclude Include="..\src\graphics\engine_requirements.hpp" />
     <ClInclude Include="..\src\graphics\mesh_arena.h" />
     <ClInclude Include="..\src\graphics\debug\debug_drawer.h" />

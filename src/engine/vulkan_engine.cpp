@@ -87,10 +87,11 @@ VulkanEngine::VulkanEngine()
     , deviceProps()
     , deviceMemProps()
     , device(VK_NULL_HANDLE)
-    , graphicsQueue(VK_NULL_HANDLE)
     , surface(VK_NULL_HANDLE)
     , swapchain(VK_NULL_HANDLE)
     , commandPool(VK_NULL_HANDLE)
+    , computeCommandPool(VK_NULL_HANDLE)
+    , computeCommandBuffer(VK_NULL_HANDLE)
     , inFlightFrames{}
     , currentFrame(0)
     , instanceCount(0)
@@ -189,7 +190,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     surface = create_win32_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     log_engine_startup(deviceProps, engine_id);
-    create_device(instance, physicalDevice, &device, &graphicsQueue);
+    create_device(instance, physicalDevice, surface, &device, &queues_);
 
     swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -214,6 +215,18 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
                         swapchain_targets_.depth_format(), width, height);
     create_command_pool();
     create_sync_objects();
+
+    {
+        SobelComputeCreateInfo sci{};
+        sci.device = device;
+        sci.mem_props = &deviceMemProps;
+        sci.width = width;
+        sci.height = height;
+        sci.depth_format = swapchain_targets_.depth_format();
+        sci.graphics_family = queues_.family_index(QueueType::_3D);
+        sci.compute_family = queues_.family_index(QueueType::CMP);
+        sobel_.create(sci);
+    }
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -240,8 +253,8 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
     imgui_vk.Instance = instance;
     imgui_vk.PhysicalDevice = physicalDevice;
     imgui_vk.Device = device;
-    imgui_vk.QueueFamily = 0;
-    imgui_vk.Queue = graphicsQueue;
+    imgui_vk.QueueFamily = queues_.family_index(QueueType::_3D);
+    imgui_vk.Queue = queues_.get(QueueType::_3D);
     imgui_vk.DescriptorPool = frame_descriptors_.pool();
     imgui_vk.PipelineCache = VK_NULL_HANDLE;
     imgui_vk.RenderPass = VK_NULL_HANDLE;
@@ -551,21 +564,220 @@ void VulkanEngine::render()
     const FramePresenter::AcquireResult acq =
         frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
 
+    bool want_sobel = false;
+    {
+        std::lock_guard<std::mutex> slock(selection_mutex_);
+        want_sobel = sobel_.ready() && !selected_hash_.empty();
+    }
+
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
-    record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                          /*defer_present=*/want_sobel);
 
-    frame_presenter_.submit_and_present(
-        graphicsQueue,
-        swapchain,
-        frame_sync_,
-        begin.frame_index,
-        acq.image_index,
-        commandBuffer,
-        acq.image_available,
-        acq.render_finished);
+    if (want_sobel)
+    {
+        submit_frame_with_async_sobel(acq.image_index, commandBuffer, acq.image_available,
+                                      acq.render_finished);
+    }
+    else
+    {
+        frame_presenter_.submit_and_present(
+            queues_.get(QueueType::_3D),
+            swapchain,
+            frame_sync_,
+            begin.frame_index,
+            acq.image_index,
+            commandBuffer,
+            acq.image_available,
+            acq.render_finished);
+    }
 
 }   /* render() */
+
+void VulkanEngine::submit_frame_with_async_sobel(uint32_t image_index,
+                                                 VkCommandBuffer graphics_cb,
+                                                 VkSemaphore image_available,
+                                                 VkSemaphore render_finished)
+{
+    // After main+pick: barrier depth for compute sampling, signal g→c.
+    {
+        VkImageMemoryBarrier2 depth_b{};
+        depth_b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        depth_b.srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        depth_b.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth_b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        depth_b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        depth_b.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        depth_b.image = swapchain_targets_.depth_image();
+        depth_b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+        if (!queues_.same_family(QueueType::_3D, QueueType::CMP))
+        {
+            depth_b.srcQueueFamilyIndex = queues_.family_index(QueueType::_3D);
+            depth_b.dstQueueFamilyIndex = queues_.family_index(QueueType::CMP);
+        }
+        VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers = &depth_b;
+        vkCmdPipelineBarrier2(graphics_cb, &dep);
+    }
+    frame_recorder_.end(graphics_cb);
+
+    // Submit graphics (_3D): wait image-available, signal g→c + timeline half-step not used
+    {
+        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+        cb.commandBuffer = graphics_cb;
+        VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+        wait.semaphore = image_available;
+        wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+        sig.semaphore = sobel_.graphics_to_compute();
+        sig.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos = &cb;
+        submit.waitSemaphoreInfoCount = 1;
+        submit.pWaitSemaphoreInfos = &wait;
+        submit.signalSemaphoreInfoCount = 1;
+        submit.pSignalSemaphoreInfos = &sig;
+        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+            throw std::runtime_error("async sobel: graphics submit failed");
+    }
+
+    // Compute (CMP): wait g→c, Sobel dispatch, signal compute_finished
+    {
+        vkResetCommandBuffer(computeCommandBuffer, 0);
+        VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(computeCommandBuffer, &bi);
+
+        if (!queues_.same_family(QueueType::_3D, QueueType::CMP))
+        {
+            // Acquire depth on compute family
+            VkImageMemoryBarrier2 depth_b{};
+            depth_b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            depth_b.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            depth_b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            depth_b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            depth_b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            depth_b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            depth_b.srcQueueFamilyIndex = queues_.family_index(QueueType::_3D);
+            depth_b.dstQueueFamilyIndex = queues_.family_index(QueueType::CMP);
+            depth_b.image = swapchain_targets_.depth_image();
+            depth_b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+            VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            dep.imageMemoryBarrierCount = 1;
+            dep.pImageMemoryBarriers = &depth_b;
+            vkCmdPipelineBarrier2(computeCommandBuffer, &dep);
+        }
+
+        sobel_.record_dispatch(computeCommandBuffer, swapchain_targets_.depth_view(),
+                               /*strength=*/12.0f, /*threshold=*/0.002f);
+        vkEndCommandBuffer(computeCommandBuffer);
+
+        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+        cb.commandBuffer = computeCommandBuffer;
+        VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+        wait.semaphore = sobel_.graphics_to_compute();
+        wait.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+        sig.semaphore = sobel_.compute_finished();
+        sig.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos = &cb;
+        submit.waitSemaphoreInfoCount = 1;
+        submit.pWaitSemaphoreInfos = &wait;
+        submit.signalSemaphoreInfoCount = 1;
+        submit.pSignalSemaphoreInfos = &sig;
+        if (vkQueueSubmit2(queues_.get(QueueType::CMP), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+            throw std::runtime_error("async sobel: compute submit failed");
+    }
+
+    // Graphics overlay + present: wait compute, composite edges, present
+    {
+        VkCommandBuffer overlay_cb = inFlightFrames[(currentFrame + 1) % MAX_FRAMES_IN_FLIGHT].commandBuffer;
+        // Reuse a free slot's buffer is wrong if still in flight — allocate one-shot from pool
+        // Use computeCommandBuffer is busy; allocate temporary from _3D pool each frame is heavy.
+        // Safer: use frame's same buffer only after GPU finished — we submitted it already.
+        // Secondary buffer from _3D pool:
+        static thread_local VkCommandBuffer s_overlay_cb = VK_NULL_HANDLE;
+        if (s_overlay_cb == VK_NULL_HANDLE)
+        {
+            VkCommandBufferAllocateInfo ai{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+            ai.commandPool = commandPool;
+            ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            ai.commandBufferCount = 1;
+            vkAllocateCommandBuffers(device, &ai, &s_overlay_cb);
+        }
+        (void)overlay_cb;
+        vkResetCommandBuffer(s_overlay_cb, 0);
+        VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(s_overlay_cb, &bi);
+
+        // Color still COLOR_ATTACHMENT — load and draw edges
+        VkRenderingAttachmentInfo color{};
+        color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        color.imageView = swapchain_targets_.color_view(image_index);
+        color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea = { { 0, 0 }, { width, height } };
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments = &color;
+        vkCmdBeginRendering(s_overlay_cb, &ri);
+
+        const float highlight[4] = { 1.0f, 0.85f, 0.15f, 1.35f }; // gold selection edges
+        sobel_.record_overlay(s_overlay_cb, width, height, highlight);
+        vkCmdEndRendering(s_overlay_cb);
+
+        frame_recorder_.transition_color_to_present(s_overlay_cb, swapchainImages[image_index]);
+        vkEndCommandBuffer(s_overlay_cb);
+
+        // Submit via presenter-like path: wait compute_finished + timeline bookkeeping
+        const uint64_t signal_value = frame_presenter_.frame_counter() + 1;
+        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+        cb.commandBuffer = s_overlay_cb;
+        VkSemaphoreSubmitInfo waits[1]{};
+        waits[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waits[0].semaphore = sobel_.compute_finished();
+        waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        VkSemaphoreSubmitInfo sigs[2]{};
+        sigs[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        sigs[0].semaphore = frame_sync_.timeline();
+        sigs[0].value = signal_value;
+        sigs[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        sigs[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        sigs[1].semaphore = render_finished;
+        sigs[1].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos = &cb;
+        submit.waitSemaphoreInfoCount = 1;
+        submit.pWaitSemaphoreInfos = waits;
+        submit.signalSemaphoreInfoCount = 2;
+        submit.pSignalSemaphoreInfos = sigs;
+        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+            throw std::runtime_error("async sobel: overlay submit failed");
+
+        VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        present.waitSemaphoreCount = 1;
+        present.pWaitSemaphores = &render_finished;
+        present.swapchainCount = 1;
+        present.pSwapchains = &swapchain;
+        present.pImageIndices = &image_index;
+        vkQueuePresentKHR(queues_.get(QueueType::_3D), &present);
+
+        frame_sync_.set_frame_timeline_value(static_cast<uint32_t>(currentFrame), signal_value);
+        frame_presenter_.notify_submitted_and_presented();
+    }
+}
 
 
 void VulkanEngine::Resize()
@@ -618,6 +830,17 @@ void VulkanEngine::resize_internal()
         pr.width = width;
         pr.height = height;
         picker_.recreate_resources(pr);
+    }
+    {
+        SobelComputeCreateInfo sci{};
+        sci.device = device;
+        sci.mem_props = &deviceMemProps;
+        sci.width = width;
+        sci.height = height;
+        sci.depth_format = swapchain_targets_.depth_format();
+        sci.graphics_family = queues_.family_index(QueueType::_3D);
+        sci.compute_family = queues_.family_index(QueueType::CMP);
+        sobel_.recreate(sci);
     }
 
     s_resized = true;
@@ -676,13 +899,16 @@ void VulkanEngine::create_command_pool()
 {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = 0; // Assume graphics family at 0
+    poolInfo.queueFamilyIndex = queues_.family_index(QueueType::_3D);
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create command pool");
-    }
+        throw std::runtime_error("Failed to create _3D command pool");
+
+    // CMP pool (async compute) — same family is OK when CMP shares _3D
+    poolInfo.queueFamilyIndex = queues_.family_index(QueueType::CMP);
+    if (vkCreateCommandPool(device, &poolInfo, nullptr, &computeCommandPool) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create CMP command pool");
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -693,10 +919,12 @@ void VulkanEngine::create_command_pool()
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].commandBuffer) != VK_SUCCESS)
-        {
-            throw std::runtime_error("Failed to allocate command buffers");
-        }
+            throw std::runtime_error("Failed to allocate _3D command buffers");
     }
+
+    allocInfo.commandPool = computeCommandPool;
+    if (vkAllocateCommandBuffers(device, &allocInfo, &computeCommandBuffer) != VK_SUCCESS)
+        throw std::runtime_error("Failed to allocate CMP command buffer");
 }   /* create_command_pool() */
 
 
@@ -901,7 +1129,8 @@ void VulkanEngine::update_uniform_buffer()
 }
 
 
-void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex, VkPrimitiveTopology topology)
+void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
+                                         VkPrimitiveTopology topology, bool defer_present)
 {
     FrameRecordParams rp{};
     rp.cmd = buffer;
@@ -926,6 +1155,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
     rp.debug_drawer = &debugDrawer;
     rp.view_proj = &viewProj;
     rp.imgui_draw_data = ImGui::GetDrawData();
+    rp.transition_color_to_present = !defer_present;
 
     frame_recorder_.record_main(rp);
 
@@ -983,7 +1213,9 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
         }
     }
 
-    frame_recorder_.end(buffer);
+    // Async Sobel path adds depth barriers and ends the CB in submit_frame_with_async_sobel.
+    if (!defer_present)
+        frame_recorder_.end(buffer);
 
 }   /* record_command_buffer() */
 
@@ -1003,12 +1235,24 @@ void VulkanEngine::cleanup()
         meshArena = nullptr;
     }
 
+    sobel_.destroy(device);
+
     // Descriptors reference UBO in frame_resources — free pool before buffers.
     frame_descriptors_.destroy(device);
     frame_resources_.destroy(device);
 
     frame_sync_.destroy(device);
-    vkDestroyCommandPool(device, commandPool, nullptr);
+    if (computeCommandPool != VK_NULL_HANDLE)
+    {
+        vkDestroyCommandPool(device, computeCommandPool, nullptr);
+        computeCommandPool = VK_NULL_HANDLE;
+        computeCommandBuffer = VK_NULL_HANDLE;
+    }
+    if (commandPool != VK_NULL_HANDLE)
+    {
+        vkDestroyCommandPool(device, commandPool, nullptr);
+        commandPool = VK_NULL_HANDLE;
+    }
 
     picker_.destroy(device);
     picker_pipe_.destroy(device);

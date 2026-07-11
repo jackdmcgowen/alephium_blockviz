@@ -43,14 +43,20 @@ struct FrameRecordParams
 
     // Optional ImGui draw data (already built for this frame)
     ImDrawData* imgui_draw_data = nullptr;
+
+    // When false, color stays COLOR_ATTACHMENT_OPTIMAL for post (async Sobel overlay).
+    bool transition_color_to_present = true;
 };
 
 class FrameRecorder
 {
 public:
-    // vkBeginCommandBuffer + main dynamic-rendering pass + transition to PRESENT.
-    // Leaves the command buffer open for optional picker recording.
+    // vkBeginCommandBuffer + main dynamic-rendering pass.
+    // Optionally transitions color to PRESENT. Leaves CB open for picker / post.
     void record_main(const FrameRecordParams& params);
+
+    // Color attachment → PRESENT_SRC (when post-process deferred the transition).
+    void transition_color_to_present(VkCommandBuffer cmd, VkImage color_image);
 
     // vkEndCommandBuffer
     void end(VkCommandBuffer cmd);

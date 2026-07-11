@@ -120,7 +120,13 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
 
     vkCmdEndRendering(p.cmd);
 
-    pipeline_barrier(p.cmd, p.color_image,
+    if (p.transition_color_to_present)
+        transition_color_to_present(p.cmd, p.color_image);
+}
+
+void FrameRecorder::transition_color_to_present(VkCommandBuffer cmd, VkImage color_image)
+{
+    pipeline_barrier(cmd, color_image,
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,

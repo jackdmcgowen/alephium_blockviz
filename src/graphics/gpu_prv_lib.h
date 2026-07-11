@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu_pub_lib.h"
+#include "queue_types.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -28,11 +29,13 @@ VkPhysicalDevice pick_physical_device(
     VkPhysicalDeviceProperties* device_props,
     VkPhysicalDeviceMemoryProperties* device_mem_props);
 
+// Creates device with _3D / TX / CMP queues (see QueueType). surface used for present support.
 void create_device(
     VkInstance          instance,
     VkPhysicalDevice    physicalDevice,
+    VkSurfaceKHR        surface,
     VkDevice           *device,
-    VkQueue            *queue);
+    DeviceQueues       *out_queues);
 void destroy_device(VkDevice device);
 
 uint32_t find_device_memory_type(
