@@ -355,17 +355,24 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
             color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-        out.instances.push_back(GpuInstance{ placed.pos, scale, color, 1.0f });
+        // All blocks are unconfirmed until main-chain proven — translucent until then.
+        constexpr float kUnconfirmedAlpha = 0.38f;
+        const float alpha =
+            scene_.is_confirmed_locked(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+
+        out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
     }
 
-    // Sequential confirmed frontier ∩ pick_map (green Sobel). Cap 32.
+    // Sequential confirmed tip (H_c frontier) ∩ pick_map → green Sobel.
+    // As H_c advances, hash_c updates and the highlight shifts to the next tip.
     {
         const auto conf_tips = scene_.confirmed_frontier_ids_locked();
-        std::unordered_set<std::string> conf_set(conf_tips.begin(), conf_tips.end());
-        for (const auto& h : out.pick_map)
+        std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
+        // Lane-order frontier; Sobel moves as H_c / hash_c advances.
+        for (const auto& h : conf_tips)
         {
-            if (!conf_set.count(h))
+            if (!pick_set.count(h))
                 continue;
             out.confirmed_tip_hashes.push_back(h);
             if (out.confirmed_tip_hashes.size() >= 32)

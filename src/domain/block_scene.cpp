@@ -308,6 +308,19 @@ int BlockScene::try_advance_confirmed_unlocked_(uint32_t lane)
     return steps;
 }
 
+size_t BlockScene::unconfirmed_live_count() const
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    const std::vector<GraphNode> nodes = graph_.nodes_snapshot();
+    size_t n = 0;
+    for (const GraphNode& node : nodes)
+    {
+        if (!confirmed_.count(node.id))
+            ++n;
+    }
+    return n;
+}
+
 std::vector<NodeId> BlockScene::tip_ids() const
 {
     // Caller may hold mu_; graph has its own lock.

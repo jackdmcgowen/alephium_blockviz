@@ -338,6 +338,17 @@ void AlephiumAdapter::on_start()
     ensure_cursors_initialized_();
 }
 
+bool AlephiumAdapter::ready_for_poll() const
+{
+    // Block new blockflow polls until the current set is fully confirmation-processed:
+    // verify queue drained and every live cube is in the confirmed set (or gone).
+    if (!verify_q_.empty())
+        return false;
+    if (scene_.unconfirmed_live_count() != 0)
+        return false;
+    return true;
+}
+
 void AlephiumAdapter::enqueue_verify(VerifyJob job)
 {
     if (job.hash.empty())
@@ -506,6 +517,14 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     maybe_refill_selection_detail();
     ensure_cursors_initialized_();
 
+    // Safety: network poller should already gate on ready_for_poll().
+    if (!ready_for_poll())
+    {
+        std::printf("[adapter] poll skipped — still confirming (q=%zu unconfirmed=%zu)\n",
+                    verify_q_.size(), scene_.unconfirmed_live_count());
+        return;
+    }
+
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
     std::printf("\n[adapter] Polling blockflow from %lld to %lld (verify_q=%zu)\n",
                 static_cast<long long>(last_poll_ts), static_cast<long long>(now),
@@ -521,6 +540,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     {
         maybe_refill_selection_detail();
         drain_next_heights_(kMaxNextHeightPerDrain);
+        // Do not advance last_poll_ts on hard failure so we retry the window.
         return;
     }
 
@@ -528,7 +548,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
     {
         const int count = cJSON_GetArraySize(blocksAndEvents);
-        int seen = 0, added = 0, queued = 0, skipped_bad = 0;
+        int seen = 0, added = 0, queued = 0, skipped_bad = 0, confirmed_now = 0;
 
         for (int i = 0; i < count; i++)
         {
@@ -562,56 +582,65 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
+                // Admit as unconfirmed; only mark confirmed after main-chain proof.
                 const bool added_now = scene_.add_block(block);
                 if (added_now)
                     ++added;
 
-                // K11: re-admit / first admit of cached-main must re-populate confirmed_
-                // (enqueue_verify skips is_cached_main; verify_one will never run).
                 if (main_chain_cache_.is_cached_main(block_hash))
-                    mark_scene_confirmed_(block_hash, cf, ct, h);
-                (void)added_now; // mark does not depend on add result
-
-                if (!main_chain_cache_.is_cached_main(block_hash) &&
-                    !verify_done_.count(block_hash))
                 {
-                    // Do not congest the verify queue with heights more than
-                    // kConfirmFetchHorizon above the sequential confirmed cursor.
-                    const uint32_t lane = lane_of(cf, ct);
-                    const int hc = scene_.confirmed_height(lane);
-                    const bool within_horizon =
-                        !scene_.cursor_initialized(lane) ||
-                        h <= hc + kConfirmFetchHorizon;
-                    if (within_horizon)
-                    {
-                        VerifyJob job;
-                        job.hash = block_hash;
-                        job.from = cf;
-                        job.to = ct;
-                        job.height = h;
-                        job.hot = main_chain_cache_.is_hot_zone(cf, ct, h);
-                        const size_t before = verify_q_.size();
-                        enqueue_verify(std::move(job));
-                        if (verify_q_.size() > before)
-                            ++queued;
-                    }
+                    // Previously proven main (e.g. prior verify) — confirm now.
+                    mark_scene_confirmed_(block_hash, cf, ct, h);
+                    ++confirmed_now;
                 }
+                else if (!verify_done_.count(block_hash))
+                {
+                    // Always enqueue verify for every unconfirmed live block so
+                    // ready_for_poll() can clear before the next poll.
+                    VerifyJob job;
+                    job.hash = block_hash;
+                    job.from = cf;
+                    job.to = ct;
+                    job.height = h;
+                    job.hot = main_chain_cache_.is_hot_zone(cf, ct, h);
+                    const size_t before = verify_q_.size();
+                    enqueue_verify(std::move(job));
+                    if (verify_q_.size() > before)
+                        ++queued;
+                }
+                else if (scene_.graph().contains(block_hash) &&
+                         !main_chain_cache_.is_cached_main(block_hash))
+                {
+                    // Live but still unconfirmed and verify_done said not-main was
+                    // wrong / race — re-queue cold verify so poll is not stuck.
+                    VerifyJob job;
+                    job.hash = block_hash;
+                    job.from = cf;
+                    job.to = ct;
+                    job.height = h;
+                    job.hot = false;
+                    verify_done_.erase(block_hash);
+                    const size_t before = verify_q_.size();
+                    enqueue_verify(std::move(job));
+                    if (verify_q_.size() > before)
+                        ++queued;
+                }
+                (void)added_now;
             }
         }
 
-        std::printf("[adapter] seen=%d added=%d verify_queued+=%d skipped_bad=%d "
-                    "q=%zu verified_ok=%d removed=%d replaced=%d refilled=%d "
-                    "confirmed_marks=%d cursor_adv=%d next_h_fetch=%d\n",
-                    seen, added, queued, skipped_bad, verify_q_.size(),
-                    stats_verified_ok_, stats_removed_, stats_replaced_,
-                    stats_detail_refilled_, stats_confirmed_marks_,
-                    stats_cursor_advances_, stats_next_height_fetches_);
+        std::printf("[adapter] seen=%d added=%d verify_queued+=%d confirmed_now=%d "
+                    "skipped_bad=%d q=%zu unconfirmed=%zu verified_ok=%d removed=%d "
+                    "replaced=%d cursor_adv=%d next_h_fetch=%d\n",
+                    seen, added, queued, confirmed_now, skipped_bad, verify_q_.size(),
+                    scene_.unconfirmed_live_count(), stats_verified_ok_, stats_removed_,
+                    stats_replaced_, stats_cursor_advances_, stats_next_height_fetches_);
     }
 
     last_poll_ts = now;
     cJSON_Delete(obj);
 
-    // Forward progress: ask for H_c+1 until confirmed.
+    // Forward progress: ask for H_c+1..H_c+2 only (horizon-limited).
     drain_next_heights_(kMaxNextHeightPerDrain);
 
     // PR11: drop txn payloads for unselected blocks (pin keeps selection full)

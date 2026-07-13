@@ -37,5 +37,6 @@ private:
     std::thread       thread_;
     std::atomic<bool> running_{ false };
 
-    static constexpr int kVerifyJobsPerIdleSlice = 8;
+    // Drain hard while poll is gated on confirmation completion.
+    static constexpr int kVerifyJobsPerIdleSlice = 24;
 };

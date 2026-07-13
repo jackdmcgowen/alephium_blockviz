@@ -31,8 +31,14 @@ public:
     // Call once after curl is ready (network thread).
     void on_start();
 
-    // One poll of blocks-with-events + optimistic admit + enqueue verify.
+    // One poll of blocks-with-events + admit unconfirmed + enqueue verify.
+    // Caller should only invoke when ready_for_poll() is true.
     void poll_once(int64_t& last_poll_ts);
+
+    // True when every live block is confirmed and the verify queue is empty.
+    // Poll is gated on this so we never admit a new batch while prior blocks
+    // are still unconfirmed / unverified.
+    bool ready_for_poll() const;
 
     // Background main-chain verify / remove / replace + next-height cursor fetch.
     void drain_verify(int max_jobs, const std::atomic<bool>& running);

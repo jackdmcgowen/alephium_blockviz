@@ -69,6 +69,9 @@ public:
     // Caller may hold mutex(); uses graph snapshot.
     std::vector<NodeId> tip_ids() const;
 
+    // Self-locking: count of live graph nodes not yet in confirmed_ set.
+    size_t unconfirmed_live_count() const;
+
     // Presenter only: call while holding scene.mutex().
     bool is_confirmed_locked(const NodeId& hash) const;
     // Sequential confirmed frontier (hash_c per lane if set) — green tips source of truth.
