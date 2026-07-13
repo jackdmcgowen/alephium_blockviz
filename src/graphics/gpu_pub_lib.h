@@ -1,7 +1,7 @@
 #pragma once
 
 // Public graphics-engine surface (no Vulkan types).
-// Implemented by VulkanEngine via IBlockvizEngine (E6).
+// Implemented by GraphicsSystem via IBlockvizEngine (E6).
 // See docs/graphics-modularization-design.md
 
 #include <cstddef>
@@ -108,6 +108,6 @@ public:
     virtual bool consume_pick(PickResult& out) = 0; // true if a new result is available
 };
 
-// Factory (declared only in PR1; implement when engine is peeled from VulkanEngine)
+// Legacy alias — prefers create_graphics_system() via blockviz_engine_api.hpp
 IRenderEngine* create_vulkan_engine();
 void destroy_render_engine(IRenderEngine* engine);

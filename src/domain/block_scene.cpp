@@ -73,8 +73,6 @@ bool BlockScene::remove_block(const std::string& hash)
     graph_.apply(delta);
     detail_store_.remove(hash);
     erase_confirmed_unlocked_(hash);
-    sequenced_.erase(hash);
-    incomplete_trace_.erase(hash);
 
     feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
                                [&](const RecentFeedItem& b) { return b.hash == hash; }),
@@ -96,48 +94,6 @@ void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
         return;
     std::lock_guard<std::mutex> lock(mu_);
     mark_confirmed_unlocked_(hash, lane, height);
-    // Confirmed nodes are no longer "incomplete" endpoints.
-    incomplete_trace_.erase(hash);
-}
-
-void BlockScene::mark_sequenced(const NodeId& hash)
-{
-    if (hash.empty())
-        return;
-    std::lock_guard<std::mutex> lock(mu_);
-    if (!graph_.contains(hash))
-        return;
-    sequenced_.insert(hash);
-}
-
-void BlockScene::mark_incomplete_trace(const NodeId& hash)
-{
-    if (hash.empty())
-        return;
-    std::lock_guard<std::mutex> lock(mu_);
-    if (graph_.contains(hash))
-        incomplete_trace_.insert(hash);
-}
-
-void BlockScene::clear_incomplete_trace(const NodeId& hash)
-{
-    if (hash.empty())
-        return;
-    std::lock_guard<std::mutex> lock(mu_);
-    incomplete_trace_.erase(hash);
-}
-
-void BlockScene::clear_incomplete_traces_for_lane(uint32_t lane)
-{
-    std::lock_guard<std::mutex> lock(mu_);
-    for (auto it = incomplete_trace_.begin(); it != incomplete_trace_.end(); )
-    {
-        auto n = graph_.get(*it);
-        if (!n || n->lane == lane)
-            it = incomplete_trace_.erase(it);
-        else
-            ++it;
-    }
 }
 
 int BlockScene::confirmed_height(uint32_t lane) const
@@ -156,24 +112,9 @@ NodeId BlockScene::confirmed_tip_hash(uint32_t lane) const
     return confirmed_hash_[lane];
 }
 
-bool BlockScene::cursor_initialized(uint32_t lane) const
-{
-    if (lane >= static_cast<uint32_t>(kLaneCount))
-        return false;
-    std::lock_guard<std::mutex> lock(mu_);
-    return frontier_valid_[lane];
-}
-
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
 {
     return is_confirmed_unlocked_(hash);
-}
-
-bool BlockScene::is_sequenced_locked(const NodeId& hash) const
-{
-    if (hash.empty())
-        return false;
-    return sequenced_.count(hash) != 0;
 }
 
 std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
@@ -188,40 +129,11 @@ std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
     return out;
 }
 
-std::vector<NodeId> BlockScene::confirmed_tip_ids_locked() const
-{
-    return confirmed_frontier_ids_locked();
-}
-
-std::vector<NodeId> BlockScene::incomplete_trace_ids_locked() const
-{
-    std::vector<NodeId> out;
-    out.reserve(incomplete_trace_.size());
-    for (const NodeId& id : incomplete_trace_)
-    {
-        if (graph_.contains(id))
-            out.push_back(id);
-    }
-    return out;
-}
-
 int BlockScene::confirmed_height_locked(uint32_t lane) const
 {
     if (lane >= static_cast<uint32_t>(kLaneCount))
         return -1;
     return confirmed_height_[lane];
-}
-
-bool BlockScene::is_frontier_hash_locked(const NodeId& hash) const
-{
-    if (hash.empty())
-        return false;
-    for (int i = 0; i < kLaneCount; ++i)
-    {
-        if (confirmed_hash_[i] == hash)
-            return true;
-    }
-    return false;
 }
 
 void BlockScene::copy_confirmed_heights_locked(int out[kLaneCount]) const
@@ -265,8 +177,6 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.erase(hash);
-    sequenced_.erase(hash);
-    incomplete_trace_.erase(hash);
 
     for (int i = 0; i < kLaneCount; ++i)
     {
@@ -371,23 +281,6 @@ AlphBlock BlockScene::resolve_detail(const std::string& hash) const
     AlphBlock empty;
     empty.hash = hash;
     return empty;
-}
-
-void BlockScene::set_trace_edges(std::vector<TraceEdge> edges)
-{
-    std::lock_guard<std::mutex> lock(mu_);
-    trace_edges_ = std::move(edges);
-}
-
-void BlockScene::clear_trace_edges()
-{
-    std::lock_guard<std::mutex> lock(mu_);
-    trace_edges_.clear();
-}
-
-std::vector<TraceEdge> BlockScene::trace_edges_locked() const
-{
-    return trace_edges_;
 }
 
 void BlockScene::set_trace_status(int phase, int offset)

@@ -1,7 +1,7 @@
 #pragma once
 
 // Public host/adapter surface for the block visualizer engine (E6/E7).
-// No Vulkan headers. Concrete implementation (VulkanEngine) lives in graphics.lib.
+// No Vulkan / curl. BlockvizEngine shell owns GraphicsSystem + NetworkSystem.
 // See graphics/gpu_pub_lib.h for IRenderEngine base.
 
 #include "alph_block.hpp"
@@ -9,6 +9,7 @@
 #include "graphics/camera.hpp"
 #include "graphics/gpu_pub_lib.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,7 @@ struct FrameSourceOutput
     // Frontier confirmed tips only (≤1 per lane) with an instance this frame (green Sobel).
     std::vector<std::string> confirmed_tip_hashes;
     // Live-pool blocks with any deps[] missing (orange Sobel), if instanced this frame.
-    std::vector<std::string> incomplete_trace_hashes;
+    std::vector<std::string> incomplete_hashes;
 };
 
 // Host implements; engine calls prepare() each frame on the render thread.
@@ -79,11 +80,27 @@ public:
     virtual void publish_frame(const FrameSubmit& frame,
                                const std::vector<std::string>& pick_map,
                                const std::vector<std::string>& confirmed_tip_hashes,
-                               const std::vector<std::string>& incomplete_trace_hashes) = 0;
+                               const std::vector<std::string>& incomplete_hashes) = 0;
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;
 };
 
+// Product engine shell (blockviz_engine.lib) — composes graphics + network.
 IBlockvizEngine* create_blockviz_engine();
 void destroy_blockviz_engine(IBlockvizEngine* engine);
+
+// Optional network start after config is loaded (no-op if already started).
+struct NetworkSystemConfig
+{
+    std::string base_url;
+    int64_t     lookback_ms      = 0;
+    int64_t     poll_interval_ms = 8000;
+};
+
+// Extended host API for network lifecycle (optional dynamic_cast / free functions).
+void blockviz_engine_start_network(IBlockvizEngine* engine, const NetworkSystemConfig& cfg);
+
+// Graphics backend factory (graphics.lib) — used by the shell, not the app.
+IBlockvizEngine* create_graphics_system();
+void destroy_graphics_system(IBlockvizEngine* graphics);

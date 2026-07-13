@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{4C1AA4B2-BC4E-4DD5-8E48-D0967106857D}</ProjectGuid>
-    <RootNamespace>blockviz_engine</RootNamespace>
+    <ProjectGuid>{8F3A2B1C-9D4E-4F5A-A6B7-C8D9E0F1A2B3}</ProjectGuid>
+    <RootNamespace>network</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -62,7 +62,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <!-- Vulkan-free product facade: public headers only; implementation is graphics.lib -->
+  <!-- NetworkSystem: curl + Alephium poll/fetch. No Vulkan. -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
@@ -96,20 +96,23 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\engine\blockviz_engine.cpp" />
+    <ClCompile Include="..\src\commands.c" />
+    <ClCompile Include="..\src\network\network_system.cpp" />
+    <ClCompile Include="..\src\adapters\alephium\network_poller.cpp" />
+    <ClCompile Include="..\src\adapters\alephium\block_fetch_pool.cpp" />
+    <ClCompile Include="..\src\adapters\alephium\alephium_adapter.cpp" />
+    <ClCompile Include="..\src\adapters\alephium\main_chain_cache.cpp" />
+    <ClCompile Include="..\src\adapters\alephium\alph_detail_store.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
-    <ClInclude Include="..\src\engine\engine_identity.hpp" />
+    <ClInclude Include="..\src\commands.h" />
     <ClInclude Include="..\src\network\network_system.hpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="graphics.vcxproj">
-      <Project>{6d69b7f2-ed37-4eae-af2a-0abeef80b4af}</Project>
-    </ProjectReference>
-    <ProjectReference Include="network.vcxproj">
-      <Project>{8F3A2B1C-9D4E-4F5A-A6B7-C8D9E0F1A2B3}</Project>
-    </ProjectReference>
+    <ClInclude Include="..\src\adapters\alephium\network_poller.hpp" />
+    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp" />
+    <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp" />
+    <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp" />
+    <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp" />
+    <ClInclude Include="..\src\alph_block.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

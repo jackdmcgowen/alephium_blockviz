@@ -1,7 +1,7 @@
 #pragma once
 
 // GPU pick resources + record pass + CPU readback (E10).
-// Pick policy (when to pick, hash maps, selection) stays on VulkanEngine.
+// Pick policy (when to pick, hash maps, selection) stays on GraphicsSystem.
 #include "engine/vertex_types.hpp"
 #include "graphics/buffer_manager.hpp"
 

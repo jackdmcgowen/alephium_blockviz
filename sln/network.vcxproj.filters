@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source Files\transport">
+      <UniqueIdentifier>{b01e0001-2222-4222-8222-222222222201}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\alephium">
+      <UniqueIdentifier>{b01e0001-2222-4222-8222-222222222202}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\transport">
+      <UniqueIdentifier>{b01e0001-2222-4222-8222-222222222301}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\alephium">
+      <UniqueIdentifier>{b01e0001-2222-4222-8222-222222222302}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\commands.c"><Filter>Source Files\transport</Filter></ClCompile>
+    <ClCompile Include="..\src\network\network_system.cpp"><Filter>Source Files\transport</Filter></ClCompile>
+    <ClCompile Include="..\src\adapters\alephium\network_poller.cpp"><Filter>Source Files\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\adapters\alephium\block_fetch_pool.cpp"><Filter>Source Files\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\adapters\alephium\alephium_adapter.cpp"><Filter>Source Files\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\adapters\alephium\main_chain_cache.cpp"><Filter>Source Files\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\adapters\alephium\alph_detail_store.cpp"><Filter>Source Files\alephium</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\commands.h"><Filter>Header Files\transport</Filter></ClInclude>
+    <ClInclude Include="..\src\network\network_system.hpp"><Filter>Header Files\transport</Filter></ClInclude>
+    <ClInclude Include="..\src\adapters\alephium\network_poller.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\alph_block.hpp"><Filter>Header Files\alephium</Filter></ClInclude>
+  </ItemGroup>
+</Project>

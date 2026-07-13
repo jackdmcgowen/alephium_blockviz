@@ -11,7 +11,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\engine\blockviz_engine_stub.cpp">
+    <ClCompile Include="..\src\engine\blockviz_engine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -20,6 +20,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\src\engine\engine_identity.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\network\network_system.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

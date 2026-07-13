@@ -37,14 +37,15 @@
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
 
-// Concrete engine: IRenderEngine + IBlockvizEngine (E6); FrameResources (E8).
-class VulkanEngine : public IBlockvizEngine
+// Graphics backend (GPU + render thread). Product shell is BlockvizEngine.
+// File still named vulkan_engine.* until physical rename under graphics/.
+class GraphicsSystem : public IBlockvizEngine
 {
 public:
     using PushConstants = PickerPushConstants;
 
-    VulkanEngine();
-    ~VulkanEngine() override;
+    GraphicsSystem();
+    ~GraphicsSystem() override;
 
     // IRenderEngine
     void initialize(const EngineCreateInfo& info) override;
@@ -71,7 +72,7 @@ public:
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
                        const std::vector<std::string>& confirmed_tip_hashes,
-                       const std::vector<std::string>& incomplete_trace_hashes) override;
+                       const std::vector<std::string>& incomplete_hashes) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
 
@@ -197,7 +198,7 @@ private:
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
         std::vector<std::string> confirmed_tip_hashes;
-        std::vector<std::string> incomplete_trace_hashes;
+        std::vector<std::string> incomplete_hashes;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
     mutable std::mutex submit_mutex_;

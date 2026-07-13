@@ -9,6 +9,9 @@
 /* Easy handle: owned by the network poller thread only. Do not use from UI/render. */
 CURL            *curl;
 
+/* Set by NetworkPoller::start to the live config base_url (network thread only). */
+const char      *baseUrl = NULL;
+
 #define CHECK_CURL( x )                                                      \
     {                                                                        \
     CURLcode        res;                                                     \

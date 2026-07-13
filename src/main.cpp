@@ -1,29 +1,24 @@
-#include <curl/curl.h>
 #include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "commands.h"
-#include "config.h"
+
+#include "alph_block.hpp"
 #include "app/app_identity.hpp"
 #include "app/blockflow_overlay.hpp"
 #include "app/camera_controller.hpp"
 #include "app/scene_presenter.hpp"
+#include "config.h"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
-#include "adapters/alephium/network_poller.hpp"
-#include "alph_block.hpp"
 #include "graphics/gpu_pub_lib.h"
+
 #include <windows.h>
 
-// Window defaults (host-owned; no Vulkan engine headers in the app)
+// Host window defaults (no graphics/network backends in this TU).
 #ifndef WDW_WIDTH
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
 #endif
-
-// Set by NetworkPoller on the network thread; UI must not call commands.c.
-extern "C" CURL* curl;
-const char* baseUrl;
 
 static volatile bool keepRunning = true;
 static BlockScene scene;
@@ -78,13 +73,11 @@ int main()
         return -1;
     }
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-
+    // Product engine owns GraphicsSystem + NetworkSystem.
     engine = create_blockviz_engine();
     overlay = new BlockflowOverlay(camera, *engine);
     scene_presenter = new ScenePresenter(scene);
 
-    // Host owns application identity; engine fills its own product identity.
     EngineCreateInfo create_info{};
     create_info.platform_instance = hInstance;
     create_info.window = hwnd;
@@ -107,18 +100,16 @@ int main()
         engine->stop();
         destroy_blockviz_engine(engine);
         delete overlay;
-        curl_global_cleanup();
         return -1;
     }
 
     printf("Using config url: %s\n", config_array.configs[0].url);
 
-    NetworkPoller poller(scene, *engine);
-    NetworkPoller::Config net_cfg;
+    NetworkSystemConfig net_cfg;
     net_cfg.base_url = config_array.configs[0].url;
     net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     net_cfg.poll_interval_ms = static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
-    poller.start(net_cfg);
+    blockviz_engine_start_network(engine, net_cfg);
 
     MSG msg = { 0 };
     while (keepRunning)
@@ -137,7 +128,6 @@ int main()
         Sleep(10);
     }
 
-    poller.stop();
     engine->stop();
     destroy_blockviz_engine(engine);
     engine = nullptr;
@@ -146,6 +136,5 @@ int main()
     delete overlay;
     overlay = nullptr;
     free_configs(&config_array);
-    curl_global_cleanup();
     return 0;
 }

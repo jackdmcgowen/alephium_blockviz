@@ -3,9 +3,10 @@
 // Domain/network policy for Alephium BlockFlow ingest.
 //
 // Phases: BootstrapPoll → IdentifyTips → DfsTrace → Steady.
-// On confirm: enqueue missing deps into pool; gate Steady poll until fills clear.
-// Free main for in-pool deps of confirmed blocks. Camera unlocks large history.
-// Visual: solid=confirmed+deps; green=frontier tip; orange=missing; magenta=DFS.
+// Live chain (base lookback window): per-hash fetches allowed to fill confirmed deps.
+// Historical (below base floor / camera unlock): time-slot interval polls only — no
+// hash fetches from DFS/trace. Free main for in-pool deps of confirmed blocks.
+// Presentation (solid/green/orange/gold) lives in ScenePresenter — not here.
 #include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
@@ -101,20 +102,30 @@ private:
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     int  camera_extra_lookback_heights_() const;
+    // True when height is inside the base live window (not camera-only history).
+    bool is_live_height_(uint32_t lane, int height) const;
+    bool is_live_block_(const std::string& hash) const;
     bool tip_pending_confirmation_() const;
 
     void drain_fetch_results_(int max_admits);
+    // Live-chain only: per-hash GET /blocks/{hash}.
     bool enqueue_missing_dep_(const std::string& dep_hash);
-    // On confirm: enqueue missing deps; gate discovery until resolved.
+    // On confirm: live → hash-fill deps; historical → time-slot poll (no hash).
     int  enqueue_confirm_deps_(const std::string& parent_hash);
     bool confirm_fills_pending_() const;
     void recheck_confirm_fill_parents_();
 
-    // Phase / per-chain DFS (fill deps on confirmed hole, then resume)
+    // Historical / bulk discovery: GET /blocks-with-events?fromTs&toTs.
+    int  poll_time_slot_(int64_t from_ts, int64_t to_ts);
+    // One lookback window ending at the block's timestamp (covers older deps).
+    int  request_history_slot_for_block_(const std::string& hash);
+    int64_t block_timestamp_ms_(const std::string& hash) const;
+
+    // Phase / per-chain DFS (pool-only; live holes hash-fill, history uses time slots)
     void set_phase_(Phase p);
     void maybe_enter_dfs_();
     void advance_dfs_traces_();
-    void run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges_out, bool from_stop);
+    void run_dfs_lane_(uint32_t lane, bool from_stop);
     bool all_dfs_done_() const;
     void maybe_camera_history_extend_();
     int  admit_blocks_with_events_(cJSON* obj, int* seen_out, int* added_out);
@@ -156,6 +167,8 @@ private:
     int earliest_traced_height_[BlockScene::kLaneCount]{};
     bool lookback_floors_valid_ = false;
     float initial_camera_scroll_z_ = 0.f;
+    // Quantized from_ts of history interval polls already issued (dedupe).
+    std::unordered_set<int64_t> history_slots_fetched_;
 
     int poll_count_ = 0;
     int stats_verified_ok_ = 0;
@@ -175,6 +188,5 @@ private:
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxFloodPerSeed = 256;
     static constexpr int kMaxFetchAdmitsPerDrain = 4; // selection path only
-    static constexpr int kMaxTraceEdges = 256;
     static constexpr int kMaxDfsNodes = 256;
 };

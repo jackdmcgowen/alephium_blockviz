@@ -47,10 +47,11 @@ private:
     };
 
     float now_sec_() const;
-    // Tip-dep only: grow once → hold while tip active → fade on supersede; no re-grow unless removed.
+    // Tip/frontier deps: grow once → hold while listing is tip → fade on supersede.
     void tip_dep_tick_and_draw_(DebugDrawer& debug,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
                                 const std::unordered_set<std::string>& live_nodes,
+                                const std::unordered_set<std::string>& frontier_set,
                                 float tip_len, float tip_rad, float shaft_r, float clearance);
 
     // Ephemeral selection/hover: simple grow; OK to forget when not drawn.

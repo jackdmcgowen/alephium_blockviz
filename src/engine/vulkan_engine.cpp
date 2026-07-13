@@ -47,7 +47,7 @@ glm::mat4 viewProj;
 
 static constexpr bool kHoverPickEnabled = true;
 
-const VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
+const VertexNormal GraphicsSystem::CUBE_VERTICES[8] = {
     { glm::vec3(-1, -1,  1), glm::normalize(glm::vec3(-1, -1,  1)) }, // 0
     { glm::vec3(1, -1,  1),  glm::normalize(glm::vec3(1, -1,  1)) }, // 1
     { glm::vec3(-1, -1, -1), glm::normalize(glm::vec3(-1, -1, -1)) }, // 2
@@ -58,7 +58,7 @@ const VertexNormal VulkanEngine::CUBE_VERTICES[8] = {
     { glm::vec3(1,  1,  1),  glm::normalize(glm::vec3(1,  1,  1)) }  // 7
 };
 
-const uint16_t VulkanEngine::CUBE_INDICES[36] = {
+const uint16_t GraphicsSystem::CUBE_INDICES[36] = {
     6, 0, 2, 6, 1, 0,
     4, 0, 1, 0, 4, 3,
     0, 3, 2, 3, 5, 2,
@@ -69,7 +69,7 @@ const uint16_t VulkanEngine::CUBE_INDICES[36] = {
 
 static bool s_resized;
 
-VulkanEngine::VulkanEngine()
+GraphicsSystem::GraphicsSystem()
     : hInstance(nullptr)
     , hwnd(nullptr)
     , instance(VK_NULL_HANDLE)
@@ -88,29 +88,29 @@ VulkanEngine::VulkanEngine()
     , width(0)
     , height(0)
 {
-}   /* VulkanEngine() */
+}   /* GraphicsSystem() */
 
-void VulkanEngine::set_scene(BlockScene* scene)
+void GraphicsSystem::set_scene(BlockScene* scene)
 {
     scene_ = scene;
 }
 
-void VulkanEngine::set_ui_overlay(IUiOverlay* overlay)
+void GraphicsSystem::set_ui_overlay(IUiOverlay* overlay)
 {
     overlay_ = overlay;
 }
 
-void VulkanEngine::set_camera(CameraController* camera)
+void GraphicsSystem::set_camera(CameraController* camera)
 {
     camera_ = camera;
 }
 
-void VulkanEngine::set_frame_source(IFrameSource* source)
+void GraphicsSystem::set_frame_source(IFrameSource* source)
 {
     frame_source_ = source;
 }
 
-void VulkanEngine::resize(uint32_t w, uint32_t h)
+void GraphicsSystem::resize(uint32_t w, uint32_t h)
 {
     if (w == 0 || h == 0)
         return;
@@ -122,35 +122,35 @@ void VulkanEngine::resize(uint32_t w, uint32_t h)
     resize_internal();
 }
 
-void VulkanEngine::on_resize()
+void GraphicsSystem::on_resize()
 {
     Resize(); // reads client rect then resize_internal
 }
 
-void VulkanEngine::shutdown()
+void GraphicsSystem::shutdown()
 {
     stop();
     cleanup();
 }
 
-void VulkanEngine::request_pick(const PickQuery& /*q*/)
+void GraphicsSystem::request_pick(const PickQuery& /*q*/)
 {
     // Picks are driven from the render thread mouse path for now.
 }
 
-bool VulkanEngine::consume_pick(PickResult& out)
+bool GraphicsSystem::consume_pick(PickResult& out)
 {
     out = PickResult{};
     return false;
 }
 
-VulkanEngine::~VulkanEngine()
+GraphicsSystem::~GraphicsSystem()
 {
     stop();
     cleanup();
 }
 
-void VulkanEngine::init_platform(void* hInst, void* hwnd_)
+void GraphicsSystem::init_platform(void* hInst, void* hwnd_)
 {
     // Prefer host calling initialize() with application identity filled in.
     EngineCreateInfo info{};
@@ -159,7 +159,7 @@ void VulkanEngine::init_platform(void* hInst, void* hwnd_)
     initialize(info);
 }
 
-void VulkanEngine::initialize(const EngineCreateInfo& info)
+void GraphicsSystem::initialize(const EngineCreateInfo& info)
 {
     void* hInst = info.platform_instance;
     void* hwnd_ = info.window;
@@ -316,7 +316,7 @@ void VulkanEngine::initialize(const EngineCreateInfo& info)
 }   /* Init() */
 
 
-void VulkanEngine::request_detail_refill_unlocked(const std::string& hash)
+void GraphicsSystem::request_detail_refill_unlocked(const std::string& hash)
 {
     if (hash.empty())
         return;
@@ -324,7 +324,7 @@ void VulkanEngine::request_detail_refill_unlocked(const std::string& hash)
     detail_refill_hash_ = hash;
 }
 
-void VulkanEngine::pin_and_maybe_refill(const std::string& hash, bool has_txns)
+void GraphicsSystem::pin_and_maybe_refill(const std::string& hash, bool has_txns)
 {
     if (!scene_)
         return;
@@ -334,7 +334,7 @@ void VulkanEngine::pin_and_maybe_refill(const std::string& hash, bool has_txns)
         request_detail_refill_unlocked(hash);
 }
 
-void VulkanEngine::clear_selection_unlocked()
+void GraphicsSystem::clear_selection_unlocked()
 {
     selected_hash_.clear();
     selected_block = AlphBlock{};
@@ -344,13 +344,13 @@ void VulkanEngine::clear_selection_unlocked()
         scene_->detail_store().set_full_detail_pin({});
 }
 
-void VulkanEngine::clear_selection()
+void GraphicsSystem::clear_selection()
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     clear_selection_unlocked();
 }
 
-void VulkanEngine::set_selection_unlocked(const std::string& hash)
+void GraphicsSystem::set_selection_unlocked(const std::string& hash)
 {
     if (hash.empty())
     {
@@ -381,13 +381,13 @@ void VulkanEngine::set_selection_unlocked(const std::string& hash)
     }
 }
 
-void VulkanEngine::set_selection(const std::string& hash)
+void GraphicsSystem::set_selection(const std::string& hash)
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     set_selection_unlocked(hash);
 }
 
-std::string VulkanEngine::consume_detail_refill_request()
+std::string GraphicsSystem::consume_detail_refill_request()
 {
     std::lock_guard<std::mutex> lock(detail_refill_mutex_);
     std::string out = std::move(detail_refill_hash_);
@@ -395,19 +395,19 @@ std::string VulkanEngine::consume_detail_refill_request()
     return out;
 }
 
-bool VulkanEngine::is_selected(const std::string& hash) const
+bool GraphicsSystem::is_selected(const std::string& hash) const
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     return !hash.empty() && selected_hash_ == hash;
 }
 
-AlphBlock VulkanEngine::copy_selected_block() const
+AlphBlock GraphicsSystem::copy_selected_block() const
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
     return selected_block;
 }
 
-void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
+void GraphicsSystem::refresh_selection_if_needed(BlockScene& scene)
 {
     // Caller holds scene.mutex() and selection_mutex_.
     if (selected_hash_.empty())
@@ -424,13 +424,13 @@ void VulkanEngine::refresh_selection_if_needed(BlockScene& scene)
 }
 
 
-void VulkanEngine::start()
+void GraphicsSystem::start()
 {
     running = true;
-    renderThread = std::thread(&VulkanEngine::render_loop, this);
+    renderThread = std::thread(&GraphicsSystem::render_loop, this);
 }
 
-void VulkanEngine::stop()
+void GraphicsSystem::stop()
 {
     running = false;
     if (renderThread.joinable())
@@ -438,7 +438,7 @@ void VulkanEngine::stop()
 }
 
 
-void VulkanEngine::render_loop()
+void GraphicsSystem::render_loop()
 {
     const double frameTimeMin = 1000.0 / 60; // ~16.67ms for 60Hz
     LARGE_INTEGER freq, t1, t2;
@@ -534,7 +534,7 @@ void VulkanEngine::render_loop()
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes,
-                          fout.incomplete_trace_hashes);
+                          fout.incomplete_hashes);
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -579,7 +579,7 @@ void VulkanEngine::render_loop()
 }   /* render_loop() */
 
 
-void VulkanEngine::render()
+void GraphicsSystem::render()
 {
     std::lock_guard<std::mutex> lk(renderMutex);
 
@@ -711,7 +711,7 @@ void VulkanEngine::render()
 
 }   /* render() */
 
-void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
+void GraphicsSystem::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
                                                  VkCommandBuffer graphics_cb,
                                                  VkSemaphore image_available,
                                                  VkSemaphore render_finished,
@@ -879,7 +879,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
 }
 
 
-void VulkanEngine::Resize()
+void GraphicsSystem::Resize()
 {
     RECT rect;
     int new_width;
@@ -906,7 +906,7 @@ void VulkanEngine::Resize()
 }   /* Resize() */
 
 
-void VulkanEngine::resize_internal()
+void GraphicsSystem::resize_internal()
 {
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -949,7 +949,7 @@ void VulkanEngine::resize_internal()
 }   /* resize() */
 
 
-void VulkanEngine::create_swapchain_targets()
+void GraphicsSystem::create_swapchain_targets()
 {
     SwapchainTargetsCreateInfo info{};
     info.device = device;
@@ -969,7 +969,7 @@ void VulkanEngine::create_swapchain_targets()
 }
 
 
-void VulkanEngine::create_frame_resources()
+void GraphicsSystem::create_frame_resources()
 {
     FrameResourcesCreateInfo info{};
     info.device = device;
@@ -985,7 +985,7 @@ void VulkanEngine::create_frame_resources()
 }
 
 
-void VulkanEngine::create_frame_descriptors()
+void GraphicsSystem::create_frame_descriptors()
 {
     FrameDescriptorsCreateInfo info{};
     info.device = device;
@@ -997,7 +997,7 @@ void VulkanEngine::create_frame_descriptors()
 }
 
 
-void VulkanEngine::create_command_pool()
+void GraphicsSystem::create_command_pool()
 {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1035,7 +1035,7 @@ void VulkanEngine::create_command_pool()
 }   /* create_command_pool() */
 
 
-void VulkanEngine::create_sync_objects()
+void GraphicsSystem::create_sync_objects()
 {
     FrameSyncCreateInfo info{};
     info.device = device;
@@ -1050,7 +1050,7 @@ void VulkanEngine::create_sync_objects()
 }
 
 
-int VulkanEngine::find_free_gpu_slot_unlocked() const
+int GraphicsSystem::find_free_gpu_slot_unlocked() const
 {
     // Triple buffer: always one free among {0,1,2} when reading and pending are distinct.
     for (int i = 0; i < kGpuSlots; ++i)
@@ -1062,15 +1062,15 @@ int VulkanEngine::find_free_gpu_slot_unlocked() const
     return (pending_slot_ >= 0) ? pending_slot_ : 0;
 }
 
-void VulkanEngine::submit_frame(const FrameSubmit& frame)
+void GraphicsSystem::submit_frame(const FrameSubmit& frame)
 {
     publish_frame(frame, {}, {}, {});
 }
 
-void VulkanEngine::publish_frame(const FrameSubmit& frame,
+void GraphicsSystem::publish_frame(const FrameSubmit& frame,
                                  const std::vector<std::string>& pick_map,
                                  const std::vector<std::string>& confirmed_tip_hashes,
-                                 const std::vector<std::string>& incomplete_trace_hashes)
+                                 const std::vector<std::string>& incomplete_hashes)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1085,12 +1085,12 @@ void VulkanEngine::publish_frame(const FrameSubmit& frame,
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
     slot.confirmed_tip_hashes = confirmed_tip_hashes;
-    slot.incomplete_trace_hashes = incomplete_trace_hashes;
+    slot.incomplete_hashes = incomplete_hashes;
 
     pending_slot_ = write;
 }
 
-bool VulkanEngine::apply_published_frame()
+bool GraphicsSystem::apply_published_frame()
 {
     int slot_idx = -1;
     {
@@ -1110,12 +1110,12 @@ bool VulkanEngine::apply_published_frame()
 
     pick_id_to_hash_ = slot.pick_map;
     sobel_tip_hashes_ = slot.confirmed_tip_hashes;
-    sobel_incomplete_hashes_ = slot.incomplete_trace_hashes;
+    sobel_incomplete_hashes_ = slot.incomplete_hashes;
     gpu_frame_seq_ = slot.client_seq;
     return true;
 }
 
-void VulkanEngine::publish_ui_snapshot(UiSnapshot snap)
+void GraphicsSystem::publish_ui_snapshot(UiSnapshot snap)
 {
     std::lock_guard<std::mutex> lock(ui_snap_mutex_);
     if (snap.seq == 0)
@@ -1125,13 +1125,13 @@ void VulkanEngine::publish_ui_snapshot(UiSnapshot snap)
     ui_snap_ = std::move(snap);
 }
 
-UiSnapshot VulkanEngine::copy_ui_snapshot() const
+UiSnapshot GraphicsSystem::copy_ui_snapshot() const
 {
     std::lock_guard<std::mutex> lock(ui_snap_mutex_);
     return ui_snap_;
 }
 
-void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
+void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                          VkPrimitiveTopology topology, bool defer_present)
 {
     FrameRecordParams rp{};
@@ -1227,7 +1227,7 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
 }   /* record_command_buffer() */
 
 
-void VulkanEngine::cleanup()
+void GraphicsSystem::cleanup()
 {
     vkDeviceWaitIdle(device);
 
@@ -1288,19 +1288,19 @@ void VulkanEngine::cleanup()
     destroy_instance(instance);
 }
 
-IBlockvizEngine* create_blockviz_engine()
+IBlockvizEngine* create_graphics_system()
 {
-    return new VulkanEngine();
+    return new GraphicsSystem();
 }
 
-void destroy_blockviz_engine(IBlockvizEngine* engine)
+void destroy_graphics_system(IBlockvizEngine* graphics)
 {
-    delete engine;
+    delete graphics;
 }
 
 IRenderEngine* create_vulkan_engine()
 {
-    return create_blockviz_engine();
+    return create_graphics_system();
 }
 
 void destroy_render_engine(IRenderEngine* engine)

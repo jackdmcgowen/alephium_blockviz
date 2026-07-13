@@ -25,15 +25,9 @@
     <ClCompile Include="..\imgui\imgui_draw.cpp" />
     <ClCompile Include="..\imgui\imgui_tables.cpp" />
     <ClCompile Include="..\imgui\imgui_widgets.cpp" />
-    <ClCompile Include="..\src\commands.c" />
     <ClCompile Include="..\src\config.c" />
     <ClCompile Include="..\src\domain\block_graph.cpp" />
     <ClCompile Include="..\src\domain\block_scene.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\alph_detail_store.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\main_chain_cache.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\alephium_adapter.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\block_fetch_pool.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\network_poller.cpp" />
     <ClCompile Include="..\src\domain\layout.cpp" />
     <ClCompile Include="..\src\app\blockflow_overlay.cpp" />
     <ClCompile Include="..\src\app\scene_presenter.cpp" />
@@ -41,7 +35,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\alph_block.hpp" />
-    <ClInclude Include="..\src\commands.h" />
     <ClInclude Include="..\src\config.h" />
     <ClInclude Include="..\src\app\app_identity.hpp" />
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
@@ -52,12 +45,7 @@
     <ClInclude Include="..\src\domain\block_graph.hpp" />
     <ClInclude Include="..\src\domain\block_scene.hpp" />
     <ClInclude Include="..\src\domain\layout.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\network_poller.hpp" />
-    <!-- Public engine API only (no Vulkan headers) -->
+    <!-- Public engine API only (no Vulkan / curl sources) -->
     <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
   </ItemGroup>
@@ -67,6 +55,9 @@
     </ProjectReference>
     <ProjectReference Include="graphics.vcxproj">
       <Project>{6d69b7f2-ed37-4eae-af2a-0abeef80b4af}</Project>
+    </ProjectReference>
+    <ProjectReference Include="network.vcxproj">
+      <Project>{8F3A2B1C-9D4E-4F5A-A6B7-C8D9E0F1A2B3}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
@@ -143,8 +134,8 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
@@ -166,8 +157,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
