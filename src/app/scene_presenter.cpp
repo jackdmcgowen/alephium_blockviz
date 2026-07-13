@@ -365,21 +365,47 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
 
     {
-        std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
+        // Orange: any drawn block whose deps[] is not fully present in the live pool.
+        // (Missing dep = not in this frame's live graph / positions.)
         std::unordered_set<std::string> incomplete_set;
-        for (const auto& h : scene_.incomplete_trace_ids_locked())
+        for (const auto& h : out.pick_map)
         {
-            if (!pick_set.count(h))
+            auto d = scene_.detail_store().get(h);
+            if (!d || d->deps.empty())
+                continue;
+            bool missing = false;
+            for (const std::string& dep : d->deps)
+            {
+                if (dep.empty())
+                    continue;
+                if (live_nodes.count(dep) == 0)
+                {
+                    missing = true;
+                    break;
+                }
+            }
+            if (!missing)
                 continue;
             incomplete_set.insert(h);
-            out.incomplete_trace_hashes.push_back(h);
-            if (out.incomplete_trace_hashes.size() >= 32)
-                break;
+            if (out.incomplete_trace_hashes.size() < 32)
+                out.incomplete_trace_hashes.push_back(h);
         }
-        // Green confirmed tips — not if they still have a broken same-chain dep.
+
+        // Green: confirmed frontier tips that have all deps in the pool.
         for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
-            if (!pick_set.count(h) || incomplete_set.count(h))
+            if (incomplete_set.count(h))
+                continue;
+            bool in_pick = false;
+            for (const auto& p : out.pick_map)
+            {
+                if (p == h)
+                {
+                    in_pick = true;
+                    break;
+                }
+            }
+            if (!in_pick)
                 continue;
             out.confirmed_tip_hashes.push_back(h);
             if (out.confirmed_tip_hashes.size() >= 32)
