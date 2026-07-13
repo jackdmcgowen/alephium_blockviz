@@ -68,15 +68,20 @@ private:
     // is_main on the tip only; offline flood in-graph deps within lookback.
     void confirm_seed_(const SeedJob& seed);
     // Offline same-chain main trace: mark tip + in-graph deps on the same
-    // chainFrom->chainTo lane, at/above lookback floor (no network).
+    // chainFrom->chainTo lane, at/above lookback floor (no network). Live pool only.
     int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
+    // force=true after a newly proven tip; force=false skips re-walk when already traced.
+    int maybe_flood_offline_(const std::string& main_hash, uint32_t lane, int height,
+                             bool force);
+    bool lane_needs_reflood_(uint32_t lane) const;
     // Fetch only for a missing dep of an already-proven main tip (broken link).
     bool fetch_and_admit_(const std::string& hash);
     void replace_non_main_(const SeedJob& job);
     void verify_uncle_(const std::string& uncle_hash, int parent_from, int parent_to,
                        int parent_height);
     void enqueue_uncles_from_block_(const AlphBlock& alph);
-    void label_all_confirmed_tip_ancestors_();
+    // Only re-flood lanes that need it (camera unlock / never traced).
+    void label_tips_needing_reflood_();
     void refresh_lookback_floors_();
     // Effective floor = max(base_floor - camera_extra, earliest_traced) rules applied in flood.
     bool height_in_lookback_(uint32_t lane, int height) const;

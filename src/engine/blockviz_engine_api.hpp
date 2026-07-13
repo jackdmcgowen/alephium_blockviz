@@ -39,10 +39,12 @@ struct FrameSourceOutput
     glm::vec3 look_target_pos{ 0.f };
     UiSnapshot ui{};
 
-    // Confirmed tip hashes still present in this frame's pick_map (frustum-culled out = omitted).
-    // Engine maps hash → instance index for multi-draw Sobel depth (green).
+    // Confirmed solid tips from the live pool that also have an instance this frame.
+    // Pool membership/confirmed state is independent of frustum cull; missing instance
+    // only means no green Sobel index this frame (tip remains confirmed in the pool).
     std::vector<std::string> confirmed_tip_hashes;
-    // Blocks whose same-chain dep is missing from the initial set (orange Sobel).
+    // Live-pool blocks with any deps[] entry missing from the graph (orange Sobel),
+    // subset that has an instance this frame.
     std::vector<std::string> incomplete_trace_hashes;
 };
 

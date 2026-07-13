@@ -270,8 +270,8 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
-    // Same-chain main trace: follow same-lane deps within the (camera-extended)
-    // lookback floor. Terminate at already-confirmed nodes (earliest traced).
+    // Same-chain main trace over the *live pool* (graph + detail), never the
+    // render/cull set. No HTTP: missing pool deps stay missing (orange in presenter).
     if (main_hash.empty() || budget <= 0)
         return 0;
 
@@ -335,8 +335,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (!detail)
             continue;
 
-        // Orange Sobel is decided on the render thread (any dep missing from pool).
-        // Flood only walks same-chain deps that are already live.
+        // Flood only walks same-chain deps already in the live pool.
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty() || !seen.insert(dep).second)
@@ -370,11 +369,38 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
     return marked;
 }
 
-void AlephiumAdapter::label_all_confirmed_tip_ancestors_()
+bool AlephiumAdapter::lane_needs_reflood_(uint32_t lane) const
 {
-    // Per-lane tip: same-chain offline main trace only.
+    if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+        return false;
+    // Never traced on this lane, or camera unlocked below previous earliest.
+    if (earliest_traced_height_[lane] == INT_MAX)
+        return true;
+    return earliest_traced_height_[lane] > effective_lookback_floor_(lane);
+}
+
+int AlephiumAdapter::maybe_flood_offline_(const std::string& main_hash, uint32_t lane,
+                                          int height, bool force)
+{
+    if (main_hash.empty())
+        return 0;
+    if (!force)
+    {
+        // Skip pure re-walk: lane already traced to floor and tip height already covered.
+        const int ch = scene_.confirmed_height(lane);
+        if (!lane_needs_reflood_(lane) && height >= 0 && ch >= height)
+            return 0;
+    }
+    return flood_confirm_deps_offline_(main_hash, kMaxFloodPerSeed);
+}
+
+void AlephiumAdapter::label_tips_needing_reflood_()
+{
+    // Per-lane confirmed tip: offline flood only when camera unlock / incomplete cover.
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
     {
+        if (!lane_needs_reflood_(static_cast<uint32_t>(lane)))
+            continue;
         const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
         if (tip.empty())
             continue;
@@ -411,10 +437,24 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
     uncle_queued_.erase(uncle_hash);
     if (uncle_hash.empty())
         return;
+
+    // Already proven not-main: if it later appears in the live pool, remove it.
+    if (proven_not_main_.count(uncle_hash))
+    {
+        if (scene_.graph().contains(uncle_hash))
+        {
+            std::printf("[adapter] uncle previously not-main now live %s — remove\n",
+                        uncle_hash.c_str());
+            scene_.remove_block(uncle_hash);
+            ++stats_uncles_removed_;
+            ++stats_removed_;
+        }
+        return;
+    }
+
     ++stats_uncles_checked_;
 
-    // Independent of tip seeds: is_main only (no block fetch).
-    // Orphan policy: not main AND height behind main-chain tip on that lane → remove.
+    // Live pool only — no fetch. Not-main uncles in the pool are removed.
     auto node = scene_.graph().get(uncle_hash);
     const int from = node ? static_cast<int>(node->group_from) : parent_from;
     const int to = node ? static_cast<int>(node->group_to) : parent_to;
@@ -463,31 +503,22 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
         return;
     }
 
-    // Not on main chain. Remove if live and behind the main tip (orphaned uncle).
-    if (node && behind_tip)
-    {
-        std::printf("[adapter] uncle orphaned (not main, h=%d < tip %d) %s — remove\n",
-                    height, tip_h, uncle_hash.c_str());
-        scene_.remove_block(uncle_hash);
-        proven_not_main_.insert(uncle_hash);
-        ++stats_uncles_removed_;
-        ++stats_removed_;
-        return;
-    }
-
-    // Not main and not behind tip (or not live): drop if live anyway (ghost uncle).
+    // Not on main chain.
+    proven_not_main_.insert(uncle_hash);
     if (node)
     {
-        std::printf("[adapter] uncle NOT main %s — remove\n", uncle_hash.c_str());
+        // Remove from live pool (graph + detail), independent of render/cull.
+        if (behind_tip)
+            std::printf("[adapter] uncle orphaned (not main, h=%d < tip %d) %s — remove\n",
+                        height, tip_h, uncle_hash.c_str());
+        else
+            std::printf("[adapter] uncle NOT main %s — remove from pool\n",
+                        uncle_hash.c_str());
         scene_.remove_block(uncle_hash);
-        proven_not_main_.insert(uncle_hash);
         ++stats_uncles_removed_;
         ++stats_removed_;
     }
-    else
-    {
-        proven_not_main_.insert(uncle_hash);
-    }
+    // Not in pool: remember not-main so a later admit is dropped immediately.
 }
 
 void AlephiumAdapter::replace_non_main_(const SeedJob& job)
@@ -546,30 +577,33 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 
     main_chain_cache_.mark_main(main_hash);
     mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
-    flood_confirm_deps_offline_(main_hash, kMaxFloodPerSeed);
+    const uint32_t mlane = lane_of(job.from, job.to);
+    const int m = maybe_flood_offline_(main_hash, mlane, job.height, /*force=*/true);
     ++stats_replaced_;
     ++stats_verified_ok_;
     if (reselect)
         engine_.set_selection(main_hash);
-    std::printf("[adapter] replaced with main %s [%d->%d] h=%d\n",
-                main_hash.c_str(), job.from, job.to, job.height);
+    std::printf("[adapter] replaced with main %s [%d->%d] h=%d flood_marked=%d\n",
+                main_hash.c_str(), job.from, job.to, job.height, m);
 }
 
 void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
 {
     // Tip-only verification — never walk the ancestor chain with is_main.
+    const uint32_t lane = lane_of(seed.from, seed.to);
+
     if (main_chain_cache_.is_cached_main(seed.hash))
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
-        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        // Already known main: only re-flood if lane incomplete / camera unlocked.
+        maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/false);
         ++stats_verified_ok_;
         return;
     }
 
     if (!scene_.graph().contains(seed.hash))
-        return; // nothing to do without a live tip cube
+        return; // nothing to do without a live tip in the pool
 
-    const uint32_t lane = lane_of(seed.from, seed.to);
     if (!height_in_lookback_(lane, seed.height))
         return;
 
@@ -577,10 +611,14 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
         main_chain_cache_.try_hashes_singleton(seed.hash, seed.from, seed.to, seed.height))
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
-        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
-        std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood\n",
-                    seed.hash.c_str(), seed.from, seed.to, seed.height);
+        if (m > 0)
+            std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood marked=%d\n",
+                        seed.hash.c_str(), seed.from, seed.to, seed.height, m);
+        else
+            std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d\n",
+                        seed.hash.c_str(), seed.from, seed.to, seed.height);
         return;
     }
 
@@ -589,10 +627,14 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     if (main_chain_cache_.query_is_main(seed.hash, &transport_ok))
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
-        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
-        std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood\n",
-                    seed.hash.c_str(), seed.from, seed.to, seed.height);
+        if (m > 0)
+            std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood marked=%d\n",
+                        seed.hash.c_str(), seed.from, seed.to, seed.height, m);
+        else
+            std::printf("[adapter] tip main %s [%d->%d] h=%d\n",
+                        seed.hash.c_str(), seed.from, seed.to, seed.height);
         return;
     }
 
@@ -666,8 +708,8 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Offline label from already-confirmed tips (in-graph only; no block fetch).
-    label_all_confirmed_tip_ancestors_();
+    // Camera unlock / incomplete cover only — not every drain cycle.
+    label_tips_needing_reflood_();
 
     // Re-seed current live tips for main-chain confirmation (does not gate poll).
     if (seed_q_.empty() && tip_pending_confirmation_())
@@ -681,10 +723,10 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
                 continue;
             if (main_chain_cache_.is_cached_main(tip))
             {
+                const int h = static_cast<int>(node->height);
                 mark_scene_confirmed_(tip, static_cast<int>(node->group_from),
-                                      static_cast<int>(node->group_to),
-                                      static_cast<int>(node->height));
-                flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+                                      static_cast<int>(node->group_to), h);
+                maybe_flood_offline_(tip, node->lane, h, /*force=*/false);
                 continue;
             }
             SeedJob job;
@@ -706,7 +748,8 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++tip_n;
     }
 
-    label_all_confirmed_tip_ancestors_();
+    // After new tip proves, only re-flood lanes that still need camera cover.
+    label_tips_needing_reflood_();
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
@@ -772,23 +815,34 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
+                // Previously proven not-main: never keep in the live pool.
+                if (proven_not_main_.count(block_hash))
+                {
+                    if (scene_.graph().contains(block_hash))
+                    {
+                        scene_.remove_block(block_hash);
+                        ++stats_uncles_removed_;
+                        ++stats_removed_;
+                    }
+                    continue;
+                }
+
                 // Admit unconfirmed; confirmation is DAG work, not assume-main.
+                // Live pool = graph + detail (not render/cull).
                 const bool added_now = scene_.add_block(block);
                 if (added_now)
                     ++added;
 
-                // Queue ghost uncles for manual is_main (remove if not main).
+                // Queue ghost uncles for manual is_main (remove from pool if not main).
                 {
                     AlphBlock alph(block);
                     if (!alph.hash.empty())
                         enqueue_uncles_from_block_(alph);
                 }
 
+                // Cached main: confirm in pool; flood only from tips (below) or new proves.
                 if (main_chain_cache_.is_cached_main(block_hash))
-                {
                     mark_scene_confirmed_(block_hash, cf, ct, h);
-                    flood_confirm_deps_offline_(block_hash, kMaxFloodPerSeed);
-                }
                 // Non-tips are labeled offline when a tip proves main — do not
                 // enqueue every admit as an is_main seed (that re-traces history).
             }
@@ -805,10 +859,11 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
             continue;
         if (main_chain_cache_.is_cached_main(tip))
         {
+            const int h = static_cast<int>(n->height);
             mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
-                                  static_cast<int>(n->group_to),
-                                  static_cast<int>(n->height));
-            flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+                                  static_cast<int>(n->group_to), h);
+            // Skip redundant offline flood when lane already covered.
+            maybe_flood_offline_(tip, n->lane, h, /*force=*/false);
             continue;
         }
         SeedJob job;

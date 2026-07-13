@@ -334,10 +334,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    // --- Canonical / incomplete classification (whole live pool) ---
+    // --- Live pool classification (graph + detail), never frustum/draw set ---
+    // live_nodes / graph_nodes = known admitted data (the pool).
     // missing_dep[h]: any deps[] entry not in the live graph.
     // solid[h]: confirmed AND no missing dep AND every same-chain dep in pool is solid
     //   (so nothing above a broken link becomes opaque until the pool is complete).
+    // Draw/cull may hide cubes without changing these truths.
     std::unordered_map<std::string, bool> missing_dep;
     missing_dep.reserve(graph_nodes.size());
     for (const GraphNode& n : graph_nodes)
@@ -395,6 +397,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     for (const GraphNode& n : graph_nodes)
         (void)is_solid(n.id);
 
+    // Pool-first incomplete set (for force-draw + orange Sobel).
+    std::vector<std::string> incomplete_pool;
+    incomplete_pool.reserve(64);
+    for (const GraphNode& n : graph_nodes)
+    {
+        if (!missing_dep[n.id])
+            continue;
+        incomplete_pool.push_back(n.id);
+        if (incomplete_pool.size() >= 64)
+            break;
+    }
+
     out.instances.reserve(layout.placements.size());
     out.pick_map.reserve(layout.placements.size());
     constexpr float kUnconfirmedAlpha = 0.38f;
@@ -420,7 +434,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Pass 1: frustum-culled draw.
+    // Pass 1: frustum-culled draw (presentation only; does not redefine the pool).
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
     {
@@ -428,8 +442,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Pass 2: force-draw blocks with missing deps so orange Sobel is visible
-    // (window-edge / broken-link blocks must not be culled away).
+    // Pass 2: force-draw pool incomplete blocks so orange Sobel has instances.
     for (const PlacedBlock& placed : layout.placements)
     {
         if (drawn.count(placed.hash))
@@ -440,24 +453,27 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Orange Sobel: any drawn block with a dep not in the live pool.
+    // Orange Sobel: pool incomplete ∩ this frame's instances (GPU needs an index).
+    // Classification is pool-first; cull only limits which get a highlight instance.
     {
-        for (const auto& h : out.pick_map)
+        std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
+        for (const auto& h : incomplete_pool)
         {
-            if (!missing_dep[h])
+            if (!pick_set.count(h))
                 continue;
             out.incomplete_trace_hashes.push_back(h);
             if (out.incomplete_trace_hashes.size() >= 64)
                 break;
         }
 
-        // Green: confirmed frontier tips that are fully solid (canonical).
+        // Green: confirmed frontier tips that are solid in the *pool*.
+        // Only skip GPU highlight if no instance this frame (not "not confirmed").
         for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
             if (missing_dep[h] || !is_solid(h))
                 continue;
-            if (drawn.count(h) == 0)
-                continue;
+            if (!pick_set.count(h))
+                continue; // still confirmed in pool; just not instanced this frame
             out.confirmed_tip_hashes.push_back(h);
             if (out.confirmed_tip_hashes.size() >= 32)
                 break;
