@@ -32,9 +32,10 @@ bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
     return true;
 }
 
-std::string tip_edge_key(const std::string& from, const std::string& to)
+// Key: listing block (owns deps[]) then dependency. Arrow draws listing → dep.
+std::string tip_edge_key(const std::string& listing, const std::string& dep)
 {
-    return std::string("t|") + from + '|' + to;
+    return std::string("t|") + listing + '|' + dep;
 }
 } // namespace
 
@@ -75,45 +76,74 @@ void ScenePresenter::tip_dep_tick_and_draw_(
     constexpr uint32_t kDepRadial = 8;
     constexpr uint32_t kMaxDepArrows = 512;
 
-    // Active tip → dep edges this frame.
+    // Active tip listing → dep edges this frame (live max-height tips = cyan; frontier = green).
     std::unordered_set<std::string> active_keys;
     active_keys.reserve(64);
 
     struct ActiveEdge
     {
         std::string key;
-        std::string from;
-        std::string to;
-        glm::vec3 from_pos{};
-        glm::vec3 to_pos{};
+        std::string listing; // block that owns deps[]
+        std::string dep;
+        glm::vec3 from_pos{}; // listing
+        glm::vec3 to_pos{};   // dependency
         int stagger_i = 0;
+        bool on_frontier = false; // sequential confirmed cursor tip
     };
     std::vector<ActiveEdge> active;
     active.reserve(64);
 
+    // Frontier hashes (sequential H_c) — green arrows + Sobel.
+    // Live max-height tips that are not on the frontier stay cyan.
+    // IMPORTANT: frontier is often behind max-height tip; always include frontier listings.
+    std::unordered_set<std::string> frontier_set;
+    {
+        const auto frontier = scene_.confirmed_frontier_ids_locked();
+        frontier_set.insert(frontier.begin(), frontier.end());
+    }
+
+    std::vector<NodeId> listing_ids;
+    listing_ids.reserve(32);
+    {
+        std::unordered_set<std::string> seen;
+        for (const NodeId& id : scene_.confirmed_frontier_ids_locked())
+        {
+            if (seen.insert(id).second)
+                listing_ids.push_back(id);
+        }
+        for (const NodeId& id : scene_.tip_ids())
+        {
+            if (seen.insert(id).second)
+                listing_ids.push_back(id);
+        }
+    }
+
     int tip_stagger_base = 0;
-    for (const NodeId& tip_hash : scene_.tip_ids())
+    for (const NodeId& tip_hash : listing_ids)
     {
         auto d = scene_.detail_store().get(tip_hash);
         if (!d)
             continue;
-        auto to_it = positions.find(tip_hash);
-        if (to_it == positions.end())
+        auto listing_it = positions.find(tip_hash);
+        if (listing_it == positions.end())
             continue;
 
+        const bool on_frontier = frontier_set.count(tip_hash) != 0;
         int stagger_i = 0;
         for (const std::string& dep_hash : d->deps)
         {
-            auto from_it = positions.find(dep_hash);
-            if (from_it == positions.end())
+            auto dep_it = positions.find(dep_hash);
+            if (dep_it == positions.end())
                 continue;
             ActiveEdge e;
-            e.key = tip_edge_key(dep_hash, tip_hash);
-            e.from = dep_hash;
-            e.to = tip_hash;
-            e.from_pos = from_it->second;
-            e.to_pos = to_it->second;
+            e.key = tip_edge_key(tip_hash, dep_hash);
+            e.listing = tip_hash;
+            e.dep = dep_hash;
+            // Arrow grows from listing block toward each dependency.
+            e.from_pos = listing_it->second;
+            e.to_pos = dep_it->second;
             e.stagger_i = tip_stagger_base + stagger_i++;
+            e.on_frontier = on_frontier;
             active_keys.insert(e.key);
             active.push_back(std::move(e));
         }
@@ -131,8 +161,8 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.base_alpha = kActiveArrowColor.a;
         anim.tip_scale = 1.f;
 
-        // Cyan→green blend toward scene confirmation of tip endpoint (mutex held by prepare).
-        const bool conf = scene_.is_confirmed_locked(e.to);
+        // Green when listing tip is the sequential confirmed frontier (not mere bag membership).
+        const bool conf = e.on_frontier;
         if (conf != anim.tip_confirmed)
         {
             anim.tip_confirmed = conf;
@@ -184,20 +214,20 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         const std::string& key = it->first;
         DepArrowAnim& anim = it->second;
 
-        // Parse from|to from key "t|from|to"
-        std::string from, to;
+        // Parse listing|dep from key "t|listing|dep"
+        std::string listing, dep;
         {
             const size_t p0 = key.find('|');
             const size_t p1 = (p0 == std::string::npos) ? std::string::npos : key.find('|', p0 + 1);
             if (p0 != std::string::npos && p1 != std::string::npos)
             {
-                from = key.substr(p0 + 1, p1 - p0 - 1);
-                to = key.substr(p1 + 1);
+                listing = key.substr(p0 + 1, p1 - p0 - 1);
+                dep = key.substr(p1 + 1);
             }
         }
 
-        const bool live = !from.empty() && !to.empty() &&
-                          live_nodes.count(from) && live_nodes.count(to);
+        const bool live = !listing.empty() && !dep.empty() &&
+                          live_nodes.count(listing) && live_nodes.count(dep);
 
         if (!live)
         {
@@ -329,9 +359,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(placed.hash);
     }
 
-    // Confirmed tips ∩ this frame's pick_map (frustum-culled tips omitted). Cap 32.
+    // Sequential confirmed frontier ∩ pick_map (green Sobel). Cap 32.
     {
-        const auto conf_tips = scene_.confirmed_tip_ids_locked();
+        const auto conf_tips = scene_.confirmed_frontier_ids_locked();
         std::unordered_set<std::string> conf_set(conf_tips.begin(), conf_tips.end());
         for (const auto& h : out.pick_map)
         {
@@ -388,20 +418,21 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const float ghost_half = 1.0f;
 
         auto draw_selection_deps = [&](const AlphBlock& block) {
-            auto to_it = block_positions.find(block.hash);
-            if (to_it == block_positions.end())
+            auto listing_it = block_positions.find(block.hash);
+            if (listing_it == block_positions.end())
                 return;
-            const glm::vec3& to_pos = to_it->second;
+            const glm::vec3& listing_pos = listing_it->second;
             const int parent_lane = block.chain_idx();
             int missing_i = 0;
             int stagger_i = 0;
 
             for (const std::string& dep_hash : block.deps)
             {
-                auto from_it = block_positions.find(dep_hash);
-                if (from_it != block_positions.end())
+                auto dep_it = block_positions.find(dep_hash);
+                if (dep_it != block_positions.end())
                 {
-                    add_eph_arrow('s', dep_hash, block.hash, from_it->second, to_pos,
+                    // Listing block → dependency.
+                    add_eph_arrow('s', block.hash, dep_hash, listing_pos, dep_it->second,
                                   kSelectionArrowColor, 1.15f, stagger_i++);
                     continue;
                 }
@@ -415,9 +446,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 glm::vec3 ghost(
                     radius * std::cos(angle),
                     radius * std::sin(angle),
-                    to_pos.z + meters_per_height);
+                    listing_pos.z + meters_per_height);
                 debug->add_wire_box(ghost, ghost_half, kMissingOutline);
-                debug->add_line(to_pos, ghost, kMissingOutline);
+                debug->add_line(listing_pos, ghost, kMissingOutline);
                 ++missing_i;
             }
         };
@@ -434,16 +465,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         {
             if (auto d = scene_.detail_store().get(in.hovered_hash))
             {
-                auto to_it = block_positions.find(d->hash);
-                if (to_it != block_positions.end())
+                auto listing_it = block_positions.find(d->hash);
+                if (listing_it != block_positions.end())
                 {
                     int stagger_i = 0;
                     for (const std::string& dep_hash : d->deps)
                     {
-                        auto from_it = block_positions.find(dep_hash);
-                        if (from_it == block_positions.end())
+                        auto dep_it = block_positions.find(dep_hash);
+                        if (dep_it == block_positions.end())
                             continue;
-                        add_eph_arrow('h', dep_hash, d->hash, from_it->second, to_it->second,
+                        add_eph_arrow('h', d->hash, dep_hash, listing_it->second, dep_it->second,
                                       kHoverArrowColor, 1.05f, stagger_i++);
                     }
                 }
@@ -464,16 +495,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     out.ui.selected_hash = in.selected_hash;
     out.ui.selected_detail = in.selected_detail;
     {
-        // HUD tip counts (mutex already held); same tip set as tip_dep / Sobel sources.
+        // HUD: live max-height tips vs sequential confirmed frontier + per-chain H_c.
         const auto tips = scene_.tip_ids();
         out.ui.tip_count = static_cast<int>(tips.size());
-        int confirmed = 0;
-        for (const NodeId& id : tips)
-        {
-            if (scene_.is_confirmed_locked(id))
-                ++confirmed;
-        }
-        out.ui.confirmed_tip_count = confirmed;
+        out.ui.confirmed_tip_count =
+            static_cast<int>(scene_.confirmed_frontier_ids_locked().size());
+        scene_.copy_confirmed_heights_locked(out.ui.confirmed_height_by_lane);
     }
     for (const RecentFeedItem& b : scene_.feed())
     {

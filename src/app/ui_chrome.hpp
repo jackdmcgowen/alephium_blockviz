@@ -7,7 +7,7 @@ namespace ui_chrome
 {
 inline constexpr float kInspectorWidth = 340.f;
 // Shorter after retiring Scroll speed slider (status row + feed).
-inline constexpr float kToolbarHeight  = 140.f;
+inline constexpr float kToolbarHeight  = 200.f;
 
 // Right-rail width for a given framebuffer width.
 inline float inspector_width(float fb_w)

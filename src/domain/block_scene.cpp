@@ -2,6 +2,16 @@
 
 #include <algorithm>
 
+BlockScene::BlockScene()
+{
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        confirmed_height_[i] = -1;
+        confirmed_hash_[i].clear();
+        cursor_inited_[i] = false;
+    }
+}
+
 bool BlockScene::add_block(cJSON* block)
 {
     AlphBlock alph_block(block);
@@ -100,14 +110,103 @@ void BlockScene::mark_confirmed(const NodeId& hash)
     mark_confirmed_unlocked_(hash);
 }
 
+void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    mark_confirmed_unlocked_(hash, lane, height);
+}
+
+void BlockScene::ensure_cursor_initialized(uint32_t lane, int start_height_minus_one)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (cursor_inited_[lane])
+        return;
+    confirmed_height_[lane] = start_height_minus_one;
+    confirmed_hash_[lane].clear();
+    cursor_inited_[lane] = true;
+}
+
+int BlockScene::confirmed_height(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return -1;
+    std::lock_guard<std::mutex> lock(mu_);
+    return confirmed_height_[lane];
+}
+
+NodeId BlockScene::confirmed_tip_hash(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return {};
+    std::lock_guard<std::mutex> lock(mu_);
+    return confirmed_hash_[lane];
+}
+
+bool BlockScene::cursor_initialized(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    return cursor_inited_[lane];
+}
+
+int BlockScene::try_advance_confirmed(uint32_t lane)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return 0;
+    std::lock_guard<std::mutex> lock(mu_);
+    return try_advance_confirmed_unlocked_(lane);
+}
+
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
 {
     return is_confirmed_unlocked_(hash);
 }
 
+std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
+{
+    std::vector<NodeId> out;
+    out.reserve(kLaneCount);
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (!confirmed_hash_[i].empty())
+            out.push_back(confirmed_hash_[i]);
+    }
+    return out;
+}
+
 std::vector<NodeId> BlockScene::confirmed_tip_ids_locked() const
 {
-    return confirmed_tip_ids_unlocked_();
+    return confirmed_frontier_ids_locked();
+}
+
+int BlockScene::confirmed_height_locked(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return -1;
+    return confirmed_height_[lane];
+}
+
+bool BlockScene::is_frontier_hash_locked(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (confirmed_hash_[i] == hash)
+            return true;
+    }
+    return false;
+}
+
+void BlockScene::copy_confirmed_heights_locked(int out[kLaneCount]) const
+{
+    for (int i = 0; i < kLaneCount; ++i)
+        out[i] = cursor_inited_[i] ? confirmed_height_[i] : -1;
 }
 
 void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
@@ -115,6 +214,31 @@ void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.insert(hash);
+
+    // Resolve lane/height from graph for cursor advance.
+    if (auto n = graph_.get(hash))
+    {
+        if (n->lane < static_cast<uint32_t>(kLaneCount) && n->height >= 0)
+            try_advance_confirmed_unlocked_(static_cast<uint32_t>(n->lane));
+    }
+}
+
+void BlockScene::mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int height)
+{
+    if (hash.empty())
+        return;
+    confirmed_.insert(hash);
+    if (lane >= static_cast<uint32_t>(kLaneCount) || !cursor_inited_[lane])
+        return;
+
+    // Fast path: exact next sequential height with known lane/height.
+    if (height == confirmed_height_[lane] + 1)
+    {
+        confirmed_height_[lane] = height;
+        confirmed_hash_[lane] = hash;
+    }
+    // Catch up any further contiguous confirmed heights already in the graph.
+    try_advance_confirmed_unlocked_(lane);
 }
 
 void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
@@ -122,6 +246,21 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.erase(hash);
+    // Monotonic: never decrease H_c. Clear hash_c if this was the frontier display hash,
+    // then re-resolve another confirmed hash at the same height if present.
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (confirmed_hash_[i] != hash)
+            continue;
+        confirmed_hash_[i].clear();
+        if (confirmed_height_[i] >= 0)
+        {
+            const NodeId alt =
+                find_confirmed_at_unlocked_(static_cast<uint32_t>(i), confirmed_height_[i]);
+            if (!alt.empty())
+                confirmed_hash_[i] = alt;
+        }
+    }
 }
 
 bool BlockScene::is_confirmed_unlocked_(const NodeId& hash) const
@@ -131,17 +270,41 @@ bool BlockScene::is_confirmed_unlocked_(const NodeId& hash) const
     return confirmed_.count(hash) != 0;
 }
 
-std::vector<NodeId> BlockScene::confirmed_tip_ids_unlocked_() const
+NodeId BlockScene::find_confirmed_at_unlocked_(uint32_t lane, int height) const
 {
-    std::vector<NodeId> tips = tip_ids();
-    std::vector<NodeId> out;
-    out.reserve(tips.size());
-    for (const NodeId& id : tips)
+    if (lane >= static_cast<uint32_t>(kLaneCount) || height < 0)
+        return {};
+
+    const std::vector<GraphNode> nodes = graph_.nodes_snapshot();
+    for (const GraphNode& n : nodes)
     {
-        if (confirmed_.count(id))
-            out.push_back(id);
+        if (n.lane != lane || n.height != height)
+            continue;
+        if (confirmed_.count(n.id))
+            return n.id;
     }
-    return out;
+    return {};
+}
+
+int BlockScene::try_advance_confirmed_unlocked_(uint32_t lane)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount) || !cursor_inited_[lane])
+        return 0;
+
+    int steps = 0;
+    // Catch up through contiguous confirmed heights (budget via caller loops too).
+    constexpr int kMaxSteps = 64;
+    while (steps < kMaxSteps)
+    {
+        const int need = confirmed_height_[lane] + 1;
+        const NodeId at = find_confirmed_at_unlocked_(lane, need);
+        if (at.empty())
+            break;
+        confirmed_height_[lane] = need;
+        confirmed_hash_[lane] = at;
+        ++steps;
+    }
+    return steps;
 }
 
 std::vector<NodeId> BlockScene::tip_ids() const

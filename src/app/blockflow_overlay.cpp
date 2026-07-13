@@ -150,7 +150,24 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::SameLine(0.f, 24.f);
     ImGui::Text("rate: %1.2f/s", bps);
     ImGui::SameLine(0.f, 24.f);
-    ImGui::Text("tips confirmed %d/%d", ui.confirmed_tip_count, ui.tip_count);
+    ImGui::Text("frontier %d / live tips %d", ui.confirmed_tip_count, ui.tip_count);
+
+    // Per-chain highest sequential confirmed height (H_c).
+    ImGui::TextDisabled("confirmed H (from->to):");
+    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
+    {
+        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+        {
+            const int lane = f * ALPH_NUM_GROUPS + t;
+            const int hc = ui.confirmed_height_by_lane[lane];
+            if (t > 0)
+                ImGui::SameLine(0.f, 10.f);
+            if (hc < 0)
+                ImGui::TextDisabled("%d->%d:—", f, t);
+            else
+                ImGui::Text("%d->%d:%d", f, t, hc);
+        }
+    }
 
     ImGui::Separator();
     ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
@@ -385,7 +402,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
         ImGui::TextDisabled(
-            "Tips: cyan unconfirmed tip deps · green confirmed tip · gold selection");
+            "Tips: cyan live tip · green confirmed frontier (H_c) · gold selection · arrows listing→deps");
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();

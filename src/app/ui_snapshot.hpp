@@ -29,8 +29,16 @@ struct UiSnapshot
     NodeId                selected_hash;
     AlphBlock             selected_detail; // full block for inspector (txns)
     int                   total_blocks = 0;
-    // Live tip frontier (max-height per lane); confirmed = main-chain tips among them.
+    // tip_count = live max-height tips; confirmed_tip_count = sequential confirmed frontier (H_c).
     int                   tip_count            = 0;
     int                   confirmed_tip_count  = 0;
+    // Highest sequential confirmed height per lane (chainFrom*4+chainTo). -1 = not initialized.
+    int                   confirmed_height_by_lane[16]{};
     uint64_t              seq                  = 0;
+
+    UiSnapshot()
+    {
+        for (int& h : confirmed_height_by_lane)
+            h = -1;
+    }
 };
