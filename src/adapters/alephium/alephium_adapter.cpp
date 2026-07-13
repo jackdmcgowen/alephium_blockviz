@@ -56,6 +56,7 @@ void AlephiumAdapter::reset_stats()
     proven_not_main_.clear();
     broken_dep_q_.clear();
     broken_dep_seen_.clear();
+    broken_dep_failed_.clear();
     uncle_q_.clear();
     uncle_queued_.clear();
 }
@@ -121,20 +122,28 @@ bool AlephiumAdapter::height_in_lookback_(uint32_t lane, int height) const
     return height >= min_lookback_height_[lane];
 }
 
+bool AlephiumAdapter::tip_pending_confirmation_() const
+{
+    for (const NodeId& tip : scene_.tip_ids())
+    {
+        auto n = scene_.graph().get(tip);
+        if (!n)
+            continue;
+        if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
+            continue;
+        if (!main_chain_cache_.is_cached_main(tip))
+            return true;
+    }
+    return false;
+}
+
 bool AlephiumAdapter::ready_for_poll() const
 {
+    // Do not block forever on intermediate / historical unconfirmed cubes —
+    // only live tips (+ uncle/broken work queues) must finish.
     if (!seed_q_.empty() || !uncle_q_.empty() || !broken_dep_q_.empty())
         return false;
-    // Only blocks within the lookback height window must be confirmed before
-    // the next poll (older live cubes do not gate).
-    for (const GraphNode& n : scene_.nodes_snapshot())
-    {
-        if (!height_in_lookback_(n.lane, static_cast<int>(n.height)))
-            continue;
-        if (!main_chain_cache_.is_cached_main(n.id))
-            return false;
-    }
-    return true;
+    return !tip_pending_confirmation_();
 }
 
 void AlephiumAdapter::enqueue_seed_(SeedJob job)
@@ -223,9 +232,11 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
-    // Pure in-graph DAG label within lookback window. No is_main.
-    // Missing dep of an in-window main-chain node → broken-link fetch only.
+    // In-graph only, within lookback. Skip already-confirmed. Missing deps of a
+    // proven main parent → one-shot broken-link fetch (not re-traced forever).
     if (main_hash.empty() || budget <= 0)
+        return 0;
+    if (!scene_.graph().contains(main_hash))
         return 0;
 
     std::queue<std::string> q;
@@ -239,51 +250,53 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         const std::string cur = std::move(q.front());
         q.pop();
 
-        if (!scene_.graph().contains(cur))
-        {
-            // Only queue fetch when discovered as a dep of a main-chain walk
-            // (caller only floods from proven main). Still no is_main on the dep.
-            if (broken_dep_seen_.insert(cur).second)
-                broken_dep_q_.push_back(cur);
-            continue;
-        }
-
         auto node = scene_.graph().get(cur);
-        auto detail = scene_.detail_store().get(cur);
-        const int from = node ? static_cast<int>(node->group_from) : 0;
-        const int to = node ? static_cast<int>(node->group_to) : 0;
-        const int height = node ? static_cast<int>(node->height) : -1;
-        const uint32_t lane = node ? node->lane : lane_of(from, to);
+        if (!node)
+            continue;
 
-        // Stop at lookback floor — do not label or walk further back.
+        const int from = static_cast<int>(node->group_from);
+        const int to = static_cast<int>(node->group_to);
+        const int height = static_cast<int>(node->height);
+        const uint32_t lane = node->lane;
+
         if (!height_in_lookback_(lane, height))
             continue;
 
-        main_chain_cache_.mark_main(cur);
-        mark_scene_confirmed_(cur, from, to, height);
-        ++marked;
-        ++stats_dag_floods_;
+        const bool already = main_chain_cache_.is_cached_main(cur);
+        if (!already)
+        {
+            main_chain_cache_.mark_main(cur);
+            mark_scene_confirmed_(cur, from, to, height);
+            ++marked;
+            ++stats_dag_floods_;
+        }
 
+        auto detail = scene_.detail_store().get(cur);
         if (!detail)
             continue;
+
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty() || !seen.insert(dep).second)
                 continue;
-            // If dep is live and below floor, skip without queuing a fetch.
+
             if (auto dn = scene_.graph().get(dep))
             {
                 if (!height_in_lookback_(dn->lane, static_cast<int>(dn->height)))
                     continue;
-            }
-            // Missing dep: only fetch if parent is still in lookback window.
-            if (!scene_.graph().contains(dep))
-            {
-                if (height_in_lookback_(lane, height) && broken_dep_seen_.insert(dep).second)
-                    broken_dep_q_.push_back(dep);
+                if (main_chain_cache_.is_cached_main(dep))
+                    continue; // already labeled — do not re-walk
+                q.push(dep);
                 continue;
             }
-            q.push(dep);
+
+            // Broken link: missing dep of an in-window main-chain parent only.
+            if (height_in_lookback_(lane, height) &&
+                !broken_dep_failed_.count(dep) &&
+                broken_dep_seen_.insert(dep).second)
+            {
+                broken_dep_q_.push_back(dep);
+            }
         }
     }
     return marked;
@@ -456,7 +469,6 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
     main_chain_cache_.mark_main(main_hash);
     mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
     flood_confirm_deps_offline_(main_hash, kMaxFloodPerSeed);
-    label_all_confirmed_tip_ancestors_();
     ++stats_replaced_;
     ++stats_verified_ok_;
     if (reselect)
@@ -467,115 +479,53 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 
 void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
 {
-    // Already resolved.
+    // Tip-only verification — never walk the ancestor chain with is_main.
     if (main_chain_cache_.is_cached_main(seed.hash))
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
-        label_all_confirmed_tip_ancestors_();
         ++stats_verified_ok_;
         return;
     }
 
-    // BFS ancestors from the seed (tip-first). For each unproven node, one is_main
-    // query. On first main hit: offline flood all of its in-graph deps (no API).
-    std::queue<std::string> walk;
-    std::unordered_set<std::string> visited;
-    walk.push(seed.hash);
-    visited.insert(seed.hash);
+    if (!scene_.graph().contains(seed.hash))
+        return; // nothing to do without a live tip cube
 
-    int walked = 0;
-    while (!walk.empty() && walked < kMaxAncestorWalk)
+    const uint32_t lane = lane_of(seed.from, seed.to);
+    if (!height_in_lookback_(lane, seed.height))
+        return;
+
+    if (seed.height >= 0 &&
+        main_chain_cache_.try_hashes_singleton(seed.hash, seed.from, seed.to, seed.height))
     {
-        const std::string cur = std::move(walk.front());
-        walk.pop();
-        ++walked;
-
-        if (main_chain_cache_.is_cached_main(cur))
-        {
-            auto n = scene_.graph().get(cur);
-            const int from = n ? static_cast<int>(n->group_from) : seed.from;
-            const int to = n ? static_cast<int>(n->group_to) : seed.to;
-            const int height = n ? static_cast<int>(n->height) : seed.height;
-            mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
-            label_all_confirmed_tip_ancestors_();
-            ++stats_verified_ok_;
-            return;
-        }
-
-        // Never request individual blocks during the seed walk — only offline
-        // flood of proven main may queue broken main-chain deps for fetch.
-        if (!scene_.graph().contains(cur))
-            continue;
-
-        auto node = scene_.graph().get(cur);
-        const int from = node ? static_cast<int>(node->group_from) : seed.from;
-        const int to = node ? static_cast<int>(node->group_to) : seed.to;
-        const int height = node ? static_cast<int>(node->height) : seed.height;
-        const uint32_t lane = node ? node->lane : lane_of(from, to);
-
-        // Do not is_main / walk below the initial lookback floor.
-        if (!height_in_lookback_(lane, height))
-            continue;
-
-        // Singleton at height is often enough without full is_main.
-        if (height >= 0 &&
-            main_chain_cache_.try_hashes_singleton(cur, from, to, height))
-        {
-            mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
-            label_all_confirmed_tip_ancestors_();
-            ++stats_verified_ok_;
-            return;
-        }
-
-        bool transport_ok = false;
-        ++stats_api_is_main_;
-        if (main_chain_cache_.query_is_main(cur, &transport_ok))
-        {
-            mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
-            label_all_confirmed_tip_ancestors_();
-            ++stats_verified_ok_;
-            std::printf("[adapter] DAG hit main %s [%d->%d] h=%d — offline flood\n",
-                        cur.c_str(), from, to, height);
-            return;
-        }
-
-        if (!transport_ok)
-        {
-            SeedJob retry = seed;
-            retry.hash = cur;
-            retry.from = from;
-            retry.to = to;
-            retry.height = height;
-            enqueue_seed_(std::move(retry));
-            return;
-        }
-
-        // Not main: if this is the original tip seed, replace; else walk deps.
-        if (cur == seed.hash)
-        {
-            replace_non_main_(seed);
-            return;
-        }
-
-        if (auto d = scene_.detail_store().get(cur))
-        {
-            for (const std::string& dep : d->deps)
-            {
-                if (dep.empty() || !visited.insert(dep).second)
-                    continue;
-                if (auto dn = scene_.graph().get(dep))
-                {
-                    if (!height_in_lookback_(dn->lane, static_cast<int>(dn->height)))
-                        continue;
-                }
-                walk.push(dep);
-            }
-        }
+        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
+        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        ++stats_verified_ok_;
+        std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood\n",
+                    seed.hash.c_str(), seed.from, seed.to, seed.height);
+        return;
     }
+
+    bool transport_ok = false;
+    ++stats_api_is_main_;
+    if (main_chain_cache_.query_is_main(seed.hash, &transport_ok))
+    {
+        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
+        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        ++stats_verified_ok_;
+        std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood\n",
+                    seed.hash.c_str(), seed.from, seed.to, seed.height);
+        return;
+    }
+
+    if (!transport_ok)
+    {
+        // Retry later (same tip only — do not expand to ancestors).
+        enqueue_seed_(seed);
+        return;
+    }
+
+    replace_non_main_(seed);
 }
 
 void AlephiumAdapter::prune_detail_store()
@@ -625,25 +575,37 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
-    // Offline pass first: label all prior blocks of confirmed tips (no network).
+    // Offline label from already-confirmed tips (in-graph only, lookback-capped).
     label_all_confirmed_tip_ancestors_();
 
-    // Repair broken dep links (one fetch each), then offline flood again.
     int n = 0;
-    while (n < max_jobs && running.load() && !broken_dep_q_.empty())
+
+    // Broken main-chain dep links: one-shot fetch, never re-queue on failure.
+    int broken_n = 0;
+    while (n < max_jobs && broken_n < kMaxBrokenFetchesPerDrain && running.load() &&
+           !broken_dep_q_.empty())
     {
         const std::string dep = std::move(broken_dep_q_.front());
         broken_dep_q_.pop_front();
         broken_dep_seen_.erase(dep);
+        if (broken_dep_failed_.count(dep))
+        {
+            ++n;
+            continue;
+        }
         if (fetch_and_admit_(dep))
         {
-            // Parent tips can now offline-flood through this link.
+            // Mark via offline flood from tips that reference this dep.
             label_all_confirmed_tip_ancestors_();
         }
+        else
+        {
+            broken_dep_failed_.insert(dep);
+        }
+        ++broken_n;
         ++n;
     }
 
-    // Manual uncle main-chain check (remove non-main uncles).
     while (n < max_jobs && running.load() && !uncle_q_.empty())
     {
         SeedJob uj = std::move(uncle_q_.front());
@@ -652,42 +614,30 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Re-seed from latest unconfirmed tips in the lookback window only.
-    if (seed_q_.empty() && !ready_for_poll())
+    // Re-seed only current live tips (never every unconfirmed historical cube).
+    if (seed_q_.empty() && tip_pending_confirmation_())
     {
-        auto seed_node = [&](const NodeId& id) {
-            auto n = scene_.graph().get(id);
-            if (!n)
-                return;
-            if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
-                return;
-            if (main_chain_cache_.is_cached_main(id))
+        for (const NodeId& tip : scene_.tip_ids())
+        {
+            auto node = scene_.graph().get(tip);
+            if (!node)
+                continue;
+            if (!height_in_lookback_(node->lane, static_cast<int>(node->height)))
+                continue;
+            if (main_chain_cache_.is_cached_main(tip))
             {
-                mark_scene_confirmed_(id, static_cast<int>(n->group_from),
-                                      static_cast<int>(n->group_to),
-                                      static_cast<int>(n->height));
-                flood_confirm_deps_offline_(id, kMaxFloodPerSeed);
-                return;
+                mark_scene_confirmed_(tip, static_cast<int>(node->group_from),
+                                      static_cast<int>(node->group_to),
+                                      static_cast<int>(node->height));
+                flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+                continue;
             }
             SeedJob job;
-            job.hash = id;
-            job.from = static_cast<int>(n->group_from);
-            job.to = static_cast<int>(n->group_to);
-            job.height = static_cast<int>(n->height);
+            job.hash = tip;
+            job.from = static_cast<int>(node->group_from);
+            job.to = static_cast<int>(node->group_to);
+            job.height = static_cast<int>(node->height);
             enqueue_seed_(std::move(job));
-        };
-
-        for (const NodeId& tip : scene_.tip_ids())
-            seed_node(tip);
-
-        if (seed_q_.empty())
-        {
-            for (const GraphNode& gn : scene_.nodes_snapshot())
-            {
-                if (main_chain_cache_.is_cached_main(gn.id))
-                    continue;
-                seed_node(gn.id);
-            }
         }
     }
 
@@ -700,7 +650,6 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Final offline sweep after seeds.
     label_all_confirmed_tip_ancestors_();
 }
 
@@ -710,8 +659,8 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 
     if (!ready_for_poll())
     {
-        std::printf("[adapter] poll skipped — DAG confirm pending (seeds=%zu unconfirmed=%zu)\n",
-                    seed_q_.size(), scene_.unconfirmed_live_count());
+        std::printf("[adapter] poll skipped — tips pending (seeds=%zu uncles=%zu broken=%zu)\n",
+                    seed_q_.size(), uncle_q_.size(), broken_dep_q_.size());
         return;
     }
 
@@ -788,34 +737,37 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                     mark_scene_confirmed_(block_hash, cf, ct, h);
                     flood_confirm_deps_offline_(block_hash, kMaxFloodPerSeed);
                 }
-                else
-                {
-                    SeedJob job;
-                    job.hash = block_hash;
-                    job.from = cf;
-                    job.to = ct;
-                    job.height = h;
-                    const size_t before = seed_q_.size();
-                    enqueue_seed_(std::move(job));
-                    if (seed_q_.size() > before)
-                        ++seeded;
-                }
+                // Non-tips are labeled offline when a tip proves main — do not
+                // enqueue every admit as an is_main seed (that re-traces history).
             }
         }
     }
 
-    // Prefer current tips as seeds (highest priority for backward search).
+    // Seed only current live tips for is_main (one API each).
     for (const NodeId& tip : scene_.tip_ids())
     {
         auto n = scene_.graph().get(tip);
         if (!n)
             continue;
+        if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
+            continue;
+        if (main_chain_cache_.is_cached_main(tip))
+        {
+            mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
+                                  static_cast<int>(n->group_to),
+                                  static_cast<int>(n->height));
+            flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+            continue;
+        }
         SeedJob job;
         job.hash = tip;
         job.from = static_cast<int>(n->group_from);
         job.to = static_cast<int>(n->group_to);
         job.height = static_cast<int>(n->height);
+        const size_t before = seed_q_.size();
         enqueue_seed_(std::move(job));
+        if (seed_q_.size() > before)
+            ++seeded;
     }
 
     std::printf("[adapter] seen=%d added=%d seeds+=%d skipped_bad=%d "
