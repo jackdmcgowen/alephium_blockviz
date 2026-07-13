@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 
 #include <glm/glm.hpp>
 
@@ -333,47 +334,17 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    out.instances.reserve(layout.placements.size());
-    out.pick_map.reserve(layout.placements.size());
-    for (const PlacedBlock& placed : layout.placements)
+    // --- Canonical / incomplete classification (whole live pool) ---
+    // missing_dep[h]: any deps[] entry not in the live graph.
+    // solid[h]: confirmed AND no missing dep AND every same-chain dep in pool is solid
+    //   (so nothing above a broken link becomes opaque until the pool is complete).
+    std::unordered_map<std::string, bool> missing_dep;
+    missing_dep.reserve(graph_nodes.size());
+    for (const GraphNode& n : graph_nodes)
     {
-        if (out.instances.size() >= kMaxInstances)
+        bool missing = false;
+        if (auto d = scene_.detail_store().get(n.id))
         {
-            std::printf("Instance buffer full\n");
-            break;
-        }
-
-        const float scale = kDefaultBlockScale;
-        const glm::vec3 half = in.instance_half_extents * scale;
-
-        if (in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
-            continue;
-
-        glm::vec3 color = placed.color;
-        if (!in.selected_hash.empty() && placed.hash == in.selected_hash)
-            color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
-        else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
-            color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
-
-        // All blocks are unconfirmed until main-chain proven — translucent until then.
-        constexpr float kUnconfirmedAlpha = 0.38f;
-        const float alpha =
-            scene_.is_confirmed_locked(placed.hash) ? 1.0f : kUnconfirmedAlpha;
-
-        out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
-        out.pick_map.push_back(placed.hash);
-    }
-
-    {
-        // Orange: any drawn block whose deps[] is not fully present in the live pool.
-        // (Missing dep = not in this frame's live graph / positions.)
-        std::unordered_set<std::string> incomplete_set;
-        for (const auto& h : out.pick_map)
-        {
-            auto d = scene_.detail_store().get(h);
-            if (!d || d->deps.empty())
-                continue;
-            bool missing = false;
             for (const std::string& dep : d->deps)
             {
                 if (dep.empty())
@@ -384,28 +355,108 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     break;
                 }
             }
-            if (!missing)
+        }
+        missing_dep[n.id] = missing;
+    }
+
+    std::unordered_map<std::string, int> solid_memo; // 0 unknown, 1 solid, -1 not
+    solid_memo.reserve(graph_nodes.size());
+    std::function<bool(const std::string&)> is_solid;
+    is_solid = [&](const std::string& h) -> bool {
+        auto it = solid_memo.find(h);
+        if (it != solid_memo.end())
+            return it->second > 0;
+        solid_memo[h] = -1; // cycle guard
+        if (!scene_.is_confirmed_locked(h))
+            return false;
+        if (missing_dep[h])
+            return false;
+        auto d = scene_.detail_store().get(h);
+        auto self = scene_.graph().get(h);
+        if (d && self)
+        {
+            for (const std::string& dep : d->deps)
+            {
+                if (dep.empty() || live_nodes.count(dep) == 0)
+                    continue;
+                auto dn = scene_.graph().get(dep);
+                if (!dn)
+                    continue;
+                // Only same-chain deps gate solidity (cross-shard may be absent by design).
+                if (dn->lane != self->lane)
+                    continue;
+                if (!is_solid(dep))
+                    return false;
+            }
+        }
+        solid_memo[h] = 1;
+        return true;
+    };
+    for (const GraphNode& n : graph_nodes)
+        (void)is_solid(n.id);
+
+    out.instances.reserve(layout.placements.size());
+    out.pick_map.reserve(layout.placements.size());
+    constexpr float kUnconfirmedAlpha = 0.38f;
+    const float scale = kDefaultBlockScale;
+
+    auto push_instance = [&](const PlacedBlock& placed, bool force) {
+        if (out.instances.size() >= kMaxInstances)
+            return false;
+        const glm::vec3 half = in.instance_half_extents * scale;
+        if (!force && in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
+            return false;
+
+        glm::vec3 color = placed.color;
+        if (!in.selected_hash.empty() && placed.hash == in.selected_hash)
+            color = glm::mix(color, glm::vec3(1.f, 1.f, 1.f), 0.45f);
+        else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
+            color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
+
+        // Solid only when main-chain confirmed and same-chain dep pool is complete.
+        const float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+        out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
+        out.pick_map.push_back(placed.hash);
+        return true;
+    };
+
+    // Pass 1: frustum-culled draw.
+    std::unordered_set<std::string> drawn;
+    for (const PlacedBlock& placed : layout.placements)
+    {
+        if (push_instance(placed, /*force=*/false))
+            drawn.insert(placed.hash);
+    }
+
+    // Pass 2: force-draw blocks with missing deps so orange Sobel is visible
+    // (window-edge / broken-link blocks must not be culled away).
+    for (const PlacedBlock& placed : layout.placements)
+    {
+        if (drawn.count(placed.hash))
+            continue;
+        if (!missing_dep[placed.hash])
+            continue;
+        if (push_instance(placed, /*force=*/true))
+            drawn.insert(placed.hash);
+    }
+
+    // Orange Sobel: any drawn block with a dep not in the live pool.
+    {
+        for (const auto& h : out.pick_map)
+        {
+            if (!missing_dep[h])
                 continue;
-            incomplete_set.insert(h);
-            if (out.incomplete_trace_hashes.size() < 32)
-                out.incomplete_trace_hashes.push_back(h);
+            out.incomplete_trace_hashes.push_back(h);
+            if (out.incomplete_trace_hashes.size() >= 64)
+                break;
         }
 
-        // Green: confirmed frontier tips that have all deps in the pool.
+        // Green: confirmed frontier tips that are fully solid (canonical).
         for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
-            if (incomplete_set.count(h))
+            if (missing_dep[h] || !is_solid(h))
                 continue;
-            bool in_pick = false;
-            for (const auto& p : out.pick_map)
-            {
-                if (p == h)
-                {
-                    in_pick = true;
-                    break;
-                }
-            }
-            if (!in_pick)
+            if (drawn.count(h) == 0)
                 continue;
             out.confirmed_tip_hashes.push_back(h);
             if (out.confirmed_tip_hashes.size() >= 32)
