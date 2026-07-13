@@ -41,6 +41,11 @@ public:
     // Preferred: lane + height known (updates highest-confirmed frontier for lane).
     void mark_confirmed(const NodeId& hash, uint32_t lane, int height);
 
+    // Incomplete same-chain dep link (missing dep in graph) — orange Sobel.
+    void mark_incomplete_trace(const NodeId& hash);
+    void clear_incomplete_trace(const NodeId& hash);
+    void clear_incomplete_traces_for_lane(uint32_t lane); // optional cleanup
+
     // Self-locking reads for adapter / HUD.
     int    confirmed_height(uint32_t lane) const;
     NodeId confirmed_tip_hash(uint32_t lane) const;
@@ -78,6 +83,8 @@ public:
     std::vector<NodeId> confirmed_tip_ids_locked() const;
     int confirmed_height_locked(uint32_t lane) const;
     bool is_frontier_hash_locked(const NodeId& hash) const;
+    // Blocks whose same-chain dep is missing (orange Sobel).
+    std::vector<NodeId> incomplete_trace_ids_locked() const;
     // Fill out[16]; -1 = no confirmed block on that lane yet.
     void copy_confirmed_heights_locked(int out[kLaneCount]) const;
 
@@ -97,6 +104,8 @@ private:
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
     std::unordered_set<NodeId> confirmed_; // guarded by mu_
+    // Live parents whose same-chain dep is missing from the graph (orange Sobel).
+    std::unordered_set<NodeId> incomplete_trace_;
     // Written by render thread; read by network adapter for lookback extension.
     std::atomic<float> camera_scroll_z_{ 0.f };
 

@@ -70,7 +70,8 @@ public:
     UiSnapshot copy_ui_snapshot() const override;
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
-                       const std::vector<std::string>& confirmed_tip_hashes) override;
+                       const std::vector<std::string>& confirmed_tip_hashes,
+                       const std::vector<std::string>& incomplete_trace_hashes) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
 
@@ -174,11 +175,12 @@ private:
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
 
-    // Mode + instance indices for async Sobel (gold selection or green confirmed tips).
+    // Mode + instance indices for async Sobel.
     struct SobelFrameRequest
     {
-        enum class Mode { SelectionGold, ConfirmedTipsGreen } mode = Mode::SelectionGold;
-        std::vector<uint32_t> instance_indices; // size 1 for selection; 1..32 for tips
+        enum class Mode { SelectionGold, ConfirmedTipsGreen, IncompleteTraceOrange } mode =
+            Mode::SelectionGold;
+        std::vector<uint32_t> instance_indices;
     };
 
     void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
@@ -195,6 +197,7 @@ private:
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
         std::vector<std::string> confirmed_tip_hashes;
+        std::vector<std::string> incomplete_trace_hashes;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
     mutable std::mutex submit_mutex_;
@@ -208,7 +211,8 @@ private:
 
     // Loaded from GpuFrameSlot in apply_published_frame (paired with pick_id_to_hash_).
     std::vector<std::string> sobel_tip_hashes_;
-    // Kill-switch: gates ConfirmedTipsGreen only; selection gold always works. Default on (K8).
+    std::vector<std::string> sobel_incomplete_hashes_;
+    // Kill-switch: gates tip/incomplete Sobel; selection gold always works. Default on.
     bool visualize_confirmed_tips_ = true;
 
     mutable std::mutex ui_snap_mutex_;

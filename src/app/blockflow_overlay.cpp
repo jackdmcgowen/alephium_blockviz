@@ -402,7 +402,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
         ImGui::TextDisabled(
-            "Unconfirmed cubes translucent · green Sobel on confirmed tip (shifts with H_c) · gold selection");
+            "Translucent=unconfirmed · green tip · orange=missing same-chain dep · gold selection");
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();

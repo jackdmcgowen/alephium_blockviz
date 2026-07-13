@@ -59,15 +59,11 @@ void NetworkPoller::thread_main()
     while (running_)
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-        // Never poll blockflow until every currently live block is confirmed
-        // (or removed as non-main) and the verify queue is empty.
-        if (adapter_.ready_for_poll() &&
-            now - last_poll_ts >= adapter_.poll_interval_ms())
-        {
+        // Poll on interval regardless of confirmation state (unconfirmed admits OK).
+        if (now - last_poll_ts >= adapter_.poll_interval_ms())
             adapter_.poll_once(last_poll_ts);
-        }
 
-        // Prefer draining confirmation work over admitting more blocks.
+        // Background: tip is_main + offline same-chain flood (does not gate poll).
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
         for (int i = 0; i < 10 && running_; ++i)

@@ -73,6 +73,7 @@ bool BlockScene::remove_block(const std::string& hash)
     graph_.apply(delta);
     detail_store_.remove(hash);
     erase_confirmed_unlocked_(hash);
+    incomplete_trace_.erase(hash);
 
     feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
                                [&](const RecentFeedItem& b) { return b.hash == hash; }),
@@ -94,6 +95,38 @@ void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
         return;
     std::lock_guard<std::mutex> lock(mu_);
     mark_confirmed_unlocked_(hash, lane, height);
+    // Confirmed nodes are no longer "incomplete" endpoints.
+    incomplete_trace_.erase(hash);
+}
+
+void BlockScene::mark_incomplete_trace(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (graph_.contains(hash))
+        incomplete_trace_.insert(hash);
+}
+
+void BlockScene::clear_incomplete_trace(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    incomplete_trace_.erase(hash);
+}
+
+void BlockScene::clear_incomplete_traces_for_lane(uint32_t lane)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    for (auto it = incomplete_trace_.begin(); it != incomplete_trace_.end(); )
+    {
+        auto n = graph_.get(*it);
+        if (!n || n->lane == lane)
+            it = incomplete_trace_.erase(it);
+        else
+            ++it;
+    }
 }
 
 int BlockScene::confirmed_height(uint32_t lane) const
@@ -140,6 +173,18 @@ std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
 std::vector<NodeId> BlockScene::confirmed_tip_ids_locked() const
 {
     return confirmed_frontier_ids_locked();
+}
+
+std::vector<NodeId> BlockScene::incomplete_trace_ids_locked() const
+{
+    std::vector<NodeId> out;
+    out.reserve(incomplete_trace_.size());
+    for (const NodeId& id : incomplete_trace_)
+    {
+        if (graph_.contains(id))
+            out.push_back(id);
+    }
+    return out;
 }
 
 int BlockScene::confirmed_height_locked(uint32_t lane) const
@@ -202,6 +247,7 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.erase(hash);
+    incomplete_trace_.erase(hash);
 
     for (int i = 0; i < kLaneCount; ++i)
     {

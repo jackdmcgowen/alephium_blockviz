@@ -40,8 +40,10 @@ struct FrameSourceOutput
     UiSnapshot ui{};
 
     // Confirmed tip hashes still present in this frame's pick_map (frustum-culled out = omitted).
-    // Engine maps hash → instance index for multi-draw Sobel depth.
+    // Engine maps hash → instance index for multi-draw Sobel depth (green).
     std::vector<std::string> confirmed_tip_hashes;
+    // Blocks whose same-chain dep is missing from the initial set (orange Sobel).
+    std::vector<std::string> incomplete_trace_hashes;
 };
 
 // Host implements; engine calls prepare() each frame on the render thread.
@@ -74,10 +76,11 @@ public:
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;
     virtual UiSnapshot copy_ui_snapshot() const = 0;
 
-    // Render-loop path: instances + pick map + confirmed tips (extends IRenderEngine::submit_frame)
+    // Render-loop path: instances + pick map + sobel hash lists
     virtual void publish_frame(const FrameSubmit& frame,
                                const std::vector<std::string>& pick_map,
-                               const std::vector<std::string>& confirmed_tip_hashes) = 0;
+                               const std::vector<std::string>& confirmed_tip_hashes,
+                               const std::vector<std::string>& incomplete_trace_hashes) = 0;
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;

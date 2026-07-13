@@ -533,7 +533,8 @@ void VulkanEngine::render_loop()
             submit.instance_count = fout.instances.size();
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes);
+            publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes,
+                          fout.incomplete_trace_hashes);
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -548,7 +549,7 @@ void VulkanEngine::render_loop()
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             // Empty frame-source: clear tips for this frame (paired with empty pick_map).
-            publish_frame(submit, frame_pick_map, {});
+            publish_frame(submit, frame_pick_map, {}, {});
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
@@ -644,31 +645,43 @@ void VulkanEngine::render()
             }
         }
 
+        auto resolve_hashes = [&](const std::vector<std::string>& hashes,
+                                  size_t cap) {
+            std::vector<uint32_t> idxs;
+            idxs.reserve(std::min(hashes.size(), cap));
+            for (const std::string& h : hashes)
+            {
+                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
+                {
+                    if (pick_id_to_hash_[i] == h)
+                    {
+                        idxs.push_back(static_cast<uint32_t>(i));
+                        break;
+                    }
+                }
+                if (idxs.size() >= cap)
+                    break;
+            }
+            return idxs;
+        };
+
         if (selected_instance != ~0u)
         {
             sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
             sobel_req.instance_indices = { selected_instance };
             want_sobel = true;
         }
+        else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
+        {
+            // Incomplete same-chain deps (window edge) — orange until more data loads.
+            sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
+            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_, 32);
+            want_sobel = !sobel_req.instance_indices.empty();
+        }
         else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
         {
-            constexpr size_t kMaxTipSobel = 32;
             sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
-            sobel_req.instance_indices.reserve(
-                std::min(sobel_tip_hashes_.size(), kMaxTipSobel));
-            for (const std::string& h : sobel_tip_hashes_)
-            {
-                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
-                {
-                    if (pick_id_to_hash_[i] == h)
-                    {
-                        sobel_req.instance_indices.push_back(static_cast<uint32_t>(i));
-                        break;
-                    }
-                }
-                if (sobel_req.instance_indices.size() >= kMaxTipSobel)
-                    break;
-            }
+            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_, 32);
             want_sobel = !sobel_req.instance_indices.empty();
         }
     }
@@ -811,11 +824,14 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
         ri.pColorAttachments = &color;
         vkCmdBeginRendering(overlay_cb, &ri);
 
-        static const float kGoldHighlight[4]  = { 1.0f, 0.85f, 0.15f, 1.35f };
-        static const float kGreenHighlight[4] = { 0.25f, 0.95f, 0.40f, 1.35f };
-        const float* highlight = (req.mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)
-                                     ? kGreenHighlight
-                                     : kGoldHighlight;
+        static const float kGoldHighlight[4]   = { 1.0f, 0.85f, 0.15f, 1.35f };
+        static const float kGreenHighlight[4]  = { 0.25f, 0.95f, 0.40f, 1.35f };
+        static const float kOrangeHighlight[4] = { 1.0f, 0.45f, 0.08f, 1.35f };
+        const float* highlight = kGoldHighlight;
+        if (req.mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)
+            highlight = kGreenHighlight;
+        else if (req.mode == SobelFrameRequest::Mode::IncompleteTraceOrange)
+            highlight = kOrangeHighlight;
         sobel_.record_overlay(overlay_cb, width, height, highlight);
         vkCmdEndRendering(overlay_cb);
 
@@ -1048,12 +1064,13 @@ int VulkanEngine::find_free_gpu_slot_unlocked() const
 
 void VulkanEngine::submit_frame(const FrameSubmit& frame)
 {
-    publish_frame(frame, {}, {});
+    publish_frame(frame, {}, {}, {});
 }
 
 void VulkanEngine::publish_frame(const FrameSubmit& frame,
                                  const std::vector<std::string>& pick_map,
-                                 const std::vector<std::string>& confirmed_tip_hashes)
+                                 const std::vector<std::string>& confirmed_tip_hashes,
+                                 const std::vector<std::string>& incomplete_trace_hashes)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1068,6 +1085,7 @@ void VulkanEngine::publish_frame(const FrameSubmit& frame,
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
     slot.confirmed_tip_hashes = confirmed_tip_hashes;
+    slot.incomplete_trace_hashes = incomplete_trace_hashes;
 
     pending_slot_ = write;
 }
@@ -1092,6 +1110,7 @@ bool VulkanEngine::apply_published_frame()
 
     pick_id_to_hash_ = slot.pick_map;
     sobel_tip_hashes_ = slot.confirmed_tip_hashes;
+    sobel_incomplete_hashes_ = slot.incomplete_trace_hashes;
     gpu_frame_seq_ = slot.client_seq;
     return true;
 }

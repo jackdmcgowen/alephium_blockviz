@@ -364,15 +364,22 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(placed.hash);
     }
 
-    // Sequential confirmed tip (H_c frontier) ∩ pick_map → green Sobel.
-    // As H_c advances, hash_c updates and the highlight shifts to the next tip.
     {
-        const auto conf_tips = scene_.confirmed_frontier_ids_locked();
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
-        // Lane-order frontier; Sobel moves as H_c / hash_c advances.
-        for (const auto& h : conf_tips)
+        std::unordered_set<std::string> incomplete_set;
+        for (const auto& h : scene_.incomplete_trace_ids_locked())
         {
             if (!pick_set.count(h))
+                continue;
+            incomplete_set.insert(h);
+            out.incomplete_trace_hashes.push_back(h);
+            if (out.incomplete_trace_hashes.size() >= 32)
+                break;
+        }
+        // Green confirmed tips — not if they still have a broken same-chain dep.
+        for (const auto& h : scene_.confirmed_frontier_ids_locked())
+        {
+            if (!pick_set.count(h) || incomplete_set.count(h))
                 continue;
             out.confirmed_tip_hashes.push_back(h);
             if (out.confirmed_tip_hashes.size() >= 32)

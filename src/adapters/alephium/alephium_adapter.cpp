@@ -333,8 +333,12 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
         auto detail = scene_.detail_store().get(cur);
         if (!detail)
+        {
+            scene_.clear_incomplete_trace(cur);
             continue;
+        }
 
+        bool missing_same_chain_dep = false;
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty() || !seen.insert(dep).second)
@@ -348,8 +352,8 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
                     continue;
                 const int dh = static_cast<int>(dn->height);
                 if (dh >= 0 && dh < floor_h)
-                    continue;
-                // Skip re-walk of already-confirmed deps still inside old window.
+                    continue; // past beginning of unlocked window — terminate
+                // Already confirmed in previously traced band: terminate branch.
                 if (main_chain_cache_.is_cached_main(dep) &&
                     earliest != INT_MAX && dh >= earliest)
                     continue;
@@ -357,14 +361,15 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
                 continue;
             }
 
-            // Broken same-chain link only within unlocked window.
-            if (height >= floor_h &&
-                !broken_dep_failed_.count(dep) &&
-                broken_dep_seen_.insert(dep).second)
-            {
-                broken_dep_q_.push_back(dep);
-            }
+            // Missing same-chain dep within window: do NOT request the block.
+            // Mark parent incomplete (orange Sobel) until poll loads more data.
+            if (height >= floor_h)
+                missing_same_chain_dep = true;
         }
+        if (missing_same_chain_dep)
+            scene_.mark_incomplete_trace(cur);
+        else
+            scene_.clear_incomplete_trace(cur);
     }
 
     // Record earliest height labeled this run (terminate point for next flood).
@@ -650,36 +655,10 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
-    // Offline label from already-confirmed tips (in-graph only, lookback-capped).
+    // Offline label from already-confirmed tips (in-graph only; no block fetch).
     label_all_confirmed_tip_ancestors_();
 
     int n = 0;
-
-    // Broken main-chain dep links: one-shot fetch, never re-queue on failure.
-    int broken_n = 0;
-    while (n < max_jobs && broken_n < kMaxBrokenFetchesPerDrain && running.load() &&
-           !broken_dep_q_.empty())
-    {
-        const std::string dep = std::move(broken_dep_q_.front());
-        broken_dep_q_.pop_front();
-        broken_dep_seen_.erase(dep);
-        if (broken_dep_failed_.count(dep))
-        {
-            ++n;
-            continue;
-        }
-        if (fetch_and_admit_(dep))
-        {
-            // Mark via offline flood from tips that reference this dep.
-            label_all_confirmed_tip_ancestors_();
-        }
-        else
-        {
-            broken_dep_failed_.insert(dep);
-        }
-        ++broken_n;
-        ++n;
-    }
 
     while (n < max_jobs && running.load() && !uncle_q_.empty())
     {
@@ -689,7 +668,7 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Re-seed only current live tips (never every unconfirmed historical cube).
+    // Re-seed current live tips for main-chain confirmation (does not gate poll).
     if (seed_q_.empty() && tip_pending_confirmation_())
     {
         for (const NodeId& tip : scene_.tip_ids())
@@ -732,12 +711,8 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 {
     maybe_refill_selection_detail();
 
-    if (!ready_for_poll())
-    {
-        std::printf("[adapter] poll skipped — tips pending (seeds=%zu uncles=%zu broken=%zu)\n",
-                    seed_q_.size(), uncle_q_.size(), broken_dep_q_.size());
-        return;
-    }
+    // Poll always admits the latest window (unconfirmed OK). Confirmation is
+    // concurrent via drain_verify — never blocks the next poll.
 
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
     std::printf("\n[adapter] Polling blockflow from %lld to %lld\n",
