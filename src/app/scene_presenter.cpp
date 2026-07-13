@@ -463,6 +463,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     out.ui.total_blocks = scene_.total_blocks();
     out.ui.selected_hash = in.selected_hash;
     out.ui.selected_detail = in.selected_detail;
+    {
+        // HUD tip counts (mutex already held); same tip set as tip_dep / Sobel sources.
+        const auto tips = scene_.tip_ids();
+        out.ui.tip_count = static_cast<int>(tips.size());
+        int confirmed = 0;
+        for (const NodeId& id : tips)
+        {
+            if (scene_.is_confirmed_locked(id))
+                ++confirmed;
+        }
+        out.ui.confirmed_tip_count = confirmed;
+    }
     for (const RecentFeedItem& b : scene_.feed())
     {
         FeedEntry e;

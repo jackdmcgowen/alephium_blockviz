@@ -149,6 +149,8 @@ void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::Text("blocks: %d", ui.total_blocks);
     ImGui::SameLine(0.f, 24.f);
     ImGui::Text("rate: %1.2f/s", bps);
+    ImGui::SameLine(0.f, 24.f);
+    ImGui::Text("tips confirmed %d/%d", ui.confirmed_tip_count, ui.tip_count);
 
     ImGui::Separator();
     ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
@@ -382,6 +384,8 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::Spacing();
         ImGui::TextDisabled(
             "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
+        ImGui::TextDisabled(
+            "Tips: cyan unconfirmed tip deps · green confirmed tip · gold selection");
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();

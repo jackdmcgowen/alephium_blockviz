@@ -29,5 +29,8 @@ struct UiSnapshot
     NodeId                selected_hash;
     AlphBlock             selected_detail; // full block for inspector (txns)
     int                   total_blocks = 0;
-    uint64_t              seq          = 0;
+    // Live tip frontier (max-height per lane); confirmed = main-chain tips among them.
+    int                   tip_count            = 0;
+    int                   confirmed_tip_count  = 0;
+    uint64_t              seq                  = 0;
 };
