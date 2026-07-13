@@ -71,6 +71,7 @@ void AlephiumAdapter::reset_stats()
     broken_dep_failed_.clear();
     uncle_q_.clear();
     uncle_queued_.clear();
+    pending_fill_parents_.clear();
     phase_ = Phase::BootstrapPoll;
     bootstrap_poll_done_ = false;
     for (int i = 0; i < BlockScene::kLaneCount; ++i)
@@ -93,7 +94,9 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
         return;
     scene_.mark_confirmed(hash);
     ++stats_confirmed_marks_;
-    propagate_main_from_confirmed_deps_(hash);
+    const int n = enqueue_confirm_deps_(hash);
+    if (n == 0)
+        propagate_main_from_confirmed_deps_(hash);
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, int to, int height)
@@ -102,7 +105,9 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, i
         return;
     scene_.mark_confirmed(hash, lane_of(from, to), height);
     ++stats_confirmed_marks_;
-    propagate_main_from_confirmed_deps_(hash);
+    const int n = enqueue_confirm_deps_(hash);
+    if (n == 0)
+        propagate_main_from_confirmed_deps_(hash);
 }
 
 void AlephiumAdapter::propagate_main_from_confirmed_deps_(const std::string& confirmed_hash)
@@ -265,6 +270,9 @@ bool AlephiumAdapter::ready_for_poll() const
         return !bootstrap_poll_done_;
     // Gate further window polls until per-chain DFS finishes.
     if (phase_ == Phase::IdentifyTips || phase_ == Phase::DfsTrace)
+        return false;
+    // Steady: no new discovery while confirmed blocks await dep fills (no gaps).
+    if (phase_ == Phase::Steady && confirm_fills_pending_())
         return false;
     return phase_ == Phase::Steady;
 }
@@ -546,6 +554,116 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
     return false;
 }
 
+int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
+{
+    // When a block becomes confirmed, every missing dep must enter the pool
+    // before further discovery (gate via pending_fill_parents_).
+    if (parent_hash.empty())
+        return 0;
+    auto detail = scene_.detail_store().get(parent_hash);
+    if (!detail)
+        return 0;
+
+    int missing = 0;
+    for (const std::string& dep : detail->deps)
+    {
+        if (dep.empty())
+            continue;
+        if (scene_.graph().contains(dep))
+            continue;
+        if (broken_dep_failed_.count(dep) ||
+            (fetch_pool_ && fetch_pool_->is_failed(dep)))
+            continue;
+        if (enqueue_missing_dep_(dep))
+        {
+            ++missing;
+            std::printf("[adapter] confirm fill enqueue dep parent=%s\n",
+                        parent_hash.c_str());
+        }
+        else if (!scene_.graph().contains(dep))
+        {
+            // Enqueue failed (queue full) — still treat as pending if not failed forever.
+            if (!(fetch_pool_ && fetch_pool_->is_failed(dep)) &&
+                !broken_dep_failed_.count(dep))
+                ++missing;
+        }
+    }
+
+    if (missing > 0)
+    {
+        pending_fill_parents_.insert(parent_hash);
+        std::printf("[adapter] confirm fill pending parent=%s missing~=%d gate=1\n",
+                    parent_hash.c_str(), missing);
+    }
+    else
+    {
+        pending_fill_parents_.erase(parent_hash);
+    }
+    return missing;
+}
+
+bool AlephiumAdapter::confirm_fills_pending_() const
+{
+    if (!pending_fill_parents_.empty())
+        return true;
+    if (fetch_pool_ &&
+        (fetch_pool_->pending_jobs() > 0 || fetch_pool_->in_flight() > 0))
+        return true;
+    return false;
+}
+
+void AlephiumAdapter::recheck_confirm_fill_parents_()
+{
+    if (pending_fill_parents_.empty())
+        return;
+
+    std::vector<std::string> done;
+    for (const std::string& parent : pending_fill_parents_)
+    {
+        auto detail = scene_.detail_store().get(parent);
+        if (!detail)
+        {
+            done.push_back(parent);
+            continue;
+        }
+        bool still = false;
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty())
+                continue;
+            if (scene_.graph().contains(dep))
+                continue;
+            if (broken_dep_failed_.count(dep) ||
+                (fetch_pool_ && fetch_pool_->is_failed(dep)))
+                continue; // permanent hole — do not block forever
+            still = true;
+            // Re-enqueue if dropped.
+            enqueue_missing_dep_(dep);
+        }
+        if (!still)
+        {
+            done.push_back(parent);
+            propagate_main_from_confirmed_deps_(parent);
+            std::printf("[adapter] confirm fill complete parent=%s\n", parent.c_str());
+        }
+    }
+    for (const std::string& p : done)
+        pending_fill_parents_.erase(p);
+
+    // Resume DFS lanes that stopped on a hole.
+    if (!done.empty())
+    {
+        for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+        {
+            if (!dfs_stop_hash_[lane].empty())
+            {
+                dfs_active_[lane] = true;
+                dfs_done_[lane] = false;
+            }
+        }
+    }
+}
+
 void AlephiumAdapter::publish_trace_status_()
 {
     scene_.set_trace_status(static_cast<int>(phase_), trace_offset());
@@ -679,14 +797,24 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges
             }
         }
 
-        // Incomplete: stop without magenta edges (edges only for complete listings).
+        // Incomplete: if confirmed, enqueue dep fills and pause lane until resolved.
         if (any_missing)
         {
             dfs_stop_hash_[lane] = cur;
             dfs_stop_height_[lane] = height;
-            dfs_done_[lane] = true;
-            std::printf("[adapter] DFS end lane %d at h=%d (unknown dep, no fetch) %s\n",
-                        static_cast<int>(lane), height, cur.c_str());
+            if (main_chain_cache_.is_cached_main(cur))
+            {
+                const int n = enqueue_confirm_deps_(cur);
+                dfs_done_[lane] = (n == 0 && !confirm_fills_pending_());
+                std::printf("[adapter] DFS pause lane %d at h=%d (fill %d deps) %s\n",
+                            static_cast<int>(lane), height, n, cur.c_str());
+            }
+            else
+            {
+                dfs_done_[lane] = true;
+                std::printf("[adapter] DFS end lane %d at h=%d (unknown dep, not main) %s\n",
+                            static_cast<int>(lane), height, cur.c_str());
+            }
             return;
         }
 
@@ -901,9 +1029,9 @@ void AlephiumAdapter::advance_dfs_traces_()
         scene_.set_trace_edges(std::move(edges));
         publish_trace_status_();
 
-        if (all_dfs_done_())
+        if (all_dfs_done_() && !confirm_fills_pending_())
         {
-            std::printf("[adapter] DFS complete (pool-only) → Steady; "
+            std::printf("[adapter] DFS complete → Steady (fills clear); "
                         "older history only on camera unlock\n");
             scene_.clear_trace_edges();
             set_phase_(Phase::Steady);
@@ -982,8 +1110,14 @@ void AlephiumAdapter::drain_fetch_results_(int max_admits)
         cJSON_Delete(obj);
 
         if (added || scene_.graph().contains(r.hash))
+        {
             ++stats_fetch_admitted_;
+            // If this dep was main-path of a confirmed parent, free-confirm it.
+            if (main_chain_cache_.is_cached_main(r.hash))
+                mark_scene_confirmed_(r.hash);
+        }
     }
+    recheck_confirm_fill_parents_();
 }
 
 void AlephiumAdapter::enqueue_uncles_from_block_(const AlphBlock& alph)
@@ -1273,7 +1407,9 @@ void AlephiumAdapter::maybe_refill_selection_detail()
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
     maybe_refill_selection_detail();
+    // Prefer confirm-dep fills so the gate can clear and progress resumes.
     drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+    recheck_confirm_fill_parents_();
 
     const int uncle_budget = (max_jobs / 2) > 0 ? (max_jobs / 2) : 1;
     const int tip_budget = (max_jobs - uncle_budget) > 0 ? (max_jobs - uncle_budget) : 1;
@@ -1287,11 +1423,16 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Tip identify (and Steady new tips): seed is_main work.
-    if (phase_ == Phase::IdentifyTips || phase_ == Phase::Steady ||
-        phase_ == Phase::BootstrapPoll)
+    // While fills pending: still allow is_main on already-live tips (IdentifyTips),
+    // but Steady should not expand tip seeds until fills clear (no new discovery).
+    const bool fills_block_steady_seeds =
+        phase_ == Phase::Steady && confirm_fills_pending_();
+
+    if (phase_ == Phase::IdentifyTips || phase_ == Phase::BootstrapPoll ||
+        (phase_ == Phase::Steady && !fills_block_steady_seeds) ||
+        phase_ == Phase::DfsTrace)
     {
-        if (seed_q_.empty() && tip_pending_confirmation_())
+        if (seed_q_.empty() && tip_pending_confirmation_() && !fills_block_steady_seeds)
         {
             for (const NodeId& tip : scene_.tip_ids())
             {
@@ -1320,6 +1461,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         int tip_n = 0;
         while (tip_n < tip_budget && running.load())
         {
+            // IdentifyTips must finish is_main even if fills start mid-phase.
+            if (fills_block_steady_seeds)
+                break;
             SeedJob job;
             if (!pop_seed_round_robin_(job))
                 break;
@@ -1338,8 +1482,8 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         advance_dfs_traces_();
     }
 
-    // Selection detail refill only — not used for chain DFS backfill.
     drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+    recheck_confirm_fill_parents_();
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)

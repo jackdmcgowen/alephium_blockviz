@@ -511,13 +511,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Pass 2: force-draw incomplete + confirmed so Sobel has instances.
+    // Pass 2: force-draw incomplete, confirmed, and frontier tips for Sobel.
+    std::unordered_set<std::string> frontier_set;
+    for (const auto& h : scene_.confirmed_frontier_ids_locked())
+        if (!h.empty())
+            frontier_set.insert(h);
     for (const PlacedBlock& placed : layout.placements)
     {
         if (drawn.count(placed.hash))
             continue;
-        const bool force =
-            missing_dep[placed.hash] || scene_.is_confirmed_locked(placed.hash);
+        const bool force = missing_dep[placed.hash] ||
+                           scene_.is_confirmed_locked(placed.hash) ||
+                           frontier_set.count(placed.hash);
         if (!force)
             continue;
         if (push_instance(placed, /*force=*/true))
@@ -528,24 +533,22 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     {
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
 
-        // Green: frontier tip only if confirmed main (free-confirm can make tip main
-        // without is_main when referenced as dep of another confirmed tip).
+        // Green: frontier tip if confirmed main (show even while deps still filling).
         for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
             if (h.empty() || !pick_set.count(h))
                 continue;
             if (!scene_.is_confirmed_locked(h))
                 continue;
-            // Incomplete tip → orange path instead of green.
-            if (missing_dep[h])
-                continue;
             out.confirmed_tip_hashes.push_back(h);
         }
 
-        // Orange: every incomplete cube with an instance (no 32/64 product cap).
+        // Orange: incomplete non-frontier cubes (tips stay green when both apply).
+        std::unordered_set<std::string> green_set(out.confirmed_tip_hashes.begin(),
+                                                  out.confirmed_tip_hashes.end());
         for (const auto& h : incomplete_pool)
         {
-            if (!pick_set.count(h))
+            if (!pick_set.count(h) || green_set.count(h))
                 continue;
             out.incomplete_trace_hashes.push_back(h);
         }

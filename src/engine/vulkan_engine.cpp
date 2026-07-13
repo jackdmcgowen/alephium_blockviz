@@ -664,23 +664,24 @@ void VulkanEngine::render()
             return idxs;
         };
 
-        // Cubes only (not arrows). Gold > orange (all incomplete) > green (frontier tips).
+        // Cubes only (not arrows). Gold > green frontier tips > orange incomplete.
+        // Green must not be starved by a sea of missing-dep cubes.
         if (selected_instance != ~0u)
         {
             sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
             sobel_req.instance_indices = { selected_instance };
             want_sobel = true;
         }
-        else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
-        {
-            sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
-            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_);
-            want_sobel = !sobel_req.instance_indices.empty();
-        }
         else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
         {
             sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
             sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_);
+            want_sobel = !sobel_req.instance_indices.empty();
+        }
+        else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
+        {
+            sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
+            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_);
             want_sobel = !sobel_req.instance_indices.empty();
         }
     }

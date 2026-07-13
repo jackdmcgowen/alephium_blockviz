@@ -2,13 +2,10 @@
 
 // Domain/network policy for Alephium BlockFlow ingest.
 //
-// Phases: BootstrapPoll → IdentifyTips → DfsTrace (pool-only) → Steady.
-// Confirmed = tip is_main + offline flood within pool (stop at missing dep).
-// No blockhash fetch for DFS; camera lookback periods unlock large history polls
-// and resume DFS from per-lane stop points.
-//
-// Visual (presenter/engine): solid = confirmed+deps in pool; green Sobel =
-// frontier tip only; orange = missing dep; magenta arrows = complete DFS edges.
+// Phases: BootstrapPoll → IdentifyTips → DfsTrace → Steady.
+// On confirm: enqueue missing deps into pool; gate Steady poll until fills clear.
+// Free main for in-pool deps of confirmed blocks. Camera unlocks large history.
+// Visual: solid=confirmed+deps; green=frontier tip; orange=missing; magenta=DFS.
 #include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
@@ -107,13 +104,16 @@ private:
     bool tip_pending_confirmation_() const;
 
     void drain_fetch_results_(int max_admits);
-    bool enqueue_missing_dep_(const std::string& dep_hash); // selection/legacy only
+    bool enqueue_missing_dep_(const std::string& dep_hash);
+    // On confirm: enqueue missing deps; gate discovery until resolved.
+    int  enqueue_confirm_deps_(const std::string& parent_hash);
+    bool confirm_fills_pending_() const;
+    void recheck_confirm_fill_parents_();
 
-    // Phase / per-chain pool-only DFS
+    // Phase / per-chain DFS (fill deps on confirmed hole, then resume)
     void set_phase_(Phase p);
     void maybe_enter_dfs_();
     void advance_dfs_traces_();
-    // Pool-only walk; terminate at first missing dep (no fetch). Always finishes.
     void run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges_out, bool from_stop);
     bool all_dfs_done_() const;
     void maybe_camera_history_extend_();
@@ -138,6 +138,8 @@ private:
     std::deque<std::string> broken_dep_q_;
     std::unordered_set<std::string> broken_dep_seen_;
     std::unordered_set<std::string> broken_dep_failed_;
+    // Confirmed parents waiting for missing deps to enter the pool.
+    std::unordered_set<std::string> pending_fill_parents_;
     std::deque<SeedJob> uncle_q_;
     std::unordered_set<std::string> uncle_queued_;
 
