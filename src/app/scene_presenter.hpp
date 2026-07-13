@@ -38,6 +38,12 @@ private:
         bool       has_pos        = false;
         float      base_alpha     = 0.95f;
         float      tip_scale      = 1.f;
+        // Confirm color blend (0 = cyan, 1 = green). Updated only while tip-active;
+        // Fading/Gone freeze last confirm_blend_t (no re-grow on confirm).
+        bool  tip_confirmed           = false;
+        float confirm_blend_t         = 0.f;
+        float confirm_blend_from      = 0.f;
+        float confirm_blend_start_sec = -1.f; // <0 = no active blend
     };
 
     float now_sec_() const;

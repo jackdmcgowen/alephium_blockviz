@@ -13,7 +13,9 @@ namespace
 {
 float meters_per_height = static_cast<float>(ALPH_TARGET_BLOCK_SECONDS);
 
-const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);
+const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);    // cyan unconfirmed
+const glm::vec4 kConfirmedArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // green main-chain tip
+constexpr float kConfirmBlendSec = 0.35f; // cyan→green lerp duration
 const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
 const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
 
@@ -118,7 +120,8 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         tip_stagger_base += 2; // slight global cascade across tips
     }
 
-    // Admit / refresh active edges.
+    // Admit / refresh active edges (Growing/Held). Confirm blend updates only here;
+    // Fading/Gone freeze last confirm_blend_t. Never reset birth_sec for confirm.
     for (const ActiveEdge& e : active)
     {
         DepArrowAnim& anim = tip_dep_anims_[e.key];
@@ -127,6 +130,28 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.has_pos = true;
         anim.base_alpha = kActiveArrowColor.a;
         anim.tip_scale = 1.f;
+
+        // Cyan→green blend toward scene confirmation of tip endpoint (mutex held by prepare).
+        const bool conf = scene_.is_confirmed_locked(e.to);
+        if (conf != anim.tip_confirmed)
+        {
+            anim.tip_confirmed = conf;
+            anim.confirm_blend_from = anim.confirm_blend_t;
+            anim.confirm_blend_start_sec = now;
+        }
+        const float target = conf ? 1.f : 0.f;
+        if (anim.confirm_blend_start_sec >= 0.f)
+        {
+            const float u = std::clamp(
+                (now - anim.confirm_blend_start_sec) / kConfirmBlendSec, 0.f, 1.f);
+            anim.confirm_blend_t = glm::mix(anim.confirm_blend_from, target, u);
+            if (u >= 1.f)
+                anim.confirm_blend_start_sec = -1.f;
+        }
+        else
+        {
+            anim.confirm_blend_t = target;
+        }
 
         if (anim.phase == ArrowPhase::Gone || anim.phase == ArrowPhase::Fading)
         {
@@ -238,7 +263,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             }
         }
 
-        glm::vec4 color = kActiveArrowColor;
+        glm::vec4 color = glm::mix(kActiveArrowColor, kConfirmedArrowColor, anim.confirm_blend_t);
         color.a = alpha;
         debug.add_arrow(from_inset, to_inset, color,
                         tip_len * anim.tip_scale, tip_rad * anim.tip_scale,
