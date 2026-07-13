@@ -1,7 +1,7 @@
 #pragma once
 
 // Public host/adapter surface for the block visualizer engine (E6/E7).
-// No Vulkan headers. Concrete VulkanEngine is engine-lib internal.
+// No Vulkan headers. Concrete implementation (VulkanEngine) lives in graphics.lib.
 // See graphics/gpu_pub_lib.h for IRenderEngine base.
 
 #include "alph_block.hpp"

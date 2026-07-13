@@ -81,8 +81,11 @@
     <ClCompile Include="..\src\adapters\alephium\network_poller.cpp">
       <Filter>Source Files\adapters</Filter>
     </ClCompile>
-    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
-      <Filter>Source Files\imgui</Filter>
+    <ClCompile Include="..\src\adapters\alephium\block_fetch_pool.cpp">
+      <Filter>Source Files\adapters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\app\scene_presenter.cpp">
+      <Filter>Source Files\app</Filter>
     </ClCompile>
     <ClCompile Include="..\imgui\backends\imgui_impl_win32.cpp">
       <Filter>Source Files\imgui</Filter>
@@ -146,7 +149,16 @@
     <ClInclude Include="..\src\adapters\alephium\network_poller.hpp">
       <Filter>Header Files\adapters</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\engine\vulkan_engine.hpp">
+    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp">
+      <Filter>Header Files\adapters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\app\scene_presenter.hpp">
+      <Filter>Header Files\app</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\engine\engine_identity.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
   </ItemGroup>

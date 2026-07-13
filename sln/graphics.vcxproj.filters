@@ -9,70 +9,87 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111101}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\frame">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111102}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\pipelines">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111103}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\debug">
       <UniqueIdentifier>{e59f14ee-1156-4a94-9314-60cd2a6d56a8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\imgui">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111104}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111201}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\frame">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111202}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\pipelines">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111203}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\engine_api">
+      <UniqueIdentifier>{a11e0001-1111-4111-8111-111111111204}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\graphics\instance.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\device.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\engine_requirements.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\validation.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\surface.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\swapchain.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\image.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\shader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\buffer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\camera.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp">
-      <Filter>Source Files\debug</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\mesh_arena.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
+    <ClCompile Include="..\src\graphics\instance.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\device.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\engine_requirements.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\validation.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\surface.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\swapchain.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\image.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\shader.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\buffer.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\buffer_manager.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\camera.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pipeline.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\compute.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\mesh_arena.cpp"><Filter>Source Files\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp"><Filter>Source Files\debug</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\vulkan_engine.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_sync.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_resources.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_descriptors.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_recorder.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_presenter.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\frame_graph\frame_task_graph.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\swapchain_targets.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\picker.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\sobel_compute.cpp"><Filter>Source Files\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\pipelines\cube_pipeline.cpp"><Filter>Source Files\pipelines</Filter></ClCompile>
+    <ClCompile Include="..\src\engine\pipelines\picker_pipeline.cpp"><Filter>Source Files\pipelines</Filter></ClCompile>
+    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\graphics\camera.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\gpu_prv_lib.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\gpu_pub_lib.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\engine_requirements.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\mesh_arena.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\debug\debug_drawer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ClInclude Include="..\src\graphics\camera.hpp"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\gpu_prv_lib.h"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\gpu_pub_lib.h"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\queue_types.hpp"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\buffer_manager.hpp"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\engine_requirements.hpp"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\mesh_arena.h"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\debug\debug_drawer.h"><Filter>Header Files\core</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp"><Filter>Header Files\engine_api</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\engine_identity.hpp"><Filter>Header Files\engine_api</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\vulkan_engine.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_sync.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_resources.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_descriptors.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_recorder.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_presenter.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\frame_graph\frame_task_graph.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\swapchain_targets.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\picker.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\sobel_compute.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\vertex_types.hpp"><Filter>Header Files\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp"><Filter>Header Files\pipelines</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp"><Filter>Header Files\pipelines</Filter></ClInclude>
   </ItemGroup>
 </Project>

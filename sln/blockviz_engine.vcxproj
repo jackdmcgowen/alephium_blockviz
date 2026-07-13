@@ -62,17 +62,18 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- Vulkan-free product facade: public headers only; implementation is graphics.lib -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -95,35 +96,16 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\engine\vulkan_engine.cpp" />
-    <ClCompile Include="..\src\engine\frame_sync.cpp" />
-    <ClCompile Include="..\src\engine\frame_resources.cpp" />
-    <ClCompile Include="..\src\engine\frame_descriptors.cpp" />
-    <ClCompile Include="..\src\engine\frame_recorder.cpp" />
-    <ClCompile Include="..\src\engine\frame_presenter.cpp" />
-    <ClCompile Include="..\src\engine\frame_graph\frame_task_graph.cpp" />
-    <ClCompile Include="..\src\engine\swapchain_targets.cpp" />
-    <ClCompile Include="..\src\engine\picker.cpp" />
-    <ClCompile Include="..\src\engine\sobel_compute.cpp" />
-    <ClCompile Include="..\src\engine\pipelines\cube_pipeline.cpp" />
-    <ClCompile Include="..\src\engine\pipelines\picker_pipeline.cpp" />
+    <ClCompile Include="..\src\engine\blockviz_engine_stub.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\engine\vulkan_engine.hpp" />
     <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
-    <ClInclude Include="..\src\engine\frame_sync.hpp" />
-    <ClInclude Include="..\src\engine\frame_resources.hpp" />
-    <ClInclude Include="..\src\engine\frame_descriptors.hpp" />
-    <ClInclude Include="..\src\engine\frame_recorder.hpp" />
-    <ClInclude Include="..\src\engine\frame_presenter.hpp" />
-    <ClInclude Include="..\src\engine\frame_graph\frame_task_graph.hpp" />
-    <ClInclude Include="..\src\engine\swapchain_targets.hpp" />
-    <ClInclude Include="..\src\engine\picker.hpp" />
-    <ClInclude Include="..\src\engine\sobel_compute.hpp" />
-    <ClInclude Include="..\src\engine\vertex_types.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="graphics.vcxproj">
+      <Project>{6d69b7f2-ed37-4eae-af2a-0abeef80b4af}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

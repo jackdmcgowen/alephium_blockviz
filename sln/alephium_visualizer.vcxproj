@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp" />
+    <!-- ImGui core + Win32 only (Vulkan backend lives in graphics.lib) -->
     <ClCompile Include="..\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="..\imgui\imgui.cpp" />
     <ClCompile Include="..\imgui\imgui_draw.cpp" />
@@ -55,13 +55,11 @@
     <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp" />
     <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp" />
     <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp" />
+    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp" />
     <ClInclude Include="..\src\adapters\alephium\network_poller.hpp" />
+    <!-- Public engine API only (no Vulkan headers) -->
     <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
-    <ClInclude Include="..\src\engine\vulkan_engine.hpp" />
-    <ClInclude Include="..\src\engine\frame_sync.hpp" />
-    <ClInclude Include="..\src\engine\vertex_types.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp" />
+    <ClInclude Include="..\src\engine\engine_identity.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="blockviz_engine.vcxproj">
@@ -121,7 +119,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <!-- No Vulkan headers in app sources; link vulkan-1 only for static graphics symbols. -->
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <!-- Run from repo root so src/graphics/shaders/* and config.json resolve -->
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
@@ -129,7 +128,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
   </PropertyGroup>

@@ -15,7 +15,7 @@
 #include "graphics/gpu_pub_lib.h"
 #include <windows.h>
 
-// Window defaults (also defined in vulkan_engine.hpp for legacy; keep host self-contained)
+// Window defaults (host-owned; no Vulkan engine headers in the app)
 #ifndef WDW_WIDTH
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
