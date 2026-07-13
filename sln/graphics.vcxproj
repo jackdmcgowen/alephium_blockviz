@@ -107,12 +107,14 @@
     <ClCompile Include="..\src\graphics\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
     <ClCompile Include="..\src\graphics\camera.cpp" />
+    <ClCompile Include="..\src\graphics\compute.cpp" />
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp" />
     <ClCompile Include="..\src\graphics\mesh_arena.cpp" />
     <ClCompile Include="..\src\graphics\device.cpp" />
     <ClCompile Include="..\src\graphics\engine_requirements.cpp" />
     <ClCompile Include="..\src\graphics\image.cpp" />
     <ClCompile Include="..\src\graphics\instance.cpp" />
+    <ClCompile Include="..\src\graphics\pipeline.cpp" />
     <ClCompile Include="..\src\graphics\shader.cpp" />
     <ClCompile Include="..\src\graphics\surface.cpp" />
     <ClCompile Include="..\src\graphics\swapchain.cpp" />

@@ -176,35 +176,13 @@ void SobelCompute::write_static_descriptors_()
 
 void SobelCompute::create_compute_pipeline(VkDevice device)
 {
-    std::vector<uint8_t> code;
-    load_shader_source("sobel.comp.spv", code);
-    VkShaderModule mod = VK_NULL_HANDLE;
-    create_shader_module(device, mod, code);
-
     VkPushConstantRange pcr{};
     pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pcr.size = sizeof(SobelPC);
 
-    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    plci.setLayoutCount = 1;
-    plci.pSetLayouts = &compute_set_layout_;
-    plci.pushConstantRangeCount = 1;
-    plci.pPushConstantRanges = &pcr;
-    if (vkCreatePipelineLayout(device, &plci, nullptr, &compute_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: compute layout");
-
-    VkPipelineShaderStageCreateInfo stage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
-    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage.module = mod;
-    stage.pName = "main";
-
-    VkComputePipelineCreateInfo ci{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-    ci.stage = stage;
-    ci.layout = compute_layout_;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: compute pipeline");
-
-    destroy_shader_module(device, mod);
+    compute_layout_ =
+        ::create_compute_pipeline_layout(device, &compute_set_layout_, 1, &pcr, 1);
+    pipeline_ = ::create_compute_pipeline(device, compute_layout_, "sobel.comp.spv", "main");
 }
 
 void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
@@ -217,11 +195,7 @@ void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_fo
     create_shader_module(device, vert, vert_code);
     create_shader_module(device, frag, frag_code);
 
-    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    plci.setLayoutCount = 1;
-    plci.pSetLayouts = &ubo_layout;
-    if (vkCreatePipelineLayout(device, &plci, nullptr, &depth_only_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: depth-only layout");
+    depth_only_layout_ = create_pipeline_layout(device, &ubo_layout, 1);
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -249,58 +223,33 @@ void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_fo
     attrs[4] = { 4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(InstanceData, color) };
     attrs[5] = { 5, 1, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, alpha) };
 
-    VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
-    vi.vertexBindingDescriptionCount = 2;
-    vi.pVertexBindingDescriptions = binds;
-    vi.vertexAttributeDescriptionCount = 6;
-    vi.pVertexAttributeDescriptions = attrs;
+    GraphicsPipelineCreateInfo ginfo{};
+    ginfo.layout = depth_only_layout_;
+    ginfo.stages = stages;
+    ginfo.stage_count = 2;
+    ginfo.bindings = binds;
+    ginfo.binding_count = 2;
+    ginfo.attributes = attrs;
+    ginfo.attribute_count = 6;
+    ginfo.depth_test = true;
+    ginfo.depth_write = true;
+    ginfo.depth_compare = VK_COMPARE_OP_LESS;
+    ginfo.blend_mode = PipelineBlendMode::None;
+    ginfo.color_attachment_count = 0;
+    ginfo.depth_format = depth_format;
+    ginfo.dynamic_viewport_scissor = true;
+    ginfo.dynamic_primitive_topology = false;
 
-    VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo vp{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
-    rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_BACK_BIT;
-    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rs.lineWidth = 1.f;
-
-    VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-    ds.depthTestEnable = VK_TRUE;
-    ds.depthWriteEnable = VK_TRUE;
-    ds.depthCompareOp = VK_COMPARE_OP_LESS;
-
-    VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dyn{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-    dyn.dynamicStateCount = 2;
-    dyn.pDynamicStates = dyn_states;
-
-    // Depth-only dynamic rendering (no color attachments)
-    VkPipelineRenderingCreateInfo rendering{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    rendering.colorAttachmentCount = 0;
-    rendering.depthAttachmentFormat = depth_format;
-
-    VkGraphicsPipelineCreateInfo gci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-    gci.pNext = &rendering;
-    gci.stageCount = 2;
-    gci.pStages = stages;
-    gci.pVertexInputState = &vi;
-    gci.pInputAssemblyState = &ia;
-    gci.pViewportState = &vp;
-    gci.pRasterizationState = &rs;
-    gci.pMultisampleState = &ms;
-    gci.pDepthStencilState = &ds;
-    gci.pDynamicState = &dyn;
-    gci.layout = depth_only_layout_;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gci, nullptr, &depth_only_pipeline_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: depth-only pipeline");
+    try
+    {
+        depth_only_pipeline_ = create_graphics_pipeline(device, ginfo);
+    }
+    catch (...)
+    {
+        destroy_shader_module(device, vert);
+        destroy_shader_module(device, frag);
+        throw;
+    }
 
     destroy_shader_module(device, vert);
     destroy_shader_module(device, frag);
@@ -319,13 +268,8 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
     pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pcr.size = sizeof(OverlayPC);
 
-    VkPipelineLayoutCreateInfo plci{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    plci.setLayoutCount = 1;
-    plci.pSetLayouts = &overlay_set_layout_;
-    plci.pushConstantRangeCount = 1;
-    plci.pPushConstantRanges = &pcr;
-    if (vkCreatePipelineLayout(device, &plci, nullptr, &overlay_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: overlay layout");
+    overlay_layout_ =
+        create_pipeline_layout(device, &overlay_set_layout_, 1, &pcr, 1);
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
@@ -333,58 +277,30 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
     stages[1] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
                   VK_SHADER_STAGE_FRAGMENT_BIT, frag, "main", nullptr };
 
-    VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
-    VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vp{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
-    rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_NONE;
-    rs.lineWidth = 1.f;
-    VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    GraphicsPipelineCreateInfo ginfo{};
+    ginfo.layout = overlay_layout_;
+    ginfo.stages = stages;
+    ginfo.stage_count = 2;
+    ginfo.binding_count = 0;
+    ginfo.attribute_count = 0;
+    ginfo.cull_mode = VK_CULL_MODE_NONE;
+    ginfo.depth_test = false;
+    ginfo.depth_write = false;
+    ginfo.blend_mode = PipelineBlendMode::Premultiplied;
+    ginfo.color_format = color_format;
+    ginfo.color_attachment_count = 1;
+    ginfo.dynamic_viewport_scissor = true;
 
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.blendEnable = VK_TRUE;
-    blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-    blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.colorBlendOp = VK_BLEND_OP_ADD;
-    blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.alphaBlendOp = VK_BLEND_OP_ADD;
-    blend.colorWriteMask = 0xF;
-    VkPipelineColorBlendStateCreateInfo cb{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    cb.attachmentCount = 1;
-    cb.pAttachments = &blend;
-
-    VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dyn{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-    dyn.dynamicStateCount = 2;
-    dyn.pDynamicStates = dyn_states;
-
-    VkPipelineRenderingCreateInfo rendering{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    rendering.colorAttachmentCount = 1;
-    rendering.pColorAttachmentFormats = &color_format;
-
-    VkGraphicsPipelineCreateInfo gci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-    gci.pNext = &rendering;
-    gci.stageCount = 2;
-    gci.pStages = stages;
-    gci.pVertexInputState = &vi;
-    gci.pInputAssemblyState = &ia;
-    gci.pViewportState = &vp;
-    gci.pRasterizationState = &rs;
-    gci.pMultisampleState = &ms;
-    gci.pDepthStencilState = &ds;
-    gci.pColorBlendState = &cb;
-    gci.pDynamicState = &dyn;
-    gci.layout = overlay_layout_;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gci, nullptr, &overlay_pipeline_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: overlay pipeline");
+    try
+    {
+        overlay_pipeline_ = create_graphics_pipeline(device, ginfo);
+    }
+    catch (...)
+    {
+        destroy_shader_module(device, vert);
+        destroy_shader_module(device, frag);
+        throw;
+    }
 
     destroy_shader_module(device, vert);
     destroy_shader_module(device, frag);
