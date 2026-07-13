@@ -9,9 +9,8 @@
 
 #define ALPH_TARGET_POLL_SECONDS ( 16 )
 #define ALPH_TARGET_BLOCK_SECONDS ( 8 )
-// Short lookback: is-block-in-main-chain is slow; long windows flood the verify queue.
-// ~4 block intervals (~32s) is enough for tip viz without multi-minute catch-up.
-#define ALPH_LOOKBACK_WINDOW_SECONDS ( ALPH_TARGET_BLOCK_SECONDS * 4 )
+// Initial poll / camera Z lookback (seconds).
+#define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * 60 )
 
 #define ALPH_NUM_GROUPS ( 4 )
 

@@ -32,6 +32,8 @@ AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
     : scene_(scene)
     , engine_(engine)
 {
+    for (int i = 0; i < BlockScene::kLaneCount; ++i)
+        min_lookback_height_[i] = 0;
 }
 
 void AlephiumAdapter::configure(const Config& cfg)
@@ -77,14 +79,61 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, i
 void AlephiumAdapter::on_start()
 {
     main_chain_cache_.refresh_tips();
+    refresh_lookback_floors_();
+}
+
+void AlephiumAdapter::refresh_lookback_floors_()
+{
+    if (!main_chain_cache_.tips_valid())
+        main_chain_cache_.refresh_tips();
+
+    // Heights older than ~lookback window are out of scope for DAG label / dep fetch.
+    const int lookback_blocks =
+        std::max(1, ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS);
+
+    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
+    {
+        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+        {
+            const uint32_t lane = lane_of(f, t);
+            const int net_tip = main_chain_cache_.tip(f, t);
+            if (net_tip < 0)
+            {
+                min_lookback_height_[lane] = 0;
+                continue;
+            }
+            min_lookback_height_[lane] = std::max(0, net_tip - lookback_blocks);
+        }
+    }
+    lookback_floors_valid_ = true;
+    std::printf("[adapter] lookback floors set (~%d heights behind tip, window=%ds)\n",
+                lookback_blocks, ALPH_LOOKBACK_WINDOW_SECONDS);
+}
+
+bool AlephiumAdapter::height_in_lookback_(uint32_t lane, int height) const
+{
+    if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+        return false;
+    if (height < 0)
+        return true; // unknown height: allow offline label of live graph nodes only
+    if (!lookback_floors_valid_)
+        return true;
+    return height >= min_lookback_height_[lane];
 }
 
 bool AlephiumAdapter::ready_for_poll() const
 {
     if (!seed_q_.empty() || !uncle_q_.empty() || !broken_dep_q_.empty())
         return false;
-    if (scene_.unconfirmed_live_count() != 0)
-        return false;
+    // Only blocks within the lookback height window must be confirmed before
+    // the next poll (older live cubes do not gate).
+    for (const GraphNode& n : scene_.nodes_snapshot())
+    {
+        if (!height_in_lookback_(n.lane, static_cast<int>(n.height)))
+            continue;
+        if (!main_chain_cache_.is_cached_main(n.id))
+            return false;
+    }
     return true;
 }
 
@@ -174,8 +223,8 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
-    // Pure in-graph DAG label: no network, no is_main. Missing deps = broken links
-    // queued for a single fetch later (not assumed main until present).
+    // Pure in-graph DAG label within lookback window. No is_main.
+    // Missing dep of an in-window main-chain node → broken-link fetch only.
     if (main_hash.empty() || budget <= 0)
         return 0;
 
@@ -192,7 +241,8 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
         if (!scene_.graph().contains(cur))
         {
-            // Broken link — fetch later; do not call is_main on deps.
+            // Only queue fetch when discovered as a dep of a main-chain walk
+            // (caller only floods from proven main). Still no is_main on the dep.
             if (broken_dep_seen_.insert(cur).second)
                 broken_dep_q_.push_back(cur);
             continue;
@@ -203,6 +253,11 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         const int from = node ? static_cast<int>(node->group_from) : 0;
         const int to = node ? static_cast<int>(node->group_to) : 0;
         const int height = node ? static_cast<int>(node->height) : -1;
+        const uint32_t lane = node ? node->lane : lane_of(from, to);
+
+        // Stop at lookback floor — do not label or walk further back.
+        if (!height_in_lookback_(lane, height))
+            continue;
 
         main_chain_cache_.mark_main(cur);
         mark_scene_confirmed_(cur, from, to, height);
@@ -215,6 +270,19 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         {
             if (dep.empty() || !seen.insert(dep).second)
                 continue;
+            // If dep is live and below floor, skip without queuing a fetch.
+            if (auto dn = scene_.graph().get(dep))
+            {
+                if (!height_in_lookback_(dn->lane, static_cast<int>(dn->height)))
+                    continue;
+            }
+            // Missing dep: only fetch if parent is still in lookback window.
+            if (!scene_.graph().contains(dep))
+            {
+                if (height_in_lookback_(lane, height) && broken_dep_seen_.insert(dep).second)
+                    broken_dep_q_.push_back(dep);
+                continue;
+            }
             q.push(dep);
         }
     }
@@ -264,28 +332,37 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
         return;
     ++stats_uncles_checked_;
 
-    if (main_chain_cache_.is_cached_main(uncle_hash))
-    {
-        mark_scene_confirmed_(uncle_hash);
-        flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
-        return;
-    }
-
-    // Ensure we have the uncle body for lane/height (and for DAG flood).
-    if (!scene_.graph().contains(uncle_hash))
-        fetch_and_admit_(uncle_hash);
-
+    // No individual block fetch for uncles — is_main is hash-only.
+    // If not live and not main, nothing to remove; if live and not main, drop it.
     auto node = scene_.graph().get(uncle_hash);
     const int from = node ? static_cast<int>(node->group_from) : parent_from;
     const int to = node ? static_cast<int>(node->group_to) : parent_to;
     const int height = node ? static_cast<int>(node->height) : parent_height;
+    const uint32_t lane = node ? node->lane : lane_of(from, to);
 
-    if (height >= 0 &&
+    if (node && !height_in_lookback_(lane, height))
+    {
+        // Outside lookback: drop from scene if present, no API.
+        scene_.remove_block(uncle_hash);
+        ++stats_uncles_removed_;
+        return;
+    }
+
+    if (main_chain_cache_.is_cached_main(uncle_hash))
+    {
+        if (node)
+        {
+            mark_scene_confirmed_(uncle_hash, from, to, height);
+            flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        }
+        return;
+    }
+
+    if (node && height >= 0 &&
         main_chain_cache_.try_hashes_singleton(uncle_hash, from, to, height))
     {
         mark_scene_confirmed_(uncle_hash, from, to, height);
         flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
-        // Sobel: only if this uncle is the highest confirmed on its lane (frontier).
         return;
     }
 
@@ -293,14 +370,16 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
     ++stats_api_is_main_;
     if (main_chain_cache_.query_is_main(uncle_hash, &transport_ok))
     {
-        mark_scene_confirmed_(uncle_hash, from, to, height);
-        flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        if (node)
+        {
+            mark_scene_confirmed_(uncle_hash, from, to, height);
+            flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        }
         return;
     }
 
     if (!transport_ok)
     {
-        // Retry later
         SeedJob uj;
         uj.hash = uncle_hash;
         uj.from = from;
@@ -311,9 +390,10 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
         return;
     }
 
-    // Not main — remove uncle from the scene.
+    // Not main — remove uncle from the scene if present.
     std::printf("[adapter] uncle NOT main %s — remove\n", uncle_hash.c_str());
-    scene_.remove_block(uncle_hash);
+    if (node)
+        scene_.remove_block(uncle_hash);
     proven_not_main_.insert(uncle_hash);
     ++stats_uncles_removed_;
     ++stats_removed_;
@@ -424,17 +504,20 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
             return;
         }
 
+        // Never request individual blocks during the seed walk — only offline
+        // flood of proven main may queue broken main-chain deps for fetch.
         if (!scene_.graph().contains(cur))
-        {
-            // Broken link only — fetch once, then continue offline.
-            if (!fetch_and_admit_(cur))
-                continue;
-        }
+            continue;
 
         auto node = scene_.graph().get(cur);
         const int from = node ? static_cast<int>(node->group_from) : seed.from;
         const int to = node ? static_cast<int>(node->group_to) : seed.to;
         const int height = node ? static_cast<int>(node->height) : seed.height;
+        const uint32_t lane = node ? node->lane : lane_of(from, to);
+
+        // Do not is_main / walk below the initial lookback floor.
+        if (!height_in_lookback_(lane, height))
+            continue;
 
         // Singleton at height is often enough without full is_main.
         if (height >= 0 &&
@@ -484,6 +567,11 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
             {
                 if (dep.empty() || !visited.insert(dep).second)
                     continue;
+                if (auto dn = scene_.graph().get(dep))
+                {
+                    if (!height_in_lookback_(dn->lane, static_cast<int>(dn->height)))
+                        continue;
+                }
                 walk.push(dep);
             }
         }
@@ -564,12 +652,14 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Re-seed from latest unconfirmed tips if needed.
-    if (seed_q_.empty() && scene_.unconfirmed_live_count() > 0)
+    // Re-seed from latest unconfirmed tips in the lookback window only.
+    if (seed_q_.empty() && !ready_for_poll())
     {
         auto seed_node = [&](const NodeId& id) {
             auto n = scene_.graph().get(id);
             if (!n)
+                return;
+            if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
                 return;
             if (main_chain_cache_.is_cached_main(id))
             {
@@ -631,7 +721,10 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 
     ++poll_count_;
     if (poll_count_ == 1 || (poll_count_ % kTipRefreshEveryNPolls) == 0)
+    {
         main_chain_cache_.refresh_tips();
+        refresh_lookback_floors_();
+    }
 
     const int64_t from_ts = last_poll_ts - (ALPH_TARGET_BLOCK_SECONDS * 1000);
     cJSON* obj = get_blockflow_blocks_with_events(from_ts, now);

@@ -67,19 +67,22 @@ private:
     bool pop_seed_round_robin_(SeedJob& out);
     // Backward DAG search from a tip/seed; one is_main per unproven ancestor until hit.
     void confirm_seed_(const SeedJob& seed);
-    // Offline DAG: mark main_hash + all deps already in the graph (no network).
-    // Broken links (missing deps) are queued for a single fetch; no is_main on deps.
+    // Offline DAG: mark main_hash + in-graph deps at/above lookback floor only.
+    // Broken main-chain deps (missing, parent in-window) queued for fetch — only then.
     int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
-    // Fetch one missing dep by hash and re-run offline flood from parent.
+    // Fetch one missing main-chain dep by hash (broken link only).
     bool fetch_and_admit_(const std::string& hash);
     // Non-main tip: remove and try admit main at that height.
     void replace_non_main_(const SeedJob& job);
-    // Manually confirm/remove ghost-uncle hashes listed by a block.
+    // Manually confirm/remove ghost-uncle hashes (is_main only; no block fetch).
     void verify_uncle_(const std::string& uncle_hash, int parent_from, int parent_to,
                        int parent_height);
     void enqueue_uncles_from_block_(const AlphBlock& alph);
-    // After tips confirm: offline label all in-graph ancestors of each frontier tip.
+    // After tips confirm: offline label in-graph ancestors within lookback window.
     void label_all_confirmed_tip_ancestors_();
+    // Refresh per-lane min height = net_tip - lookback_blocks.
+    void refresh_lookback_floors_();
+    bool height_in_lookback_(uint32_t lane, int height) const;
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
@@ -94,10 +97,14 @@ private:
     std::deque<SeedJob> seed_q_;
     std::unordered_set<std::string> seed_queued_;
     std::unordered_set<std::string> proven_not_main_; // avoid re-query thrash
-    std::deque<std::string> broken_dep_q_;            // missing deps (fetch only)
+    std::deque<std::string> broken_dep_q_;            // missing main-chain deps only
     std::unordered_set<std::string> broken_dep_seen_;
     std::deque<SeedJob> uncle_q_;
     std::unordered_set<std::string> uncle_queued_;
+
+    // Per-lane floor: do not verify/label deps below this height.
+    int min_lookback_height_[BlockScene::kLaneCount]{};
+    bool lookback_floors_valid_ = false;
 
     int poll_count_ = 0;
     int stats_verified_ok_ = 0;
