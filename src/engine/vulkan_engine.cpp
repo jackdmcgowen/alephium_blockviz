@@ -665,31 +665,24 @@ void VulkanEngine::render()
             return idxs;
         };
 
+        // Selection gold > incomplete orange > frontier-tip green (single mode).
         if (selected_instance != ~0u)
         {
             sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
             sobel_req.instance_indices = { selected_instance };
             want_sobel = true;
         }
-        else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
-        {
-            // Confirmed main-chain blocks: green Sobel (priority over incomplete orange).
-            sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
-            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_, 64);
-            want_sobel = !sobel_req.instance_indices.empty();
-            // Dual-ish: if no green instances resolved, fall through to orange below.
-            if (!want_sobel && !sobel_incomplete_hashes_.empty())
-            {
-                sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
-                sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_, 32);
-                want_sobel = !sobel_req.instance_indices.empty();
-            }
-        }
         else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
         {
-            // Incomplete (missing deps) — orange until fetch pool fills the live pool.
             sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
             sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_, 32);
+            want_sobel = !sobel_req.instance_indices.empty();
+        }
+        else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
+        {
+            // One frontier tip per lane (presenter), not whole confirmed spine.
+            sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
+            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_, 16);
             want_sobel = !sobel_req.instance_indices.empty();
         }
     }

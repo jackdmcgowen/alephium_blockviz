@@ -157,7 +157,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         tip_stagger_base += 2; // slight global cascade across tips
     }
 
-    // DFS completeness edges (adapter-published) — magenta, animated.
+    // Magenta DFS edges (adapter): only listings whose deps are all in the pool.
     struct TraceActive
     {
         std::string key;
@@ -173,6 +173,23 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         for (const TraceEdge& te : tedges)
         {
             if (te.from.empty() || te.to.empty())
+                continue;
+            if (live_nodes.count(te.from) == 0 || live_nodes.count(te.to) == 0)
+                continue;
+            // Skip edges from incomplete listings (stale / terminate noise).
+            bool from_incomplete = false;
+            if (auto d = scene_.detail_store().get(te.from))
+            {
+                for (const std::string& dep : d->deps)
+                {
+                    if (!dep.empty() && live_nodes.count(dep) == 0)
+                    {
+                        from_incomplete = true;
+                        break;
+                    }
+                }
+            }
+            if (from_incomplete)
                 continue;
             auto from_it = positions.find(te.from);
             auto to_it = positions.find(te.to);
@@ -415,9 +432,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    // --- Live pool classification ---
-    // solid[h]: known main-chain AND every deps[] entry is in the live pool.
-    // No cascade / sequenced gate — opaque as soon as main + deps known.
+    // --- Visual rules (sprint cleanup) ---
+    // Confirmed  = main-chain proven (adapter).
+    // Solid/opaque = confirmed AND every deps[] in live pool.
+    // Green Sobel = confirmed frontier tip only (≤1 per lane), not every confirmed cube.
+    // Orange Sobel = any live block with a missing dep (engine may prefer over green).
+    // Magenta arrows = DFS edges for complete listings only (adapter publishes).
     std::unordered_map<std::string, bool> missing_dep;
     missing_dep.reserve(graph_nodes.size());
     for (const GraphNode& n : graph_nodes)
@@ -507,38 +527,26 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
 
     // Sobel lists: pool-first; cull only limits GPU indices.
-    // Green = any confirmed main-chain block with an instance (not solid-gated).
-    // Orange = incomplete (missing deps) that are not confirmed.
     {
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
 
-        // Prefer higher-height confirmed first when over cap.
-        struct ConfItem { int height; std::string hash; };
-        std::vector<ConfItem> conf_items;
-        conf_items.reserve(64);
-        for (const GraphNode& n : graph_nodes)
+        // Green: one frontier tip per lane (not the whole confirmed spine).
+        for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
-            if (!scene_.is_confirmed_locked(n.id))
+            if (h.empty() || !pick_set.count(h))
                 continue;
-            if (!pick_set.count(n.id))
+            // Prefer solid tips for green; incomplete tips can use orange instead.
+            if (missing_dep[h])
                 continue;
-            conf_items.push_back({ static_cast<int>(n.height), n.id });
-        }
-        std::sort(conf_items.begin(), conf_items.end(),
-                  [](const ConfItem& a, const ConfItem& b) { return a.height > b.height; });
-        for (const auto& c : conf_items)
-        {
-            out.confirmed_tip_hashes.push_back(c.hash);
-            if (out.confirmed_tip_hashes.size() >= 64)
+            out.confirmed_tip_hashes.push_back(h);
+            if (out.confirmed_tip_hashes.size() >= 16)
                 break;
         }
 
+        // Orange: missing deps (including confirmed-but-incomplete).
         for (const auto& h : incomplete_pool)
         {
             if (!pick_set.count(h))
-                continue;
-            // Confirmed blocks use green; orange is for incomplete non-confirmed.
-            if (scene_.is_confirmed_locked(h))
                 continue;
             out.incomplete_trace_hashes.push_back(h);
             if (out.incomplete_trace_hashes.size() >= 64)

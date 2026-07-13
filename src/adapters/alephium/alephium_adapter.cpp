@@ -603,6 +603,7 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges
 
         bool any_missing = false;
         std::vector<std::string> same_chain_deps;
+        std::vector<std::string> found_deps;
 
         for (const std::string& dep : detail->deps)
         {
@@ -614,14 +615,7 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges
                 any_missing = true;
                 continue;
             }
-
-            if (edges_out.size() < static_cast<size_t>(kMaxTraceEdges))
-            {
-                TraceEdge e;
-                e.from = cur;
-                e.to = dep;
-                edges_out.push_back(std::move(e));
-            }
+            found_deps.push_back(dep);
 
             auto dn = scene_.graph().get(dep);
             if (!dn)
@@ -636,7 +630,7 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges
             }
         }
 
-        // End trace here — no fetch. Resume only after camera history poll fills pool.
+        // Incomplete: stop without magenta edges (edges only for complete listings).
         if (any_missing)
         {
             dfs_stop_hash_[lane] = cur;
@@ -645,6 +639,17 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges
             std::printf("[adapter] DFS end lane %d at h=%d (unknown dep, no fetch) %s\n",
                         static_cast<int>(lane), height, cur.c_str());
             return;
+        }
+
+        // Complete node: publish magenta path edges, continue DFS.
+        for (const std::string& dep : found_deps)
+        {
+            if (edges_out.size() >= static_cast<size_t>(kMaxTraceEdges))
+                break;
+            TraceEdge e;
+            e.from = cur;
+            e.to = dep;
+            edges_out.push_back(std::move(e));
         }
 
         for (auto it = same_chain_deps.rbegin(); it != same_chain_deps.rend(); ++it)
@@ -857,13 +862,17 @@ void AlephiumAdapter::advance_dfs_traces_()
         return;
     }
 
-    // Steady: resume stopped lanes if reactivated; light DFS from new tips (pool only).
+    // Steady: only resume lanes reactivated by camera unlock (or new tip height).
+    bool any_resume = false;
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
     {
-        if (dfs_active_[lane] && !dfs_done_[lane])
-            run_dfs_lane_(static_cast<uint32_t>(lane), edges, /*from_stop=*/true);
+        if (!dfs_active_[lane] || dfs_done_[lane])
+            continue;
+        run_dfs_lane_(static_cast<uint32_t>(lane), edges, /*from_stop=*/true);
+        any_resume = true;
     }
 
+    // New live tip higher than previous stop/frontier: pool-only walk once.
     for (const NodeId& tip : scene_.tip_ids())
     {
         auto n = scene_.graph().get(tip);
@@ -871,19 +880,23 @@ void AlephiumAdapter::advance_dfs_traces_()
             continue;
         if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
             continue;
+        const int h = static_cast<int>(n->height);
         mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
-                              static_cast<int>(n->group_to),
-                              static_cast<int>(n->height));
-        // Forward tip only: re-walk within unlocked floor (no history fetch).
-        if (dfs_done_[n->lane] && dfs_stop_hash_[n->lane].empty())
+                              static_cast<int>(n->group_to), h);
+        const int ch = scene_.confirmed_height(n->lane);
+        // Only re-DFS if this tip is the frontier and lane was fully done (no stop hole).
+        if (ch == h && dfs_done_[n->lane] && dfs_stop_hash_[n->lane].empty())
         {
-            dfs_active_[n->lane] = true;
-            dfs_done_[n->lane] = false;
-            run_dfs_lane_(n->lane, edges, /*from_stop=*/false);
+            // Avoid re-walking every drain: only if tip hash changed from last stop empty walk.
+            // Use flood for main labels; skip full magenta DFS spam in Steady.
+            maybe_flood_offline_(tip, n->lane, h, /*force=*/false);
         }
     }
-    if (!edges.empty())
-        scene_.set_trace_edges(std::move(edges));
+
+    if (any_resume)
+        scene_.set_trace_edges(std::move(edges)); // may be empty → clear sticky partials
+    else if (all_dfs_done_())
+        scene_.clear_trace_edges(); // idle Steady: no sticky magenta
 }
 
 void AlephiumAdapter::drain_fetch_results_(int max_admits)

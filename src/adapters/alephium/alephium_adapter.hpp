@@ -1,10 +1,14 @@
 #pragma once
 
 // Domain/network policy for Alephium BlockFlow ingest.
-// Bootstrap: one lookback poll → identify tips → pool-only per-chain DFS
-// (terminate at first unknown dep, no blockhash fetch) → Steady.
-// Older history: large window poll only when camera unlocks lookback periods;
-// DFS resumes from per-lane stop points.
+//
+// Phases: BootstrapPoll → IdentifyTips → DfsTrace (pool-only) → Steady.
+// Confirmed = tip is_main + offline flood within pool (stop at missing dep).
+// No blockhash fetch for DFS; camera lookback periods unlock large history polls
+// and resume DFS from per-lane stop points.
+//
+// Visual (presenter/engine): solid = confirmed+deps in pool; green Sobel =
+// frontier tip only; orange = missing dep; magenta arrows = complete DFS edges.
 #include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"

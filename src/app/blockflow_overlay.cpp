@@ -402,7 +402,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
         ImGui::TextDisabled(
-            "Solid=main+all deps in pool · orange=missing · green=confirmed · magenta=DFS trace · gold=select");
+            "Solid=main+deps · green=frontier tip only · orange=missing dep · magenta=DFS path · gold=select");
         {
             const char* pname = "Bootstrap";
             if (ui.trace_phase == 1) pname = "IdentifyTips";

@@ -39,11 +39,9 @@ struct FrameSourceOutput
     glm::vec3 look_target_pos{ 0.f };
     UiSnapshot ui{};
 
-    // Confirmed main-chain blocks from the live pool with an instance this frame
-    // (green Sobel). Confirmed state is independent of frustum cull / solid cascade.
+    // Frontier confirmed tips only (≤1 per lane) with an instance this frame (green Sobel).
     std::vector<std::string> confirmed_tip_hashes;
-    // Non-confirmed live-pool blocks with any deps[] missing (orange Sobel),
-    // subset that has an instance this frame.
+    // Live-pool blocks with any deps[] missing (orange Sobel), if instanced this frame.
     std::vector<std::string> incomplete_trace_hashes;
 };
 
