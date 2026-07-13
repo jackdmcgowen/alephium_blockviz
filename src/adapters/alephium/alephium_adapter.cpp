@@ -56,6 +56,8 @@ void AlephiumAdapter::reset_stats()
     stats_api_is_main_ = 0;
     stats_uncles_checked_ = 0;
     stats_uncles_removed_ = 0;
+    stats_fetch_admitted_ = 0;
+    stats_trace_missing_ = 0;
     seed_q_.clear();
     seed_queued_.clear();
     proven_not_main_.clear();
@@ -64,6 +66,9 @@ void AlephiumAdapter::reset_stats()
     broken_dep_failed_.clear();
     uncle_q_.clear();
     uncle_queued_.clear();
+    completeness_pending_lanes_.clear();
+    if (fetch_pool_)
+        fetch_pool_->reset_stats();
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
@@ -405,6 +410,200 @@ void AlephiumAdapter::label_tips_needing_reflood_()
         if (tip.empty())
             continue;
         flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+        kick_completeness_trace_(tip);
+    }
+}
+
+int AlephiumAdapter::min_live_height_on_lane_(uint32_t lane) const
+{
+    int min_h = INT_MAX;
+    for (const GraphNode& n : scene_.graph().nodes_snapshot())
+    {
+        if (n.lane != lane || n.height < 0)
+            continue;
+        if (static_cast<int>(n.height) < min_h)
+            min_h = static_cast<int>(n.height);
+    }
+    return min_h == INT_MAX ? -1 : min_h;
+}
+
+bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
+{
+    if (dep_hash.empty())
+        return false;
+    if (scene_.graph().contains(dep_hash))
+        return false;
+    if (broken_dep_failed_.count(dep_hash))
+        return false;
+    if (fetch_pool_ && fetch_pool_->is_failed(dep_hash))
+        return false;
+
+    ++stats_trace_missing_;
+
+    if (fetch_pool_)
+    {
+        if (fetch_pool_->enqueue(dep_hash))
+            return true;
+        return false;
+    }
+
+    // No pool: one-shot sync fetch (fallback).
+    if (!broken_dep_seen_.insert(dep_hash).second)
+        return false;
+    if (fetch_and_admit_(dep_hash))
+    {
+        ++stats_fetch_admitted_;
+        return true;
+    }
+    broken_dep_failed_.insert(dep_hash);
+    return false;
+}
+
+void AlephiumAdapter::kick_completeness_trace_(const std::string& tip_hash)
+{
+    if (tip_hash.empty())
+        return;
+    auto root = scene_.graph().get(tip_hash);
+    if (!root)
+        return;
+    completeness_pending_lanes_.insert(root->lane);
+    run_completeness_trace_(tip_hash, kMaxCompletenessNodes);
+}
+
+int AlephiumAdapter::run_completeness_trace_(const std::string& start_hash, int budget)
+{
+    // Walk same-chain from confirmed tip down to the initial (smallest) height
+    // on that chain in the live window. Enqueue any missing deps for fetch.
+    if (start_hash.empty() || budget <= 0)
+        return 0;
+
+    auto root = scene_.graph().get(start_hash);
+    if (!root)
+        return 0;
+
+    const uint32_t chain_lane = root->lane;
+    const int chain_from = static_cast<int>(root->group_from);
+    const int chain_to = static_cast<int>(root->group_to);
+    // Initial (smallest) end of the unlocked window for this chain.
+    const int stop_h = effective_lookback_floor_(chain_lane);
+
+    std::queue<std::string> q;
+    std::unordered_set<std::string> seen;
+    q.push(start_hash);
+    seen.insert(start_hash);
+    int visited = 0;
+    int missing_enqueued = 0;
+
+    while (!q.empty() && visited < budget)
+    {
+        const std::string cur = std::move(q.front());
+        q.pop();
+
+        auto node = scene_.graph().get(cur);
+        if (!node)
+            continue;
+
+        if (node->lane != chain_lane ||
+            static_cast<int>(node->group_from) != chain_from ||
+            static_cast<int>(node->group_to) != chain_to)
+            continue;
+
+        const int height = static_cast<int>(node->height);
+        if (height >= 0 && height < stop_h)
+            continue;
+
+        ++visited;
+
+        auto detail = scene_.detail_store().get(cur);
+        if (!detail)
+            continue;
+
+        // All deps must exist in the live pool; enqueue fetch if not.
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty())
+                continue;
+
+            if (!scene_.graph().contains(dep))
+            {
+                if (enqueue_missing_dep_(dep))
+                    ++missing_enqueued;
+                continue;
+            }
+
+            auto dn = scene_.graph().get(dep);
+            if (!dn)
+                continue;
+
+            // Continue same-chain walk only for same-lane deps above floor.
+            if (dn->lane != chain_lane ||
+                static_cast<int>(dn->group_from) != chain_from ||
+                static_cast<int>(dn->group_to) != chain_to)
+                continue;
+
+            const int dh = static_cast<int>(dn->height);
+            if (dh >= 0 && dh < stop_h)
+                continue;
+            if (!seen.insert(dep).second)
+                continue;
+            q.push(dep);
+        }
+    }
+
+    if (missing_enqueued == 0)
+        completeness_pending_lanes_.erase(chain_lane);
+    else
+        completeness_pending_lanes_.insert(chain_lane);
+
+    return missing_enqueued;
+}
+
+void AlephiumAdapter::drain_fetch_results_(int max_admits)
+{
+    if (!fetch_pool_ || max_admits <= 0)
+        return;
+
+    auto results = fetch_pool_->drain_results(static_cast<size_t>(max_admits));
+    for (auto& r : results)
+    {
+        if (!r.ok || r.body.empty())
+        {
+            broken_dep_failed_.insert(r.hash);
+            continue;
+        }
+
+        cJSON* obj = cJSON_ParseWithLength(r.body.c_str(), r.body.size());
+        if (!obj)
+        {
+            broken_dep_failed_.insert(r.hash);
+            continue;
+        }
+
+        cJSON* block = unwrap_block_json(obj);
+        AlphBlock alph(block);
+        if (alph.hash.empty() || alph.hash != r.hash)
+        {
+            cJSON_Delete(obj);
+            broken_dep_failed_.insert(r.hash);
+            continue;
+        }
+
+        const bool added = scene_.add_block(block);
+        cJSON_Delete(obj);
+
+        if (added || scene_.graph().contains(r.hash))
+        {
+            ++stats_fetch_admitted_;
+            // If parent chain had this as main-dep, offline flood may label it later.
+            // Re-kick completeness from confirmed tip on that lane if known.
+            auto n = scene_.graph().get(r.hash);
+            if (n)
+            {
+                const NodeId tip = scene_.confirmed_tip_hash(n->lane);
+                if (!tip.empty())
+                    kick_completeness_trace_(tip);
+            }
+        }
     }
 }
 
@@ -579,6 +778,7 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
     mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
     const uint32_t mlane = lane_of(job.from, job.to);
     const int m = maybe_flood_offline_(main_hash, mlane, job.height, /*force=*/true);
+    kick_completeness_trace_(main_hash);
     ++stats_replaced_;
     ++stats_verified_ok_;
     if (reselect)
@@ -597,6 +797,7 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         // Already known main: only re-flood if lane incomplete / camera unlocked.
         maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/false);
+        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         return;
     }
@@ -612,6 +813,7 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
+        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         if (m > 0)
             std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood marked=%d\n",
@@ -628,6 +830,7 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
+        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         if (m > 0)
             std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood marked=%d\n",
@@ -695,6 +898,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
+    // Admit multi-thread block fetches first so traces can advance.
+    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+
     // Split budget: uncles are an independent queue (not starved by tip seeds).
     const int uncle_budget = std::max(1, max_jobs / 2);
     const int tip_budget = std::max(1, max_jobs - uncle_budget);
@@ -710,6 +916,21 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 
     // Camera unlock / incomplete cover only — not every drain cycle.
     label_tips_needing_reflood_();
+
+    // Continue completeness on lanes with pending missing deps.
+    if (running.load() && !completeness_pending_lanes_.empty())
+    {
+        std::vector<uint32_t> lanes(completeness_pending_lanes_.begin(),
+                                    completeness_pending_lanes_.end());
+        for (uint32_t lane : lanes)
+        {
+            if (!running.load())
+                break;
+            const NodeId tip = scene_.confirmed_tip_hash(lane);
+            if (!tip.empty())
+                run_completeness_trace_(tip, kMaxCompletenessNodes);
+        }
+    }
 
     // Re-seed current live tips for main-chain confirmation (does not gate poll).
     if (seed_q_.empty() && tip_pending_confirmation_())
@@ -727,6 +948,7 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
                 mark_scene_confirmed_(tip, static_cast<int>(node->group_from),
                                       static_cast<int>(node->group_to), h);
                 maybe_flood_offline_(tip, node->lane, h, /*force=*/false);
+                kick_completeness_trace_(tip);
                 continue;
             }
             SeedJob job;
@@ -750,6 +972,7 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 
     // After new tip proves, only re-flood lanes that still need camera cover.
     label_tips_needing_reflood_();
+    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
@@ -864,6 +1087,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                                   static_cast<int>(n->group_to), h);
             // Skip redundant offline flood when lane already covered.
             maybe_flood_offline_(tip, n->lane, h, /*force=*/false);
+            kick_completeness_trace_(tip);
             continue;
         }
         SeedJob job;
@@ -877,13 +1101,23 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
             ++seeded;
     }
 
+    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+
+    const size_t fetch_pend = fetch_pool_ ? fetch_pool_->pending_jobs() : 0;
+    const size_t fetch_inflight = fetch_pool_ ? fetch_pool_->in_flight() : 0;
+    const int fetch_ok = fetch_pool_ ? fetch_pool_->stats_ok() : 0;
+    const int fetch_fail = fetch_pool_ ? fetch_pool_->stats_fail() : 0;
+
     std::printf("[adapter] seen=%d added=%d seeds+=%d skipped_bad=%d "
                 "seed_q=%zu uncle_q=%zu unconfirmed=%zu is_main_api=%d floods=%d "
-                "uncles_checked=%d uncles_rm=%d confirmed_marks=%d removed=%d\n",
+                "uncles_checked=%d uncles_rm=%d confirmed_marks=%d removed=%d "
+                "fetch_q=%zu inflight=%zu fetch_ok=%d fetch_fail=%d fetch_adm=%d "
+                "trace_missing=%d\n",
                 seen, added, seeded, skipped_bad, seed_q_.size(), uncle_q_.size(),
                 scene_.unconfirmed_live_count(), stats_api_is_main_, stats_dag_floods_,
                 stats_uncles_checked_, stats_uncles_removed_, stats_confirmed_marks_,
-                stats_removed_);
+                stats_removed_, fetch_pend, fetch_inflight, fetch_ok, fetch_fail,
+                stats_fetch_admitted_, stats_trace_missing_);
 
     last_poll_ts = now;
     cJSON_Delete(obj);

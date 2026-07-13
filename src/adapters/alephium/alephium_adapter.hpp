@@ -1,8 +1,9 @@
 #pragma once
 
 // Domain/network policy for Alephium BlockFlow ingest.
-// Confirmation: is_main only on live tips; then offline flood of in-graph deps
-// within the lookback height window (no ancestor is_main walk).
+// Confirmation: is_main only on live tips; offline flood + completeness trace
+// with multi-thread block-fetch for missing deps within lookback.
+#include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
@@ -27,15 +28,17 @@ public:
     void configure(const Config& cfg);
     void reset_stats();
 
+    // Optional external fetch pool (owned by NetworkPoller). Not owned here.
+    void set_fetch_pool(BlockFetchPool* pool) { fetch_pool_ = pool; }
+
     void on_start();
 
-    // Admit latest blocks; seed DAG confirm from live tips. Call only when ready_for_poll().
+    // Admit latest blocks; seed DAG confirm from live tips.
     void poll_once(int64_t& last_poll_ts);
 
-    // True when live tips are confirmed and seed/uncle work is idle.
     bool ready_for_poll() const;
 
-    // Drain tip-first DAG confirmation (round-robin seeds).
+    // Drain tip is_main + completeness traces + fetch admits.
     void drain_verify(int max_jobs, const std::atomic<bool>& running);
 
     void maybe_refill_selection_detail();
@@ -50,6 +53,8 @@ public:
     int stats_api_is_main() const { return stats_api_is_main_; }
     int stats_uncles_checked() const { return stats_uncles_checked_; }
     int stats_uncles_removed() const { return stats_uncles_removed_; }
+    int stats_fetch_admitted() const { return stats_fetch_admitted_; }
+    int stats_trace_missing() const { return stats_trace_missing_; }
 
     int64_t poll_interval_ms() const { return cfg_.poll_interval_ms; }
     int64_t lookback_ms() const { return cfg_.lookback_ms; }
@@ -65,29 +70,29 @@ private:
 
     void enqueue_seed_(SeedJob job);
     bool pop_seed_round_robin_(SeedJob& out);
-    // is_main on the tip only; offline flood in-graph deps within lookback.
     void confirm_seed_(const SeedJob& seed);
-    // Offline same-chain main trace: mark tip + in-graph deps on the same
-    // chainFrom->chainTo lane, at/above lookback floor (no network). Live pool only.
     int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
-    // force=true after a newly proven tip; force=false skips re-walk when already traced.
     int maybe_flood_offline_(const std::string& main_hash, uint32_t lane, int height,
                              bool force);
     bool lane_needs_reflood_(uint32_t lane) const;
-    // Fetch only for a missing dep of an already-proven main tip (broken link).
-    bool fetch_and_admit_(const std::string& hash);
+    bool fetch_and_admit_(const std::string& hash); // sync fallback (selection etc.)
     void replace_non_main_(const SeedJob& job);
     void verify_uncle_(const std::string& uncle_hash, int parent_from, int parent_to,
                        int parent_height);
     void enqueue_uncles_from_block_(const AlphBlock& alph);
-    // Only re-flood lanes that need it (camera unlock / never traced).
     void label_tips_needing_reflood_();
     void refresh_lookback_floors_();
-    // Effective floor = max(base_floor - camera_extra, earliest_traced) rules applied in flood.
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     int  camera_extra_lookback_heights_() const;
     bool tip_pending_confirmation_() const;
+
+    // Same-chain completeness: tip → floor; enqueue missing deps to fetch pool.
+    void kick_completeness_trace_(const std::string& tip_hash);
+    int  run_completeness_trace_(const std::string& start_hash, int budget);
+    void drain_fetch_results_(int max_admits);
+    bool enqueue_missing_dep_(const std::string& dep_hash);
+    int  min_live_height_on_lane_(uint32_t lane) const;
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
@@ -97,19 +102,20 @@ private:
     IBlockvizEngine& engine_;
     Config cfg_{};
     MainChainCache main_chain_cache_;
+    BlockFetchPool* fetch_pool_ = nullptr; // not owned
 
     std::deque<SeedJob> seed_q_;
     std::unordered_set<std::string> seed_queued_;
     std::unordered_set<std::string> proven_not_main_;
-    // Missing deps of proven main tips only; one-shot fetch then drop if fail.
     std::deque<std::string> broken_dep_q_;
     std::unordered_set<std::string> broken_dep_seen_;
-    std::unordered_set<std::string> broken_dep_failed_; // never re-fetch
+    std::unordered_set<std::string> broken_dep_failed_;
     std::deque<SeedJob> uncle_q_;
     std::unordered_set<std::string> uncle_queued_;
+    // Lanes needing another completeness pass (after fetch admits / new confirm).
+    std::unordered_set<uint32_t> completeness_pending_lanes_;
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
-    // Lowest height already labeled on this lane; flood terminates here.
     int earliest_traced_height_[BlockScene::kLaneCount]{};
     bool lookback_floors_valid_ = false;
     float initial_camera_scroll_z_ = 0.f;
@@ -124,10 +130,14 @@ private:
     int stats_api_is_main_ = 0;
     int stats_uncles_checked_ = 0;
     int stats_uncles_removed_ = 0;
+    int stats_fetch_admitted_ = 0;
+    int stats_trace_missing_ = 0;
     int seed_lane_rr_ = 0;
 
     static constexpr size_t kMaxSeedQueue = 512;
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxFloodPerSeed = 256;
     static constexpr int kMaxBrokenFetchesPerDrain = 4;
+    static constexpr int kMaxCompletenessNodes = 128;
+    static constexpr int kMaxFetchAdmitsPerDrain = 16;
 };

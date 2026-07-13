@@ -25,6 +25,8 @@ void NetworkPoller::start(const Config& cfg)
     cfg_ = cfg;
     adapter_.configure({ cfg.lookback_ms, cfg.poll_interval_ms });
     adapter_.reset_stats();
+    fetch_pool_.start(cfg.base_url, kFetchWorkers);
+    adapter_.set_fetch_pool(&fetch_pool_);
     running_ = true;
     thread_ = std::thread(&NetworkPoller::thread_main, this);
 }
@@ -34,6 +36,8 @@ void NetworkPoller::stop()
     running_ = false;
     if (thread_.joinable())
         thread_.join();
+    adapter_.set_fetch_pool(nullptr);
+    fetch_pool_.stop();
 }
 
 void NetworkPoller::thread_main()
@@ -53,7 +57,8 @@ void NetworkPoller::thread_main()
     int64_t last_poll_ts =
         static_cast<int64_t>(std::time(nullptr)) * 1000 - cfg_.lookback_ms;
 
-    std::printf("[net] poller started url=%s (adapter-owned policy)\n", cfg_.base_url.c_str());
+    std::printf("[net] poller started url=%s (adapter-owned policy + fetch pool)\n",
+                cfg_.base_url.c_str());
     adapter_.on_start();
 
     while (running_)
@@ -63,7 +68,7 @@ void NetworkPoller::thread_main()
         if (now - last_poll_ts >= adapter_.poll_interval_ms())
             adapter_.poll_once(last_poll_ts);
 
-        // Background: tip is_main + offline same-chain flood (does not gate poll).
+        // Background: tip is_main + completeness + fetch admits (does not gate poll).
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
         for (int i = 0; i < 10 && running_; ++i)
@@ -76,8 +81,9 @@ void NetworkPoller::thread_main()
         curl = nullptr;
     }
     std::printf("[net] poller stopped (verified_ok=%d removed=%d replaced=%d refilled=%d "
-                "seeds=%zu is_main_api=%d)\n",
+                "seeds=%zu is_main_api=%d fetch_adm=%d)\n",
                 adapter_.stats_verified_ok(), adapter_.stats_removed(),
                 adapter_.stats_replaced(), adapter_.stats_detail_refilled(),
-                adapter_.verify_queue_size(), adapter_.stats_api_is_main());
+                adapter_.verify_queue_size(), adapter_.stats_api_is_main(),
+                adapter_.stats_fetch_admitted());
 }

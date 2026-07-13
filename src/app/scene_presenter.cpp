@@ -442,40 +442,55 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Pass 2: force-draw pool incomplete blocks so orange Sobel has instances.
+    // Pass 2: force-draw incomplete + confirmed so Sobel has instances.
     for (const PlacedBlock& placed : layout.placements)
     {
         if (drawn.count(placed.hash))
             continue;
-        if (!missing_dep[placed.hash])
+        const bool force =
+            missing_dep[placed.hash] || scene_.is_confirmed_locked(placed.hash);
+        if (!force)
             continue;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
     }
 
-    // Orange Sobel: pool incomplete ∩ this frame's instances (GPU needs an index).
-    // Classification is pool-first; cull only limits which get a highlight instance.
+    // Sobel lists: pool-first; cull only limits GPU indices.
+    // Green = any confirmed main-chain block with an instance (not solid-gated).
+    // Orange = incomplete (missing deps) that are not confirmed.
     {
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
+
+        // Prefer higher-height confirmed first when over cap.
+        struct ConfItem { int height; std::string hash; };
+        std::vector<ConfItem> conf_items;
+        conf_items.reserve(64);
+        for (const GraphNode& n : graph_nodes)
+        {
+            if (!scene_.is_confirmed_locked(n.id))
+                continue;
+            if (!pick_set.count(n.id))
+                continue;
+            conf_items.push_back({ static_cast<int>(n.height), n.id });
+        }
+        std::sort(conf_items.begin(), conf_items.end(),
+                  [](const ConfItem& a, const ConfItem& b) { return a.height > b.height; });
+        for (const auto& c : conf_items)
+        {
+            out.confirmed_tip_hashes.push_back(c.hash);
+            if (out.confirmed_tip_hashes.size() >= 64)
+                break;
+        }
+
         for (const auto& h : incomplete_pool)
         {
             if (!pick_set.count(h))
                 continue;
+            // Confirmed blocks use green; orange is for incomplete non-confirmed.
+            if (scene_.is_confirmed_locked(h))
+                continue;
             out.incomplete_trace_hashes.push_back(h);
             if (out.incomplete_trace_hashes.size() >= 64)
-                break;
-        }
-
-        // Green: confirmed frontier tips that are solid in the *pool*.
-        // Only skip GPU highlight if no instance this frame (not "not confirmed").
-        for (const auto& h : scene_.confirmed_frontier_ids_locked())
-        {
-            if (missing_dep[h] || !is_solid(h))
-                continue;
-            if (!pick_set.count(h))
-                continue; // still confirmed in pool; just not instanced this frame
-            out.confirmed_tip_hashes.push_back(h);
-            if (out.confirmed_tip_hashes.size() >= 32)
                 break;
         }
     }

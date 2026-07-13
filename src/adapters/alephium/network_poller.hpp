@@ -1,7 +1,8 @@
 #pragma once
 
-// Thin network thread: owns curl + loop; delegates policy to AlephiumAdapter (PR5/PR6b).
+// Thin network thread: owns curl + loop + block-fetch pool; policy in AlephiumAdapter.
 #include "adapters/alephium/alephium_adapter.hpp"
+#include "adapters/alephium/block_fetch_pool.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/blockviz_engine_api.hpp"
 
@@ -33,10 +34,11 @@ private:
     void thread_main();
 
     AlephiumAdapter   adapter_;
+    BlockFetchPool    fetch_pool_;
     Config            cfg_{};
     std::thread       thread_;
     std::atomic<bool> running_{ false };
 
-    // Drain hard while poll is gated on confirmation completion.
     static constexpr int kVerifyJobsPerIdleSlice = 24;
+    static constexpr int kFetchWorkers = 3;
 };
