@@ -6,6 +6,7 @@
 #include "domain/block_graph.hpp"
 #include "adapters/alephium/alph_detail_store.hpp"
 
+#include <atomic>
 #include <cjson/cJSON.h>
 #include <deque>
 #include <mutex>
@@ -66,6 +67,10 @@ public:
     // Self-locking: count of live graph nodes not yet in confirmed_ set.
     size_t unconfirmed_live_count() const;
 
+    // Render → network: camera Z for lookback-window extension (no lock).
+    void  set_camera_scroll_z(float z) { camera_scroll_z_.store(z, std::memory_order_relaxed); }
+    float camera_scroll_z() const { return camera_scroll_z_.load(std::memory_order_relaxed); }
+
     // Presenter only: call while holding scene.mutex().
     bool is_confirmed_locked(const NodeId& hash) const;
     // Highest confirmed live block per lane (green Sobel / green tip arrows).
@@ -92,6 +97,8 @@ private:
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
     std::unordered_set<NodeId> confirmed_; // guarded by mu_
+    // Written by render thread; read by network adapter for lookback extension.
+    std::atomic<float> camera_scroll_z_{ 0.f };
 
     // Highest confirmed live height/hash per lane (for HUD + green tip viz).
     int    confirmed_height_[kLaneCount]{};

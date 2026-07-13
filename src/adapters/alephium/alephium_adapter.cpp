@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cjson/cJSON.h>
+#include <climits>
 #include <cstdio>
 #include <ctime>
 #include <queue>
@@ -31,9 +32,13 @@ cJSON* unwrap_block_json(cJSON* block_obj)
 AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
     : scene_(scene)
     , engine_(engine)
+    , initial_camera_scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
 {
     for (int i = 0; i < BlockScene::kLaneCount; ++i)
+    {
         min_lookback_height_[i] = 0;
+        earliest_traced_height_[i] = INT_MAX; // none traced yet
+    }
 }
 
 void AlephiumAdapter::configure(const Config& cfg)
@@ -88,7 +93,8 @@ void AlephiumAdapter::refresh_lookback_floors_()
     if (!main_chain_cache_.tips_valid())
         main_chain_cache_.refresh_tips();
 
-    // Heights older than ~lookback window are out of scope for DAG label / dep fetch.
+    // Base window: one lookback swath behind the network tip.
+    // Camera can unlock further swaths (see camera_extra_lookback_heights_).
     const int lookback_blocks =
         std::max(1, ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS);
 
@@ -107,8 +113,40 @@ void AlephiumAdapter::refresh_lookback_floors_()
         }
     }
     lookback_floors_valid_ = true;
-    std::printf("[adapter] lookback floors set (~%d heights behind tip, window=%ds)\n",
+    std::printf("[adapter] base lookback floors set (~%d heights, window=%ds); "
+                "camera can unlock more\n",
                 lookback_blocks, ALPH_LOOKBACK_WINDOW_SECONDS);
+}
+
+int AlephiumAdapter::camera_extra_lookback_heights_() const
+{
+    // Layout: z = -(height - origin) * meters_per_height with meters ≈ block seconds.
+    // Camera starts near -LOOKBACK_WINDOW seconds; scrolling toward older content
+    // increases scroll_z (toward 0 / positive). Each full lookback period of Z
+    // unlocks another swath of older heights.
+    const float z = scene_.camera_scroll_z();
+    const float z0 = initial_camera_scroll_z_;
+    const float period_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS);
+    if (period_z < 1.f)
+        return 0;
+    // older_delta > 0 when camera has moved toward older (higher world Z than start).
+    const float older_delta = z - z0;
+    if (older_delta < period_z)
+        return 0;
+    const int periods = static_cast<int>(older_delta / period_z);
+    const int lookback_blocks =
+        std::max(1, ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS);
+    return periods * lookback_blocks;
+}
+
+int AlephiumAdapter::effective_lookback_floor_(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+        return 0;
+    if (!lookback_floors_valid_)
+        return 0;
+    const int extra = camera_extra_lookback_heights_();
+    return std::max(0, min_lookback_height_[lane] - extra);
 }
 
 bool AlephiumAdapter::height_in_lookback_(uint32_t lane, int height) const
@@ -116,10 +154,10 @@ bool AlephiumAdapter::height_in_lookback_(uint32_t lane, int height) const
     if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
         return false;
     if (height < 0)
-        return true; // unknown height: allow offline label of live graph nodes only
+        return true;
     if (!lookback_floors_valid_)
         return true;
-    return height >= min_lookback_height_[lane];
+    return height >= effective_lookback_floor_(lane);
 }
 
 bool AlephiumAdapter::tip_pending_confirmation_() const
@@ -232,9 +270,8 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
-    // Same-chain main trace only: follow deps that share this tip's lane
-    // (chainFrom->chainTo). Cross-shard deps are ignored (no walk, no fetch).
-    // In-graph + lookback only. Skip already-confirmed.
+    // Same-chain main trace: follow same-lane deps within the (camera-extended)
+    // lookback floor. Terminate at already-confirmed nodes (earliest traced).
     if (main_hash.empty() || budget <= 0)
         return 0;
 
@@ -245,12 +282,15 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
     const uint32_t chain_lane = root->lane;
     const int chain_from = static_cast<int>(root->group_from);
     const int chain_to = static_cast<int>(root->group_to);
+    const int floor_h = effective_lookback_floor_(chain_lane);
+    const int earliest = earliest_traced_height_[chain_lane];
 
     std::queue<std::string> q;
     std::unordered_set<std::string> seen;
     q.push(main_hash);
     seen.insert(main_hash);
     int marked = 0;
+    int lowest_this_run = INT_MAX;
 
     while (!q.empty() && marked < budget)
     {
@@ -261,7 +301,6 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (!node)
             continue;
 
-        // Strict same-chain filter (lane == chainFrom*4+chainTo).
         if (node->lane != chain_lane ||
             static_cast<int>(node->group_from) != chain_from ||
             static_cast<int>(node->group_to) != chain_to)
@@ -271,16 +310,26 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         const int to = static_cast<int>(node->group_to);
         const int height = static_cast<int>(node->height);
 
-        if (!height_in_lookback_(chain_lane, height))
+        // Outside unlocked lookback window — stop this branch.
+        if (height >= 0 && height < floor_h)
             continue;
 
-        if (!main_chain_cache_.is_cached_main(cur))
+        const bool already = main_chain_cache_.is_cached_main(cur);
+        if (!already)
         {
             main_chain_cache_.mark_main(cur);
             mark_scene_confirmed_(cur, from, to, height);
             ++marked;
             ++stats_dag_floods_;
         }
+        if (height >= 0 && height < lowest_this_run)
+            lowest_this_run = height;
+
+        // Already-confirmed intermediate nodes: only expand unconfirmed children
+        // that are newly unlocked by camera lookback (below previous earliest).
+        // Fully inside previously traced band → terminate (no dep walk).
+        if (already && cur != main_hash && earliest != INT_MAX && height >= earliest)
+            continue;
 
         auto detail = scene_.detail_store().get(cur);
         if (!detail)
@@ -293,29 +342,37 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
             if (auto dn = scene_.graph().get(dep))
             {
-                // Only same-chain dependencies.
                 if (dn->lane != chain_lane ||
                     static_cast<int>(dn->group_from) != chain_from ||
                     static_cast<int>(dn->group_to) != chain_to)
                     continue;
-                if (!height_in_lookback_(chain_lane, static_cast<int>(dn->height)))
+                const int dh = static_cast<int>(dn->height);
+                if (dh >= 0 && dh < floor_h)
                     continue;
-                if (main_chain_cache_.is_cached_main(dep))
+                // Skip re-walk of already-confirmed deps still inside old window.
+                if (main_chain_cache_.is_cached_main(dep) &&
+                    earliest != INT_MAX && dh >= earliest)
                     continue;
                 q.push(dep);
                 continue;
             }
 
-            // Broken same-chain link: missing dep, parent in-window. We only
-            // know chain after fetch; still queue once — after admit, flood
-            // re-filters to same lane.
-            if (height_in_lookback_(chain_lane, height) &&
+            // Broken same-chain link only within unlocked window.
+            if (height >= floor_h &&
                 !broken_dep_failed_.count(dep) &&
                 broken_dep_seen_.insert(dep).second)
             {
                 broken_dep_q_.push_back(dep);
             }
         }
+    }
+
+    // Record earliest height labeled this run (terminate point for next flood).
+    if (lowest_this_run != INT_MAX)
+    {
+        if (earliest_traced_height_[chain_lane] == INT_MAX ||
+            lowest_this_run < earliest_traced_height_[chain_lane])
+            earliest_traced_height_[chain_lane] = lowest_this_run;
     }
     return marked;
 }

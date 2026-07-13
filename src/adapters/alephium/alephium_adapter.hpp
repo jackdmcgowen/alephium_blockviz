@@ -78,7 +78,10 @@ private:
     void enqueue_uncles_from_block_(const AlphBlock& alph);
     void label_all_confirmed_tip_ancestors_();
     void refresh_lookback_floors_();
+    // Effective floor = max(base_floor - camera_extra, earliest_traced) rules applied in flood.
     bool height_in_lookback_(uint32_t lane, int height) const;
+    int  effective_lookback_floor_(uint32_t lane) const;
+    int  camera_extra_lookback_heights_() const;
     bool tip_pending_confirmation_() const;
 
     void mark_scene_confirmed_(const std::string& hash);
@@ -101,7 +104,10 @@ private:
     std::unordered_set<std::string> uncle_queued_;
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
+    // Lowest height already labeled on this lane; flood terminates here.
+    int earliest_traced_height_[BlockScene::kLaneCount]{};
     bool lookback_floors_valid_ = false;
+    float initial_camera_scroll_z_ = 0.f;
 
     int poll_count_ = 0;
     int stats_verified_ok_ = 0;

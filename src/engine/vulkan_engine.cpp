@@ -512,6 +512,8 @@ void VulkanEngine::render_loop()
                 camera_->tick(last_frame_dt_sec_);
                 frame_frustum = camera_->frustum();
                 fin.frustum = &frame_frustum;
+                if (scene_)
+                    scene_->set_camera_scroll_z(camera_->scroll_z());
             }
 
             frame_source_->prepare(fin, fout, &debugDrawer);
