@@ -8,7 +8,7 @@ BlockScene::BlockScene()
     {
         confirmed_height_[i] = -1;
         confirmed_hash_[i].clear();
-        cursor_inited_[i] = false;
+        frontier_valid_[i] = false;
     }
 }
 
@@ -52,7 +52,6 @@ bool BlockScene::add_block(cJSON* block)
     if (!removed_uncles.empty())
         detail_store_.remove_many(removed_uncles);
 
-    // Uncle path does not call remove_block — erase confirmed under same lock.
     for (const NodeId& unc : removed_uncles)
         erase_confirmed_unlocked_(unc);
 
@@ -63,7 +62,6 @@ bool BlockScene::add_block(cJSON* block)
     item.height = alph_block.height;
     feed_.push_back(std::move(item));
 
-    // Drop feed rows for removed uncles
     if (!removed_uncles.empty())
     {
         feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
@@ -118,18 +116,6 @@ void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
     mark_confirmed_unlocked_(hash, lane, height);
 }
 
-void BlockScene::ensure_cursor_initialized(uint32_t lane, int start_height_minus_one)
-{
-    if (lane >= static_cast<uint32_t>(kLaneCount))
-        return;
-    std::lock_guard<std::mutex> lock(mu_);
-    if (cursor_inited_[lane])
-        return;
-    confirmed_height_[lane] = start_height_minus_one;
-    confirmed_hash_[lane].clear();
-    cursor_inited_[lane] = true;
-}
-
 int BlockScene::confirmed_height(uint32_t lane) const
 {
     if (lane >= static_cast<uint32_t>(kLaneCount))
@@ -151,15 +137,7 @@ bool BlockScene::cursor_initialized(uint32_t lane) const
     if (lane >= static_cast<uint32_t>(kLaneCount))
         return false;
     std::lock_guard<std::mutex> lock(mu_);
-    return cursor_inited_[lane];
-}
-
-int BlockScene::try_advance_confirmed(uint32_t lane)
-{
-    if (lane >= static_cast<uint32_t>(kLaneCount))
-        return 0;
-    std::lock_guard<std::mutex> lock(mu_);
-    return try_advance_confirmed_unlocked_(lane);
+    return frontier_valid_[lane];
 }
 
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
@@ -206,7 +184,7 @@ bool BlockScene::is_frontier_hash_locked(const NodeId& hash) const
 void BlockScene::copy_confirmed_heights_locked(int out[kLaneCount]) const
 {
     for (int i = 0; i < kLaneCount; ++i)
-        out[i] = cursor_inited_[i] ? confirmed_height_[i] : -1;
+        out[i] = frontier_valid_[i] ? confirmed_height_[i] : -1;
 }
 
 void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
@@ -214,12 +192,11 @@ void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.insert(hash);
-
-    // Resolve lane/height from graph for cursor advance.
     if (auto n = graph_.get(hash))
     {
         if (n->lane < static_cast<uint32_t>(kLaneCount) && n->height >= 0)
-            try_advance_confirmed_unlocked_(static_cast<uint32_t>(n->lane));
+            mark_confirmed_unlocked_(hash, static_cast<uint32_t>(n->lane),
+                                     static_cast<int>(n->height));
     }
 }
 
@@ -228,17 +205,16 @@ void BlockScene::mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int
     if (hash.empty())
         return;
     confirmed_.insert(hash);
-    if (lane >= static_cast<uint32_t>(kLaneCount) || !cursor_inited_[lane])
+    if (lane >= static_cast<uint32_t>(kLaneCount))
         return;
 
-    // Fast path: exact next sequential height with known lane/height.
-    if (height == confirmed_height_[lane] + 1)
+    frontier_valid_[lane] = true;
+    // Highest confirmed live block on this lane is the tip frontier for Sobel/HUD.
+    if (height > confirmed_height_[lane] || confirmed_hash_[lane].empty())
     {
         confirmed_height_[lane] = height;
         confirmed_hash_[lane] = hash;
     }
-    // Catch up any further contiguous confirmed heights already in the graph.
-    try_advance_confirmed_unlocked_(lane);
 }
 
 void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
@@ -246,20 +222,11 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.erase(hash);
-    // Monotonic: never decrease H_c. Clear hash_c if this was the frontier display hash,
-    // then re-resolve another confirmed hash at the same height if present.
+
     for (int i = 0; i < kLaneCount; ++i)
     {
-        if (confirmed_hash_[i] != hash)
-            continue;
-        confirmed_hash_[i].clear();
-        if (confirmed_height_[i] >= 0)
-        {
-            const NodeId alt =
-                find_confirmed_at_unlocked_(static_cast<uint32_t>(i), confirmed_height_[i]);
-            if (!alt.empty())
-                confirmed_hash_[i] = alt;
-        }
+        if (confirmed_hash_[i] == hash)
+            refresh_frontier_lane_unlocked_(static_cast<uint32_t>(i));
     }
 }
 
@@ -270,42 +237,39 @@ bool BlockScene::is_confirmed_unlocked_(const NodeId& hash) const
     return confirmed_.count(hash) != 0;
 }
 
-NodeId BlockScene::find_confirmed_at_unlocked_(uint32_t lane, int height) const
+void BlockScene::refresh_frontier_lane_unlocked_(uint32_t lane)
 {
-    if (lane >= static_cast<uint32_t>(kLaneCount) || height < 0)
-        return {};
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
 
+    int best_h = -1;
+    NodeId best;
     const std::vector<GraphNode> nodes = graph_.nodes_snapshot();
     for (const GraphNode& n : nodes)
     {
-        if (n.lane != lane || n.height != height)
+        if (n.lane != lane || n.height < 0)
             continue;
-        if (confirmed_.count(n.id))
-            return n.id;
+        if (!confirmed_.count(n.id))
+            continue;
+        if (static_cast<int>(n.height) > best_h)
+        {
+            best_h = static_cast<int>(n.height);
+            best = n.id;
+        }
     }
-    return {};
-}
 
-int BlockScene::try_advance_confirmed_unlocked_(uint32_t lane)
-{
-    if (lane >= static_cast<uint32_t>(kLaneCount) || !cursor_inited_[lane])
-        return 0;
-
-    int steps = 0;
-    // Free in-graph catch-up only (no network). Keep modest so free advances
-    // do not race far past what the horizon-limited fetcher is filling.
-    constexpr int kMaxSteps = 2;
-    while (steps < kMaxSteps)
+    if (best_h < 0)
     {
-        const int need = confirmed_height_[lane] + 1;
-        const NodeId at = find_confirmed_at_unlocked_(lane, need);
-        if (at.empty())
-            break;
-        confirmed_height_[lane] = need;
-        confirmed_hash_[lane] = at;
-        ++steps;
+        confirmed_height_[lane] = -1;
+        confirmed_hash_[lane].clear();
+        frontier_valid_[lane] = false;
     }
-    return steps;
+    else
+    {
+        confirmed_height_[lane] = best_h;
+        confirmed_hash_[lane] = best;
+        frontier_valid_[lane] = true;
+    }
 }
 
 size_t BlockScene::unconfirmed_live_count() const
@@ -323,7 +287,6 @@ size_t BlockScene::unconfirmed_live_count() const
 
 std::vector<NodeId> BlockScene::tip_ids() const
 {
-    // Caller may hold mu_; graph has its own lock.
     const std::vector<GraphNode> nodes = graph_.nodes_snapshot();
 
     int64_t tip_height[16];

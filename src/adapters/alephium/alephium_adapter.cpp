@@ -4,6 +4,8 @@
 #include <cjson/cJSON.h>
 #include <cstdio>
 #include <ctime>
+#include <queue>
+#include <vector>
 
 #include "alph_block.hpp"
 #include "commands.h"
@@ -15,6 +17,15 @@ uint32_t lane_of(int from, int to)
     return static_cast<uint32_t>(from * ALPH_NUM_GROUPS + to);
 }
 
+cJSON* unwrap_block_json(cJSON* block_obj)
+{
+    if (!block_obj)
+        return nullptr;
+    if (cJSON_GetObjectItem(block_obj, "hash"))
+        return block_obj;
+    cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
+    return inner ? inner : block_obj;
+}
 } // namespace
 
 AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
@@ -34,11 +45,11 @@ void AlephiumAdapter::reset_stats()
     stats_verified_ok_ = stats_removed_ = stats_replaced_ = 0;
     stats_detail_refilled_ = 0;
     stats_confirmed_marks_ = 0;
-    stats_cursor_advances_ = 0;
-    stats_next_height_fetches_ = 0;
-    verify_q_.clear();
-    verify_queued_.clear();
-    verify_done_.clear();
+    stats_dag_floods_ = 0;
+    stats_api_is_main_ = 0;
+    seed_q_.clear();
+    seed_queued_.clear();
+    proven_not_main_.clear();
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
@@ -47,263 +58,324 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
         return;
     scene_.mark_confirmed(hash);
     ++stats_confirmed_marks_;
-    // try_advance happens inside mark when graph has lane/height
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, int to, int height)
 {
     if (hash.empty())
         return;
-    const uint32_t lane = lane_of(from, to);
-    scene_.mark_confirmed(hash, lane, height);
+    scene_.mark_confirmed(hash, lane_of(from, to), height);
     ++stats_confirmed_marks_;
-    const int steps = scene_.try_advance_confirmed(lane);
-    stats_cursor_advances_ += steps;
 }
 
-void AlephiumAdapter::ensure_cursors_initialized_()
+void AlephiumAdapter::on_start()
 {
-    if (!main_chain_cache_.tips_valid())
-        main_chain_cache_.refresh_tips();
-
-    // Start near the live tip so we do not backfill tens of heights (queue congestion).
-    // First target height = net_tip - kConfirmFetchHorizon; H_c = that - 1.
-    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
-    {
-        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
-        {
-            const uint32_t lane = lane_of(f, t);
-            if (scene_.cursor_initialized(lane))
-                continue;
-            const int net_tip = main_chain_cache_.tip(f, t);
-            if (net_tip < 0)
-                continue;
-            const int start_h = std::max(0, net_tip - kConfirmFetchHorizon);
-            // H_c = start_h - 1 so first advance targets start_h (within horizon of tip).
-            scene_.ensure_cursor_initialized(lane, start_h - 1);
-            std::printf("[adapter] cursor init lane %u (%d->%d) H_c=%d (start=%d net_tip=%d horizon=%d)\n",
-                        lane, f, t, start_h - 1, start_h, net_tip, kConfirmFetchHorizon);
-        }
-    }
+    main_chain_cache_.refresh_tips();
 }
 
-bool AlephiumAdapter::admit_block_json_(cJSON* block_obj, const std::string& expected_hash,
-                                        int from, int to, int height)
+bool AlephiumAdapter::ready_for_poll() const
 {
-    if (!block_obj)
+    if (!seed_q_.empty())
         return false;
-
-    cJSON* block = block_obj;
-    if (!cJSON_GetObjectItem(block_obj, "hash"))
-    {
-        cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
-        if (inner)
-            block = inner;
-    }
-
-    AlphBlock alph(block);
-    if (alph.hash.empty())
+    if (scene_.unconfirmed_live_count() != 0)
         return false;
-    if (!expected_hash.empty() && alph.hash != expected_hash)
-        return false;
-
-    scene_.add_block(block);
-    main_chain_cache_.mark_main(alph.hash);
-    mark_scene_confirmed_(alph.hash, from, to, height >= 0 ? height : alph.height);
     return true;
 }
 
-int AlephiumAdapter::fetch_next_height_for_lane_(int from, int to)
+void AlephiumAdapter::enqueue_seed_(SeedJob job)
 {
-    const uint32_t lane = lane_of(from, to);
-    if (!scene_.cursor_initialized(lane))
-        return 0;
-
-    // Snapshot H_c at call start — never request heights beyond H_c0 + horizon.
-    const int h_c0 = scene_.confirmed_height(lane);
-    const int max_request_h = h_c0 + kConfirmFetchHorizon;
-
-    int total_steps = 0;
-    int api_hops = 0;
-
-    // Free advance through confirmed blocks already in the graph (no network).
+    if (job.hash.empty())
+        return;
+    if (seed_queued_.count(job.hash) || proven_not_main_.count(job.hash))
+        return;
+    // Already confirmed — no work.
+    if (main_chain_cache_.is_cached_main(job.hash))
     {
-        const int steps = scene_.try_advance_confirmed(lane);
-        if (steps > 0)
-        {
-            stats_cursor_advances_ += steps;
-            total_steps += steps;
-        }
+        mark_scene_confirmed_(job.hash, job.from, job.to, job.height);
+        return;
     }
 
-    // One network hop per call so drain_verify can round-robin across chains.
-    // Horizon still caps which heights we will ever request (need <= H_c0 + 2).
-    while (api_hops < 1)
+    if (seed_q_.size() >= kMaxSeedQueue)
     {
-        const int h_c = scene_.confirmed_height(lane);
-        const int need = h_c + 1;
-        if (need < 0)
-            break;
-        // Do not request further than horizon from the start-of-call cursor
-        // (and never more than 2 ahead of current H_c either).
-        if (need > max_request_h || need > h_c + kConfirmFetchHorizon)
-            break;
-
-        const int net_tip = main_chain_cache_.tip(from, to);
-        if (net_tip >= 0 && need > net_tip)
-            break; // caught up to network tip
-
-        // Prefer in-graph confirmed before hitting the API.
+        if (!seed_q_.empty())
         {
-            const int steps = scene_.try_advance_confirmed(lane);
-            if (steps > 0)
-            {
-                stats_cursor_advances_ += steps;
-                total_steps += steps;
-                continue;
-            }
+            seed_queued_.erase(seed_q_.back().hash);
+            seed_q_.pop_back();
         }
-
-        ++stats_next_height_fetches_;
-        ++api_hops;
-
-        cJSON* arr = get_blockflow_hashes(from, to, need);
-        if (!arr || !cJSON_IsArray(arr))
-        {
-            if (arr)
-                cJSON_Delete(arr);
-            break;
-        }
-
-        const int n = cJSON_GetArraySize(arr);
-        std::string main_hash;
-        if (n == 1)
-        {
-            cJSON* item = cJSON_GetArrayItem(arr, 0);
-            if (item && cJSON_IsString(item) && item->valuestring)
-                main_hash = item->valuestring;
-        }
-        else if (n > 1)
-        {
-            for (int i = 0; i < n; ++i)
-            {
-                cJSON* item = cJSON_GetArrayItem(arr, i);
-                if (!item || !cJSON_IsString(item) || !item->valuestring)
-                    continue;
-                const std::string cand = item->valuestring;
-                if (main_chain_cache_.is_cached_main(cand))
-                {
-                    main_hash = cand;
-                    break;
-                }
-            }
-            if (main_hash.empty())
-            {
-                for (int i = 0; i < n; ++i)
-                {
-                    cJSON* item = cJSON_GetArrayItem(arr, i);
-                    if (!item || !cJSON_IsString(item) || !item->valuestring)
-                        continue;
-                    bool transport = false;
-                    if (main_chain_cache_.query_is_main(item->valuestring, &transport) &&
-                        transport)
-                    {
-                        main_hash = item->valuestring;
-                        break;
-                    }
-                    if (!transport)
-                        break;
-                }
-            }
-        }
-        cJSON_Delete(arr);
-
-        if (main_hash.empty())
-            break;
-
-        const int h_before = scene_.confirmed_height(lane);
-
-        if (!scene_.graph().contains(main_hash))
-        {
-            cJSON* block_obj = get_blockflow_blocks_blockhash(main_hash.c_str());
-            if (!block_obj)
-            {
-                // Only enqueue verify within the same height horizon.
-                if (need <= h_c0 + kConfirmFetchHorizon)
-                {
-                    VerifyJob job;
-                    job.hash = main_hash;
-                    job.from = from;
-                    job.to = to;
-                    job.height = need;
-                    job.hot = true;
-                    enqueue_verify(std::move(job));
-                }
-                break;
-            }
-            admit_block_json_(block_obj, main_hash, from, to, need);
-            cJSON_Delete(block_obj);
-        }
-        else
-        {
-            main_chain_cache_.mark_main(main_hash);
-            mark_scene_confirmed_(main_hash, from, to, need);
-        }
-
-        const int steps = scene_.try_advance_confirmed(lane);
-        stats_cursor_advances_ += steps;
-        total_steps += steps;
-
-        if (scene_.confirmed_height(lane) <= h_before)
-            break; // stuck on this height
+        if (seed_q_.size() >= kMaxSeedQueue)
+            return;
     }
-    return total_steps;
+
+    seed_queued_.insert(job.hash);
+    // Tips (higher height) first: push_front when height is hot.
+    if (main_chain_cache_.is_hot_zone(job.from, job.to, job.height))
+        seed_q_.push_front(std::move(job));
+    else
+        seed_q_.push_back(std::move(job));
 }
 
-void AlephiumAdapter::drain_next_heights_(int max_lane_jobs)
+bool AlephiumAdapter::pop_seed_round_robin_(SeedJob& out)
 {
-    ensure_cursors_initialized_();
-    if (!main_chain_cache_.tips_valid())
-        main_chain_cache_.refresh_tips();
-
-    // One hop per lane, round-robin — never burn a drain on a single chain.
-    const int n = std::max(1, std::min(max_lane_jobs, BlockScene::kLaneCount));
-    for (int k = 0; k < n; ++k)
-    {
-        const int lane_i = next_height_lane_rr_ % BlockScene::kLaneCount;
-        next_height_lane_rr_ = (next_height_lane_rr_ + 1) % BlockScene::kLaneCount;
-        const int from = lane_i / ALPH_NUM_GROUPS;
-        const int to = lane_i % ALPH_NUM_GROUPS;
-        fetch_next_height_for_lane_(from, to);
-    }
-}
-
-bool AlephiumAdapter::pop_verify_round_robin_(VerifyJob& out)
-{
-    if (verify_q_.empty())
+    if (seed_q_.empty())
         return false;
 
-    // Prefer a job on the next preferred lane, then scan other lanes, then FIFO.
     for (int attempt = 0; attempt < BlockScene::kLaneCount; ++attempt)
     {
-        const int want_lane =
-            (verify_lane_rr_ + attempt) % BlockScene::kLaneCount;
-        for (auto it = verify_q_.begin(); it != verify_q_.end(); ++it)
+        const int want_lane = (seed_lane_rr_ + attempt) % BlockScene::kLaneCount;
+        for (auto it = seed_q_.begin(); it != seed_q_.end(); ++it)
         {
             if (static_cast<int>(lane_of(it->from, it->to)) != want_lane)
                 continue;
             out = std::move(*it);
-            verify_q_.erase(it);
-            verify_lane_rr_ = (want_lane + 1) % BlockScene::kLaneCount;
+            seed_queued_.erase(out.hash);
+            seed_q_.erase(it);
+            seed_lane_rr_ = (want_lane + 1) % BlockScene::kLaneCount;
             return true;
         }
     }
 
-    out = std::move(verify_q_.front());
-    verify_q_.pop_front();
-    verify_lane_rr_ =
+    out = std::move(seed_q_.front());
+    seed_queued_.erase(out.hash);
+    seed_q_.pop_front();
+    seed_lane_rr_ =
         (static_cast<int>(lane_of(out.from, out.to)) + 1) % BlockScene::kLaneCount;
     return true;
+}
+
+bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
+{
+    if (hash.empty())
+        return false;
+    if (scene_.graph().contains(hash))
+        return true;
+
+    cJSON* block_obj = get_blockflow_blocks_blockhash(hash.c_str());
+    if (!block_obj)
+        return false;
+
+    cJSON* block = unwrap_block_json(block_obj);
+    AlphBlock alph(block);
+    if (alph.hash.empty() || alph.hash != hash)
+    {
+        cJSON_Delete(block_obj);
+        return false;
+    }
+
+    scene_.add_block(block);
+    cJSON_Delete(block_obj);
+    return scene_.graph().contains(hash);
+}
+
+int AlephiumAdapter::flood_confirm_deps_(const std::string& main_hash, int budget)
+{
+    if (main_hash.empty() || budget <= 0)
+        return 0;
+
+    std::queue<std::string> q;
+    std::unordered_set<std::string> seen;
+    q.push(main_hash);
+    seen.insert(main_hash);
+    int marked = 0;
+
+    while (!q.empty() && marked < budget)
+    {
+        const std::string cur = std::move(q.front());
+        q.pop();
+
+        if (!scene_.graph().contains(cur))
+        {
+            if (!fetch_and_admit_(cur))
+                continue;
+        }
+
+        auto node = scene_.graph().get(cur);
+        auto detail = scene_.detail_store().get(cur);
+        const int from = node ? static_cast<int>(node->group_from) : 0;
+        const int to = node ? static_cast<int>(node->group_to) : 0;
+        const int height = node ? static_cast<int>(node->height) : -1;
+
+        main_chain_cache_.mark_main(cur);
+        mark_scene_confirmed_(cur, from, to, height);
+        ++marked;
+        ++stats_dag_floods_;
+
+        if (!detail)
+            continue;
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty() || !seen.insert(dep).second)
+                continue;
+            q.push(dep);
+        }
+    }
+    return marked;
+}
+
+void AlephiumAdapter::replace_non_main_(const SeedJob& job)
+{
+    std::printf("[adapter] DAG seed NOT main %s [%d->%d] h=%d — remove\n",
+                job.hash.c_str(), job.from, job.to, job.height);
+    const bool reselect = engine_.is_selected(job.hash);
+    scene_.remove_block(job.hash);
+    if (reselect)
+        engine_.clear_selection();
+    ++stats_removed_;
+    proven_not_main_.insert(job.hash);
+
+    cJSON* arr = get_blockflow_hashes(job.from, job.to, job.height);
+    if (!arr || !cJSON_IsArray(arr))
+    {
+        if (arr)
+            cJSON_Delete(arr);
+        return;
+    }
+
+    std::string main_hash;
+    const int n = cJSON_GetArraySize(arr);
+    if (n == 1)
+    {
+        cJSON* item = cJSON_GetArrayItem(arr, 0);
+        if (item && cJSON_IsString(item) && item->valuestring)
+            main_hash = item->valuestring;
+    }
+    else
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            cJSON* item = cJSON_GetArrayItem(arr, i);
+            if (!item || !cJSON_IsString(item) || !item->valuestring)
+                continue;
+            const std::string cand = item->valuestring;
+            if (cand == job.hash)
+                continue;
+            bool transport = false;
+            ++stats_api_is_main_;
+            if (main_chain_cache_.query_is_main(cand, &transport) && transport)
+            {
+                main_hash = cand;
+                break;
+            }
+        }
+    }
+    cJSON_Delete(arr);
+
+    if (main_hash.empty() || main_hash == job.hash)
+        return;
+
+    if (!fetch_and_admit_(main_hash))
+        return;
+
+    main_chain_cache_.mark_main(main_hash);
+    mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
+    flood_confirm_deps_(main_hash, kMaxFloodPerSeed);
+    ++stats_replaced_;
+    ++stats_verified_ok_;
+    if (reselect)
+        engine_.set_selection(main_hash);
+    std::printf("[adapter] replaced with main %s [%d->%d] h=%d\n",
+                main_hash.c_str(), job.from, job.to, job.height);
+}
+
+void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
+{
+    // Already resolved.
+    if (main_chain_cache_.is_cached_main(seed.hash))
+    {
+        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
+        flood_confirm_deps_(seed.hash, kMaxFloodPerSeed);
+        ++stats_verified_ok_;
+        return;
+    }
+
+    // BFS ancestors from the seed (tip-first). For each unproven node, one is_main
+    // query. On first main hit: flood all of its deps as confirmed (no further API).
+    std::queue<std::string> walk;
+    std::unordered_set<std::string> visited;
+    walk.push(seed.hash);
+    visited.insert(seed.hash);
+
+    int walked = 0;
+    while (!walk.empty() && walked < kMaxAncestorWalk)
+    {
+        const std::string cur = std::move(walk.front());
+        walk.pop();
+        ++walked;
+
+        if (main_chain_cache_.is_cached_main(cur))
+        {
+            auto n = scene_.graph().get(cur);
+            const int from = n ? static_cast<int>(n->group_from) : seed.from;
+            const int to = n ? static_cast<int>(n->group_to) : seed.to;
+            const int height = n ? static_cast<int>(n->height) : seed.height;
+            mark_scene_confirmed_(cur, from, to, height);
+            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            ++stats_verified_ok_;
+            return;
+        }
+
+        if (!scene_.graph().contains(cur))
+        {
+            if (!fetch_and_admit_(cur))
+                continue;
+        }
+
+        auto node = scene_.graph().get(cur);
+        const int from = node ? static_cast<int>(node->group_from) : seed.from;
+        const int to = node ? static_cast<int>(node->group_to) : seed.to;
+        const int height = node ? static_cast<int>(node->height) : seed.height;
+
+        // Singleton at height is often enough without full is_main.
+        if (height >= 0 &&
+            main_chain_cache_.try_hashes_singleton(cur, from, to, height))
+        {
+            mark_scene_confirmed_(cur, from, to, height);
+            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            ++stats_verified_ok_;
+            return;
+        }
+
+        bool transport_ok = false;
+        ++stats_api_is_main_;
+        if (main_chain_cache_.query_is_main(cur, &transport_ok))
+        {
+            mark_scene_confirmed_(cur, from, to, height);
+            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            ++stats_verified_ok_;
+            std::printf("[adapter] DAG hit main %s [%d->%d] h=%d — flood deps\n",
+                        cur.c_str(), from, to, height);
+            return;
+        }
+
+        if (!transport_ok)
+        {
+            // Retry later
+            SeedJob retry = seed;
+            retry.hash = cur;
+            retry.from = from;
+            retry.to = to;
+            retry.height = height;
+            enqueue_seed_(std::move(retry));
+            return;
+        }
+
+        // Not main: if this is the original tip seed, replace; else keep walking deps.
+        if (cur == seed.hash)
+        {
+            replace_non_main_(seed);
+            return;
+        }
+
+        // Walk further back through deps of this non-main block.
+        if (auto d = scene_.detail_store().get(cur))
+        {
+            for (const std::string& dep : d->deps)
+            {
+                if (dep.empty() || !visited.insert(dep).second)
+                    continue;
+                walk.push(dep);
+            }
+        }
+    }
 }
 
 void AlephiumAdapter::prune_detail_store()
@@ -322,7 +394,6 @@ void AlephiumAdapter::maybe_refill_selection_detail()
     if (hash.empty())
         return;
 
-    // Already full (race with concurrent upsert) — refresh selection copy only.
     if (!scene_.detail_store().is_slim(hash))
     {
         if (engine_.is_selected(hash))
@@ -333,189 +404,20 @@ void AlephiumAdapter::maybe_refill_selection_detail()
     cJSON* block_obj = get_blockflow_blocks_blockhash(hash.c_str());
     if (!block_obj)
     {
-        // Retry later
-        engine_.set_selection(hash); // re-queues refill if still slim
+        engine_.set_selection(hash);
         return;
     }
 
-    cJSON* block = block_obj;
-    if (!cJSON_GetObjectItem(block_obj, "hash"))
-    {
-        cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
-        if (inner)
-            block = inner;
-    }
-
-    // Upsert full payload without re-admitting into the graph (may already be live).
+    cJSON* block = unwrap_block_json(block_obj);
     AlphBlock alph(block);
     if (!alph.hash.empty())
     {
         scene_.detail_store().upsert(alph);
         scene_.detail_store().set_full_detail_pin(alph.hash);
         ++stats_detail_refilled_;
-        std::printf("[adapter] detail refilled %s txns=%zu\n",
-                    alph.hash.c_str(), alph.txns.size());
         if (engine_.is_selected(alph.hash))
             engine_.set_selection(alph.hash);
     }
-
-    cJSON_Delete(block_obj);
-}
-
-void AlephiumAdapter::on_start()
-{
-    main_chain_cache_.refresh_tips();
-    ensure_cursors_initialized_();
-}
-
-bool AlephiumAdapter::ready_for_poll() const
-{
-    // Block new blockflow polls until the current set is fully confirmation-processed:
-    // verify queue drained and every live cube is in the confirmed set (or gone).
-    if (!verify_q_.empty())
-        return false;
-    if (scene_.unconfirmed_live_count() != 0)
-        return false;
-    return true;
-}
-
-void AlephiumAdapter::enqueue_verify(VerifyJob job)
-{
-    if (job.hash.empty())
-        return;
-    if (main_chain_cache_.is_cached_main(job.hash))
-        return;
-    if (verify_done_.count(job.hash) || verify_queued_.count(job.hash))
-        return;
-
-    if (verify_q_.size() >= kMaxVerifyQueue)
-    {
-        if (!verify_q_.empty() && !verify_q_.back().hot)
-        {
-            verify_queued_.erase(verify_q_.back().hash);
-            verify_q_.pop_back();
-        }
-        if (verify_q_.size() >= kMaxVerifyQueue)
-            return;
-    }
-
-    verify_queued_.insert(job.hash);
-    if (job.hot)
-        verify_q_.push_front(std::move(job));
-    else
-        verify_q_.push_back(std::move(job));
-}
-
-void AlephiumAdapter::verify_one(const VerifyJob& job)
-{
-    verify_queued_.erase(job.hash);
-
-    if (main_chain_cache_.is_cached_main(job.hash))
-    {
-        verify_done_.insert(job.hash);
-        ++stats_verified_ok_;
-        mark_scene_confirmed_(job.hash, job.from, job.to, job.height);
-        return;
-    }
-
-    if (main_chain_cache_.try_hashes_singleton(job.hash, job.from, job.to, job.height))
-    {
-        verify_done_.insert(job.hash);
-        ++stats_verified_ok_;
-        mark_scene_confirmed_(job.hash, job.from, job.to, job.height);
-        return;
-    }
-
-    bool transport_ok = false;
-    if (main_chain_cache_.query_is_main(job.hash, &transport_ok))
-    {
-        verify_done_.insert(job.hash);
-        ++stats_verified_ok_;
-        mark_scene_confirmed_(job.hash, job.from, job.to, job.height);
-        return;
-    }
-
-    if (!transport_ok)
-    {
-        VerifyJob retry = job;
-        retry.hot = false;
-        enqueue_verify(std::move(retry));
-        return;
-    }
-
-    std::printf("[adapter] verify NOT main %s [%d->%d] h=%d — remove\n",
-                job.hash.c_str(), job.from, job.to, job.height);
-    const bool reselect = engine_.is_selected(job.hash);
-    scene_.remove_block(job.hash);
-    if (reselect)
-        engine_.clear_selection();
-    ++stats_removed_;
-    verify_done_.insert(job.hash);
-
-    cJSON* arr = get_blockflow_hashes(job.from, job.to, job.height);
-    if (!arr || !cJSON_IsArray(arr))
-    {
-        if (arr)
-            cJSON_Delete(arr);
-        return;
-    }
-
-    const int n = cJSON_GetArraySize(arr);
-    std::string main_hash;
-    if (n == 1)
-    {
-        cJSON* item = cJSON_GetArrayItem(arr, 0);
-        if (item && cJSON_IsString(item) && item->valuestring)
-            main_hash = item->valuestring;
-    }
-    else
-    {
-        for (int i = 0; i < n; ++i)
-        {
-            cJSON* item = cJSON_GetArrayItem(arr, i);
-            if (!item || !cJSON_IsString(item) || !item->valuestring)
-                continue;
-            const std::string cand = item->valuestring;
-            if (cand == job.hash)
-                continue;
-            bool transport = false;
-            if (main_chain_cache_.query_is_main(cand, &transport) && transport)
-            {
-                main_hash = cand;
-                break;
-            }
-        }
-    }
-    cJSON_Delete(arr);
-
-    if (main_hash.empty() || main_hash == job.hash)
-        return;
-
-    main_chain_cache_.mark_main(main_hash);
-    verify_done_.insert(main_hash);
-
-    cJSON* block_obj = get_blockflow_blocks_blockhash(main_hash.c_str());
-    if (!block_obj)
-        return;
-
-    cJSON* block = block_obj;
-    if (!cJSON_GetObjectItem(block_obj, "hash"))
-    {
-        cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
-        if (inner)
-            block = inner;
-    }
-
-    scene_.add_block(block);
-    // Always dual-write scene confirm for main_hash; ignore add_block bool.
-    mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
-    ++stats_replaced_;
-    if (reselect)
-        engine_.set_selection(main_hash);
-    std::printf("[adapter] replaced with main %s [%d->%d] h=%d%s\n",
-                main_hash.c_str(), job.from, job.to, job.height,
-                reselect ? " (reselected)" : "");
-
     cJSON_Delete(block_obj);
 }
 
@@ -523,51 +425,69 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
-    // Fair interleave: one next-height hop on one lane, then one verify job from
-    // a different lane preference — so no single chain starves the others.
+    // Re-seed from latest unconfirmed (tips first, then any remaining live).
+    if (seed_q_.empty() && scene_.unconfirmed_live_count() > 0)
+    {
+        auto seed_node = [&](const NodeId& id) {
+            auto n = scene_.graph().get(id);
+            if (!n)
+                return;
+            if (main_chain_cache_.is_cached_main(id))
+            {
+                mark_scene_confirmed_(id, static_cast<int>(n->group_from),
+                                      static_cast<int>(n->group_to),
+                                      static_cast<int>(n->height));
+                flood_confirm_deps_(id, kMaxFloodPerSeed);
+                return;
+            }
+            SeedJob job;
+            job.hash = id;
+            job.from = static_cast<int>(n->group_from);
+            job.to = static_cast<int>(n->group_to);
+            job.height = static_cast<int>(n->height);
+            enqueue_seed_(std::move(job));
+        };
+
+        for (const NodeId& tip : scene_.tip_ids())
+            seed_node(tip);
+
+        if (seed_q_.empty())
+        {
+            // Fallback: any unconfirmed live node (highest first via tips already tried).
+            for (const GraphNode& n : scene_.nodes_snapshot())
+            {
+                if (main_chain_cache_.is_cached_main(n.id))
+                    continue;
+                seed_node(n.id);
+            }
+        }
+    }
+
     int n = 0;
     while (n < max_jobs && running.load())
     {
-        const bool did_height = [&]() {
-            const size_t fetches_before = static_cast<size_t>(stats_next_height_fetches_);
-            const int adv_before = stats_cursor_advances_;
-            drain_next_heights_(/*max_lane_jobs=*/1);
-            return stats_next_height_fetches_ > static_cast<int>(fetches_before) ||
-                   stats_cursor_advances_ > adv_before;
-        }();
-
-        bool did_verify = false;
-        VerifyJob job;
-        if (pop_verify_round_robin_(job))
-        {
-            verify_one(job);
-            did_verify = true;
-        }
-
-        if (!did_height && !did_verify)
+        SeedJob job;
+        if (!pop_seed_round_robin_(job))
             break;
+        confirm_seed_(job);
         ++n;
     }
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 {
-    // Prefer selection inspector continuity before long poll work
     maybe_refill_selection_detail();
-    ensure_cursors_initialized_();
 
-    // Safety: network poller should already gate on ready_for_poll().
     if (!ready_for_poll())
     {
-        std::printf("[adapter] poll skipped — still confirming (q=%zu unconfirmed=%zu)\n",
-                    verify_q_.size(), scene_.unconfirmed_live_count());
+        std::printf("[adapter] poll skipped — DAG confirm pending (seeds=%zu unconfirmed=%zu)\n",
+                    seed_q_.size(), scene_.unconfirmed_live_count());
         return;
     }
 
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    std::printf("\n[adapter] Polling blockflow from %lld to %lld (verify_q=%zu)\n",
-                static_cast<long long>(last_poll_ts), static_cast<long long>(now),
-                verify_q_.size());
+    std::printf("\n[adapter] Polling blockflow from %lld to %lld\n",
+                static_cast<long long>(last_poll_ts), static_cast<long long>(now));
 
     ++poll_count_;
     if (poll_count_ == 1 || (poll_count_ % kTipRefreshEveryNPolls) == 0)
@@ -578,17 +498,15 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     if (!obj)
     {
         maybe_refill_selection_detail();
-        drain_next_heights_(BlockScene::kLaneCount);
-        // Do not advance last_poll_ts on hard failure so we retry the window.
         return;
     }
 
     GET_OBJECT_ITEM(obj, blocksAndEvents);
+    int seen = 0, added = 0, seeded = 0, skipped_bad = 0;
+
     if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
     {
         const int count = cJSON_GetArraySize(blocksAndEvents);
-        int seen = 0, added = 0, queued = 0, skipped_bad = 0, confirmed_now = 0;
-
         for (int i = 0; i < count; i++)
         {
             cJSON* shard = cJSON_GetArrayItem(blocksAndEvents, i);
@@ -604,7 +522,6 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                     continue;
 
                 ++seen;
-
                 GET_OBJECT_ITEM(block, hash);
                 GET_OBJECT_ITEM(block, height);
                 GET_OBJECT_ITEM(block, chainFrom);
@@ -621,68 +538,56 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
-                // Admit as unconfirmed; only mark confirmed after main-chain proof.
-                const bool added_now = scene_.add_block(block);
-                if (added_now)
+                // Admit unconfirmed; confirmation is DAG work, not assume-main.
+                if (scene_.add_block(block))
                     ++added;
 
                 if (main_chain_cache_.is_cached_main(block_hash))
                 {
-                    // Previously proven main (e.g. prior verify) — confirm now.
                     mark_scene_confirmed_(block_hash, cf, ct, h);
-                    ++confirmed_now;
+                    flood_confirm_deps_(block_hash, kMaxFloodPerSeed);
                 }
-                else if (!verify_done_.count(block_hash))
+                else
                 {
-                    // Always enqueue verify for every unconfirmed live block so
-                    // ready_for_poll() can clear before the next poll.
-                    VerifyJob job;
+                    // Seed from every admit near tip; drain will RR across lanes.
+                    SeedJob job;
                     job.hash = block_hash;
                     job.from = cf;
                     job.to = ct;
                     job.height = h;
-                    job.hot = main_chain_cache_.is_hot_zone(cf, ct, h);
-                    const size_t before = verify_q_.size();
-                    enqueue_verify(std::move(job));
-                    if (verify_q_.size() > before)
-                        ++queued;
+                    const size_t before = seed_q_.size();
+                    enqueue_seed_(std::move(job));
+                    if (seed_q_.size() > before)
+                        ++seeded;
                 }
-                else if (scene_.graph().contains(block_hash) &&
-                         !main_chain_cache_.is_cached_main(block_hash))
-                {
-                    // Live but still unconfirmed and verify_done said not-main was
-                    // wrong / race — re-queue cold verify so poll is not stuck.
-                    VerifyJob job;
-                    job.hash = block_hash;
-                    job.from = cf;
-                    job.to = ct;
-                    job.height = h;
-                    job.hot = false;
-                    verify_done_.erase(block_hash);
-                    const size_t before = verify_q_.size();
-                    enqueue_verify(std::move(job));
-                    if (verify_q_.size() > before)
-                        ++queued;
-                }
-                (void)added_now;
             }
         }
-
-        std::printf("[adapter] seen=%d added=%d verify_queued+=%d confirmed_now=%d "
-                    "skipped_bad=%d q=%zu unconfirmed=%zu verified_ok=%d removed=%d "
-                    "replaced=%d cursor_adv=%d next_h_fetch=%d\n",
-                    seen, added, queued, confirmed_now, skipped_bad, verify_q_.size(),
-                    scene_.unconfirmed_live_count(), stats_verified_ok_, stats_removed_,
-                    stats_replaced_, stats_cursor_advances_, stats_next_height_fetches_);
     }
+
+    // Prefer current tips as seeds (highest priority for backward search).
+    for (const NodeId& tip : scene_.tip_ids())
+    {
+        auto n = scene_.graph().get(tip);
+        if (!n)
+            continue;
+        SeedJob job;
+        job.hash = tip;
+        job.from = static_cast<int>(n->group_from);
+        job.to = static_cast<int>(n->group_to);
+        job.height = static_cast<int>(n->height);
+        enqueue_seed_(std::move(job));
+    }
+
+    std::printf("[adapter] seen=%d added=%d seeds+=%d skipped_bad=%d "
+                "seed_q=%zu unconfirmed=%zu is_main_api=%d floods=%d "
+                "confirmed_marks=%d removed=%d replaced=%d\n",
+                seen, added, seeded, skipped_bad, seed_q_.size(),
+                scene_.unconfirmed_live_count(), stats_api_is_main_, stats_dag_floods_,
+                stats_confirmed_marks_, stats_removed_, stats_replaced_);
 
     last_poll_ts = now;
     cJSON_Delete(obj);
 
-    // One network hop per lane after poll (round-robin fairness).
-    drain_next_heights_(BlockScene::kLaneCount);
-
-    // PR11: drop txn payloads for unselected blocks (pin keeps selection full)
     prune_detail_store();
     maybe_refill_selection_detail();
 }
