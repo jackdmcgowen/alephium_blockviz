@@ -70,15 +70,17 @@ private:
 
     void enqueue_verify(VerifyJob job);
     void verify_one(const VerifyJob& job);
+    // Pop next verify job fair across lanes (not pure FIFO).
+    bool pop_verify_round_robin_(VerifyJob& out);
     void prune_detail_store();
     // Scene-only dual-write; does NOT call mark_main. Prefer lane/height overload.
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
 
     void ensure_cursors_initialized_();
-    // Fetch / verify / admit the block at H_c+1 for one lane; returns advances this call.
+    // At most one network hop for H_c+1 on this lane (fair RR across chains).
     int fetch_next_height_for_lane_(int from, int to);
-    // Budgeted pass over all lanes needing H_c+1.
+    // Advance next_height_lane_rr_ through max_lane_jobs lanes (1 hop each).
     void drain_next_heights_(int max_lane_jobs);
 
     bool admit_block_json_(cJSON* block_obj, const std::string& expected_hash,
@@ -101,11 +103,12 @@ private:
     int stats_confirmed_marks_ = 0;
     int stats_cursor_advances_ = 0;
     int stats_next_height_fetches_ = 0;
-    int next_height_lane_rr_ = 0; // round-robin start lane
+    int next_height_lane_rr_ = 0; // next-height round-robin lane
+    int verify_lane_rr_ = 0;      // verify-queue round-robin preferred lane
 
     static constexpr size_t kMaxVerifyQueue = 50000;
     static constexpr int kTipRefreshEveryNPolls = 3;
-    static constexpr int kMaxNextHeightPerDrain = 16; // all lanes each drain pass
-    // Only request heights in (H_c, H_c + kConfirmFetchHorizon]; max 2 API hops/lane/drain.
+    // Only request heights in (H_c, H_c + kConfirmFetchHorizon] for free advance;
+    // network still does at most 1 hop per lane per call (see fetch_next_height).
     static constexpr int kConfirmFetchHorizon = 2;
 };

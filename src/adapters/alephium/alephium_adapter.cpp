@@ -136,8 +136,9 @@ int AlephiumAdapter::fetch_next_height_for_lane_(int from, int to)
         }
     }
 
-    // At most kConfirmFetchHorizon network requests per lane per call (H_c+1 .. H_c+2).
-    while (api_hops < kConfirmFetchHorizon)
+    // One network hop per call so drain_verify can round-robin across chains.
+    // Horizon still caps which heights we will ever request (need <= H_c0 + 2).
+    while (api_hops < 1)
     {
         const int h_c = scene_.confirmed_height(lane);
         const int need = h_c + 1;
@@ -265,15 +266,44 @@ void AlephiumAdapter::drain_next_heights_(int max_lane_jobs)
     if (!main_chain_cache_.tips_valid())
         main_chain_cache_.refresh_tips();
 
-    const int n = std::max(1, max_lane_jobs);
-    for (int k = 0; k < n && k < BlockScene::kLaneCount; ++k)
+    // One hop per lane, round-robin — never burn a drain on a single chain.
+    const int n = std::max(1, std::min(max_lane_jobs, BlockScene::kLaneCount));
+    for (int k = 0; k < n; ++k)
     {
-        const int lane_i = (next_height_lane_rr_ + k) % BlockScene::kLaneCount;
+        const int lane_i = next_height_lane_rr_ % BlockScene::kLaneCount;
+        next_height_lane_rr_ = (next_height_lane_rr_ + 1) % BlockScene::kLaneCount;
         const int from = lane_i / ALPH_NUM_GROUPS;
         const int to = lane_i % ALPH_NUM_GROUPS;
         fetch_next_height_for_lane_(from, to);
     }
-    next_height_lane_rr_ = (next_height_lane_rr_ + n) % BlockScene::kLaneCount;
+}
+
+bool AlephiumAdapter::pop_verify_round_robin_(VerifyJob& out)
+{
+    if (verify_q_.empty())
+        return false;
+
+    // Prefer a job on the next preferred lane, then scan other lanes, then FIFO.
+    for (int attempt = 0; attempt < BlockScene::kLaneCount; ++attempt)
+    {
+        const int want_lane =
+            (verify_lane_rr_ + attempt) % BlockScene::kLaneCount;
+        for (auto it = verify_q_.begin(); it != verify_q_.end(); ++it)
+        {
+            if (static_cast<int>(lane_of(it->from, it->to)) != want_lane)
+                continue;
+            out = std::move(*it);
+            verify_q_.erase(it);
+            verify_lane_rr_ = (want_lane + 1) % BlockScene::kLaneCount;
+            return true;
+        }
+    }
+
+    out = std::move(verify_q_.front());
+    verify_q_.pop_front();
+    verify_lane_rr_ =
+        (static_cast<int>(lane_of(out.from, out.to)) + 1) % BlockScene::kLaneCount;
+    return true;
 }
 
 void AlephiumAdapter::prune_detail_store()
@@ -493,22 +523,31 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
-    // Interleave sequential next-height fetches so forward progress is confirmed.
-    if (running.load())
-        drain_next_heights_(kMaxNextHeightPerDrain);
-
+    // Fair interleave: one next-height hop on one lane, then one verify job from
+    // a different lane preference — so no single chain starves the others.
     int n = 0;
-    while (n < max_jobs && running.load() && !verify_q_.empty())
+    while (n < max_jobs && running.load())
     {
-        VerifyJob job = std::move(verify_q_.front());
-        verify_q_.pop_front();
-        verify_one(job);
+        const bool did_height = [&]() {
+            const size_t fetches_before = static_cast<size_t>(stats_next_height_fetches_);
+            const int adv_before = stats_cursor_advances_;
+            drain_next_heights_(/*max_lane_jobs=*/1);
+            return stats_next_height_fetches_ > static_cast<int>(fetches_before) ||
+                   stats_cursor_advances_ > adv_before;
+        }();
+
+        bool did_verify = false;
+        VerifyJob job;
+        if (pop_verify_round_robin_(job))
+        {
+            verify_one(job);
+            did_verify = true;
+        }
+
+        if (!did_height && !did_verify)
+            break;
         ++n;
     }
-
-    // Second pass: advance any lanes unblocked by verify results.
-    if (running.load())
-        drain_next_heights_(kMaxNextHeightPerDrain);
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
@@ -539,7 +578,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     if (!obj)
     {
         maybe_refill_selection_detail();
-        drain_next_heights_(kMaxNextHeightPerDrain);
+        drain_next_heights_(BlockScene::kLaneCount);
         // Do not advance last_poll_ts on hard failure so we retry the window.
         return;
     }
@@ -640,8 +679,8 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     last_poll_ts = now;
     cJSON_Delete(obj);
 
-    // Forward progress: ask for H_c+1..H_c+2 only (horizon-limited).
-    drain_next_heights_(kMaxNextHeightPerDrain);
+    // One network hop per lane after poll (round-robin fairness).
+    drain_next_heights_(BlockScene::kLaneCount);
 
     // PR11: drop txn payloads for unselected blocks (pin keeps selection full)
     prune_detail_store();
