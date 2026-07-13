@@ -23,9 +23,18 @@ void AlephiumAdapter::reset_stats()
     poll_count_ = 0;
     stats_verified_ok_ = stats_removed_ = stats_replaced_ = 0;
     stats_detail_refilled_ = 0;
+    stats_confirmed_marks_ = 0;
     verify_q_.clear();
     verify_queued_.clear();
     verify_done_.clear();
+}
+
+void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
+{
+    if (hash.empty())
+        return;
+    scene_.mark_confirmed(hash);
+    ++stats_confirmed_marks_;
 }
 
 void AlephiumAdapter::prune_detail_store()
@@ -124,6 +133,7 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
     {
         verify_done_.insert(job.hash);
         ++stats_verified_ok_;
+        mark_scene_confirmed_(job.hash);
         return;
     }
 
@@ -131,6 +141,7 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
     {
         verify_done_.insert(job.hash);
         ++stats_verified_ok_;
+        mark_scene_confirmed_(job.hash);
         return;
     }
 
@@ -139,6 +150,7 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
     {
         verify_done_.insert(job.hash);
         ++stats_verified_ok_;
+        mark_scene_confirmed_(job.hash);
         return;
     }
 
@@ -214,6 +226,8 @@ void AlephiumAdapter::verify_one(const VerifyJob& job)
     }
 
     scene_.add_block(block);
+    // Always dual-write scene confirm for main_hash; ignore add_block bool.
+    mark_scene_confirmed_(main_hash);
     ++stats_replaced_;
     if (reselect)
         engine_.set_selection(main_hash);
@@ -298,8 +312,15 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const int ct = chainTo->valueint;
                 const std::string block_hash = hash->valuestring;
 
-                if (scene_.add_block(block))
+                const bool added_now = scene_.add_block(block);
+                if (added_now)
                     ++added;
+
+                // K11: re-admit / first admit of cached-main must re-populate confirmed_
+                // (enqueue_verify skips is_cached_main; verify_one will never run).
+                if (main_chain_cache_.is_cached_main(block_hash))
+                    mark_scene_confirmed_(block_hash);
+                (void)added_now; // mark does not depend on add result
 
                 if (!main_chain_cache_.is_cached_main(block_hash) &&
                     !verify_done_.count(block_hash))
@@ -319,10 +340,11 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         }
 
         std::printf("[adapter] seen=%d added=%d verify_queued+=%d skipped_bad=%d "
-                    "q=%zu verified_ok=%d removed=%d replaced=%d refilled=%d\n",
+                    "q=%zu verified_ok=%d removed=%d replaced=%d refilled=%d "
+                    "confirmed_marks=%d\n",
                     seen, added, queued, skipped_bad, verify_q_.size(),
                     stats_verified_ok_, stats_removed_, stats_replaced_,
-                    stats_detail_refilled_);
+                    stats_detail_refilled_, stats_confirmed_marks_);
     }
 
     last_poll_ts = now;

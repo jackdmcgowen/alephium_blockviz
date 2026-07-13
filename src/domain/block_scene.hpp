@@ -10,6 +10,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // Compact feed row (metadata only; full txns live in AlphDetailStore).
@@ -31,6 +32,10 @@ public:
     // Returns true if a block with this hash was present and removed
     bool remove_block(const std::string& hash);
 
+    // Network thread / adapter: self-locking (like add_block / remove_block).
+    // Do NOT call while already holding mutex().
+    void mark_confirmed(const NodeId& hash);
+
     std::mutex& mutex() { return mu_; }
     const std::mutex& mutex() const { return mu_; }
 
@@ -49,13 +54,24 @@ public:
     // Caller may hold mutex(); uses graph snapshot.
     std::vector<NodeId> tip_ids() const;
 
+    // Presenter only: call while holding scene.mutex().
+    // Self-locking overloads intentionally omitted (deadlock risk under prepare).
+    bool is_confirmed_locked(const NodeId& hash) const;
+    std::vector<NodeId> confirmed_tip_ids_locked() const;
+
     // Thread-safe detail resolve (AlphDetailStore only).
     AlphBlock resolve_detail(const std::string& hash) const;
 
 private:
+    void mark_confirmed_unlocked_(const NodeId& hash);
+    void erase_confirmed_unlocked_(const NodeId& hash);
+    bool is_confirmed_unlocked_(const NodeId& hash) const;
+    std::vector<NodeId> confirmed_tip_ids_unlocked_() const;
+
     mutable std::mutex mu_;
     BlockGraph graph_;
     AlphDetailStore detail_store_;
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
+    std::unordered_set<NodeId> confirmed_; // guarded by mu_
 };

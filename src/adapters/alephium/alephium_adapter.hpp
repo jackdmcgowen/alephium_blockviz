@@ -45,6 +45,7 @@ public:
     int stats_removed() const { return stats_removed_; }
     int stats_replaced() const { return stats_replaced_; }
     int stats_detail_refilled() const { return stats_detail_refilled_; }
+    int stats_confirmed_marks() const { return stats_confirmed_marks_; }
 
     int64_t poll_interval_ms() const { return cfg_.poll_interval_ms; }
     int64_t lookback_ms() const { return cfg_.lookback_ms; }
@@ -62,6 +63,8 @@ private:
     void enqueue_verify(VerifyJob job);
     void verify_one(const VerifyJob& job);
     void prune_detail_store();
+    // Scene-only dual-write; does NOT call mark_main.
+    void mark_scene_confirmed_(const std::string& hash);
 
     BlockScene& scene_;
     IBlockvizEngine& engine_;
@@ -77,6 +80,7 @@ private:
     int stats_removed_ = 0;
     int stats_replaced_ = 0;
     int stats_detail_refilled_ = 0;
+    int stats_confirmed_marks_ = 0;
 
     static constexpr size_t kMaxVerifyQueue = 50000;
     static constexpr int kTipRefreshEveryNPolls = 3;

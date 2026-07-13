@@ -42,6 +42,10 @@ bool BlockScene::add_block(cJSON* block)
     if (!removed_uncles.empty())
         detail_store_.remove_many(removed_uncles);
 
+    // Uncle path does not call remove_block — erase confirmed under same lock.
+    for (const NodeId& unc : removed_uncles)
+        erase_confirmed_unlocked_(unc);
+
     RecentFeedItem item;
     item.hash = alph_block.hash;
     item.chainFrom = alph_block.chainFrom;
@@ -80,11 +84,64 @@ bool BlockScene::remove_block(const std::string& hash)
     delta.remove_nodes.push_back(hash);
     graph_.apply(delta);
     detail_store_.remove(hash);
+    erase_confirmed_unlocked_(hash);
 
     feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
                                [&](const RecentFeedItem& b) { return b.hash == hash; }),
                 feed_.end());
     return true;
+}
+
+void BlockScene::mark_confirmed(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    mark_confirmed_unlocked_(hash);
+}
+
+bool BlockScene::is_confirmed_locked(const NodeId& hash) const
+{
+    return is_confirmed_unlocked_(hash);
+}
+
+std::vector<NodeId> BlockScene::confirmed_tip_ids_locked() const
+{
+    return confirmed_tip_ids_unlocked_();
+}
+
+void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    confirmed_.insert(hash);
+}
+
+void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    confirmed_.erase(hash);
+}
+
+bool BlockScene::is_confirmed_unlocked_(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    return confirmed_.count(hash) != 0;
+}
+
+std::vector<NodeId> BlockScene::confirmed_tip_ids_unlocked_() const
+{
+    std::vector<NodeId> tips = tip_ids();
+    std::vector<NodeId> out;
+    out.reserve(tips.size());
+    for (const NodeId& id : tips)
+    {
+        if (confirmed_.count(id))
+            out.push_back(id);
+    }
+    return out;
 }
 
 std::vector<NodeId> BlockScene::tip_ids() const
