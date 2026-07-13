@@ -359,7 +359,25 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (!detail)
             continue;
 
-        // Flood only walks same-chain deps already in the live pool.
+        // Terminate BFS when any dependency cannot be found in the live pool.
+        // Do not walk past a broken link (no further same-chain expansion).
+        bool any_missing = false;
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty())
+                continue;
+            if (!scene_.graph().contains(dep))
+            {
+                any_missing = true;
+                break;
+            }
+        }
+        if (any_missing)
+            continue; // stop this branch; do not enqueue children
+
+        // All deps present — may sequence and walk same-chain deps already in pool.
+        scene_.mark_sequenced(cur);
+
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty() || !seen.insert(dep).second)
@@ -367,7 +385,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
             auto dn = scene_.graph().get(dep);
             if (!dn)
-                continue; // missing from pool — no fetch; presenter paints orange
+                continue;
 
             if (dn->lane != chain_lane ||
                 static_cast<int>(dn->group_from) != chain_from ||
@@ -571,11 +589,11 @@ bool AlephiumAdapter::lockstep_step_complete_() const
                 continue;
             if (scene_.graph().contains(dep))
                 continue;
-            // Failed permanently: do not block lockstep forever.
-            if (broken_dep_failed_.count(dep))
-                continue;
-            if (fetch_pool_ && fetch_pool_->is_failed(dep))
-                continue;
+            // Permanent fail is handled in advance_lockstep_trace_ (terminate lane).
+            // Here: still waiting for fetch or not yet failed → step incomplete.
+            if (broken_dep_failed_.count(dep) ||
+                (fetch_pool_ && fetch_pool_->is_failed(dep)))
+                continue; // lane will be terminated by advance; treat OK for complete check
             return false; // still missing and not failed
         }
     }
@@ -666,9 +684,8 @@ void AlephiumAdapter::advance_lockstep_trace_()
             mark_scene_confirmed_(block, static_cast<int>(node->group_from),
                                   static_cast<int>(node->group_to), target);
         }
-        else if (phase_ == Phase::LockstepTrace)
+        else
         {
-            // Parent tip is main → offline-mark same-chain via tip flood once.
             const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
             if (!tip.empty())
                 maybe_flood_offline_(tip, static_cast<uint32_t>(lane), tip_h, /*force=*/false);
@@ -681,6 +698,9 @@ void AlephiumAdapter::advance_lockstep_trace_()
         if (!detail)
             continue;
 
+        bool any_missing = false;
+        bool any_permanent_fail = false;
+
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty())
@@ -688,16 +708,20 @@ void AlephiumAdapter::advance_lockstep_trace_()
 
             if (!scene_.graph().contains(dep))
             {
-                if (!broken_dep_failed_.count(dep) &&
-                    !(fetch_pool_ && fetch_pool_->is_failed(dep)))
+                any_missing = true;
+                const bool failed = broken_dep_failed_.count(dep) != 0 ||
+                                    (fetch_pool_ && fetch_pool_->is_failed(dep));
+                if (failed)
                 {
-                    if (enqueue_missing_dep_(dep))
-                        waiting_fetch = true;
+                    any_permanent_fail = true;
+                    continue;
                 }
+                if (enqueue_missing_dep_(dep))
+                    waiting_fetch = true;
                 continue;
             }
 
-            // Animate listing → dep for this lockstep height.
+            // Animate listing → dep only when dep is in pool.
             if (edges.size() < static_cast<size_t>(kMaxTraceEdges))
             {
                 TraceEdge e;
@@ -706,6 +730,19 @@ void AlephiumAdapter::advance_lockstep_trace_()
                 edges.push_back(std::move(e));
             }
         }
+
+        // BFS terminate: unfound (permanent) dep stops further heights on this lane.
+        if (any_permanent_fail)
+        {
+            std::printf("[adapter] lockstep terminate lane %d at h=%d (dep not found)\n",
+                        lane, target);
+            lockstep_lane_active_[lane] = false;
+            continue;
+        }
+
+        // All deps known in pool → sequenced (opaque when cascade allows).
+        if (!any_missing && main_chain_cache_.is_cached_main(block))
+            scene_.mark_sequenced(block);
     }
 
     scene_.set_trace_edges(std::move(edges));
@@ -717,7 +754,7 @@ void AlephiumAdapter::advance_lockstep_trace_()
     if (!lockstep_step_complete_())
         return;
 
-    // Advance one height back for all lanes together.
+    // Advance one height back for still-active lanes together.
     ++trace_offset_;
     publish_trace_status_();
     std::printf("[adapter] lockstep advance → offset=%d\n", trace_offset_);

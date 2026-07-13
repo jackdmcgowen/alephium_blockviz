@@ -48,6 +48,10 @@ public:
     // Preferred: lane + height known (updates highest-confirmed frontier for lane).
     void mark_confirmed(const NodeId& hash, uint32_t lane, int height);
 
+    // Successfully sequenced from a main tip with a complete dep set in the pool.
+    // Self-locking (adapter). Opaque presentation requires sequenced + complete deps.
+    void mark_sequenced(const NodeId& hash);
+
     // Incomplete same-chain dep link (missing dep in graph) — orange Sobel.
     void mark_incomplete_trace(const NodeId& hash);
     void clear_incomplete_trace(const NodeId& hash);
@@ -85,6 +89,7 @@ public:
 
     // Presenter only: call while holding scene.mutex().
     bool is_confirmed_locked(const NodeId& hash) const;
+    bool is_sequenced_locked(const NodeId& hash) const;
     // Highest confirmed live block per lane (green Sobel / green tip arrows).
     std::vector<NodeId> confirmed_frontier_ids_locked() const;
     std::vector<NodeId> confirmed_tip_ids_locked() const;
@@ -120,6 +125,8 @@ private:
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
     std::unordered_set<NodeId> confirmed_; // guarded by mu_
+    // Main-chain path successfully walked from tip with deps complete at mark time.
+    std::unordered_set<NodeId> sequenced_; // guarded by mu_
     // Live parents whose same-chain dep is missing from the graph (orange Sobel).
     std::unordered_set<NodeId> incomplete_trace_;
     // Written by render thread; read by network adapter for lookback extension.

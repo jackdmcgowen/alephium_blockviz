@@ -73,6 +73,7 @@ bool BlockScene::remove_block(const std::string& hash)
     graph_.apply(delta);
     detail_store_.remove(hash);
     erase_confirmed_unlocked_(hash);
+    sequenced_.erase(hash);
     incomplete_trace_.erase(hash);
 
     feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
@@ -97,6 +98,16 @@ void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
     mark_confirmed_unlocked_(hash, lane, height);
     // Confirmed nodes are no longer "incomplete" endpoints.
     incomplete_trace_.erase(hash);
+}
+
+void BlockScene::mark_sequenced(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!graph_.contains(hash))
+        return;
+    sequenced_.insert(hash);
 }
 
 void BlockScene::mark_incomplete_trace(const NodeId& hash)
@@ -156,6 +167,13 @@ bool BlockScene::cursor_initialized(uint32_t lane) const
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
 {
     return is_confirmed_unlocked_(hash);
+}
+
+bool BlockScene::is_sequenced_locked(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    return sequenced_.count(hash) != 0;
 }
 
 std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
@@ -247,6 +265,7 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
     if (hash.empty())
         return;
     confirmed_.erase(hash);
+    sequenced_.erase(hash);
     incomplete_trace_.erase(hash);
 
     for (int i = 0; i < kLaneCount; ++i)

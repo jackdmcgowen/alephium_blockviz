@@ -416,11 +416,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
 
     // --- Live pool classification (graph + detail), never frustum/draw set ---
-    // live_nodes / graph_nodes = known admitted data (the pool).
-    // missing_dep[h]: any deps[] entry not in the live graph.
-    // solid[h]: confirmed AND no missing dep AND every same-chain dep in pool is solid
-    //   (so nothing above a broken link becomes opaque until the pool is complete).
-    // Draw/cull may hide cubes without changing these truths.
+    // solid[h]: sequenced from main tip AND all deps in pool AND same-chain deps solid
+    //   (cascade so nothing above a broken / unsequenced link becomes opaque).
     std::unordered_map<std::string, bool> missing_dep;
     missing_dep.reserve(graph_nodes.size());
     for (const GraphNode& n : graph_nodes)
@@ -450,7 +447,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (it != solid_memo.end())
             return it->second > 0;
         solid_memo[h] = -1; // cycle guard
-        if (!scene_.is_confirmed_locked(h))
+        // Opaque only for successfully sequenced main-path blocks.
+        if (!scene_.is_sequenced_locked(h))
             return false;
         if (missing_dep[h])
             return false;
@@ -465,7 +463,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 auto dn = scene_.graph().get(dep);
                 if (!dn)
                     continue;
-                // Only same-chain deps gate solidity (cross-shard may be absent by design).
+                // Same-chain deps must also be solid (cascade stops at break).
                 if (dn->lane != self->lane)
                     continue;
                 if (!is_solid(dep))
@@ -508,7 +506,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
             color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-        // Solid only when main-chain confirmed and same-chain dep pool is complete.
+        // Opaque only when sequenced from tip and all deps known (cascade solid).
         const float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
         out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
