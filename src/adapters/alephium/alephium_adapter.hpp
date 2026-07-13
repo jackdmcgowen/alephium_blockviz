@@ -100,4 +100,6 @@ private:
     static constexpr size_t kMaxVerifyQueue = 50000;
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxNextHeightPerDrain = 16; // all lanes each drain pass
+    // Only request heights in (H_c, H_c + kConfirmFetchHorizon]; max 2 API hops/lane/drain.
+    static constexpr int kConfirmFetchHorizon = 2;
 };

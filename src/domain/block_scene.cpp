@@ -292,8 +292,9 @@ int BlockScene::try_advance_confirmed_unlocked_(uint32_t lane)
         return 0;
 
     int steps = 0;
-    // Catch up through contiguous confirmed heights (budget via caller loops too).
-    constexpr int kMaxSteps = 64;
+    // Free in-graph catch-up only (no network). Keep modest so free advances
+    // do not race far past what the horizon-limited fetcher is filling.
+    constexpr int kMaxSteps = 2;
     while (steps < kMaxSteps)
     {
         const int need = confirmed_height_[lane] + 1;

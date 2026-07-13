@@ -15,10 +15,6 @@ uint32_t lane_of(int from, int to)
     return static_cast<uint32_t>(from * ALPH_NUM_GROUPS + to);
 }
 
-int lookback_blocks()
-{
-    return std::max(1, ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS);
-}
 } // namespace
 
 AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
@@ -70,7 +66,8 @@ void AlephiumAdapter::ensure_cursors_initialized_()
     if (!main_chain_cache_.tips_valid())
         main_chain_cache_.refresh_tips();
 
-    const int lb = lookback_blocks();
+    // Start near the live tip so we do not backfill tens of heights (queue congestion).
+    // First target height = net_tip - kConfirmFetchHorizon; H_c = that - 1.
     for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
     {
         for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
@@ -81,11 +78,11 @@ void AlephiumAdapter::ensure_cursors_initialized_()
             const int net_tip = main_chain_cache_.tip(f, t);
             if (net_tip < 0)
                 continue;
-            const int start_h = std::max(0, net_tip - lb);
-            // H_c = start_h - 1 so first advance targets start_h
+            const int start_h = std::max(0, net_tip - kConfirmFetchHorizon);
+            // H_c = start_h - 1 so first advance targets start_h (within horizon of tip).
             scene_.ensure_cursor_initialized(lane, start_h - 1);
-            std::printf("[adapter] cursor init lane %u (%d->%d) H_c=%d (start=%d net_tip=%d)\n",
-                        lane, f, t, start_h - 1, start_h, net_tip);
+            std::printf("[adapter] cursor init lane %u (%d->%d) H_c=%d (start=%d net_tip=%d horizon=%d)\n",
+                        lane, f, t, start_h - 1, start_h, net_tip, kConfirmFetchHorizon);
         }
     }
 }
@@ -122,12 +119,40 @@ int AlephiumAdapter::fetch_next_height_for_lane_(int from, int to)
     if (!scene_.cursor_initialized(lane))
         return 0;
 
+    // Snapshot H_c at call start — never request heights beyond H_c0 + horizon.
+    const int h_c0 = scene_.confirmed_height(lane);
+    const int max_request_h = h_c0 + kConfirmFetchHorizon;
+
     int total_steps = 0;
-    // Catch up several sequential heights per call so the frontier reaches live tips.
-    constexpr int kMaxHeightsPerLane = 12;
-    for (int hop = 0; hop < kMaxHeightsPerLane; ++hop)
+    int api_hops = 0;
+
+    // Free advance through confirmed blocks already in the graph (no network).
     {
-        // Contiguous confirmed already in graph?
+        const int steps = scene_.try_advance_confirmed(lane);
+        if (steps > 0)
+        {
+            stats_cursor_advances_ += steps;
+            total_steps += steps;
+        }
+    }
+
+    // At most kConfirmFetchHorizon network requests per lane per call (H_c+1 .. H_c+2).
+    while (api_hops < kConfirmFetchHorizon)
+    {
+        const int h_c = scene_.confirmed_height(lane);
+        const int need = h_c + 1;
+        if (need < 0)
+            break;
+        // Do not request further than horizon from the start-of-call cursor
+        // (and never more than 2 ahead of current H_c either).
+        if (need > max_request_h || need > h_c + kConfirmFetchHorizon)
+            break;
+
+        const int net_tip = main_chain_cache_.tip(from, to);
+        if (net_tip >= 0 && need > net_tip)
+            break; // caught up to network tip
+
+        // Prefer in-graph confirmed before hitting the API.
         {
             const int steps = scene_.try_advance_confirmed(lane);
             if (steps > 0)
@@ -138,16 +163,8 @@ int AlephiumAdapter::fetch_next_height_for_lane_(int from, int to)
             }
         }
 
-        const int h_c = scene_.confirmed_height(lane);
-        const int need = h_c + 1;
-        if (need < 0)
-            break;
-
-        const int net_tip = main_chain_cache_.tip(from, to);
-        if (net_tip >= 0 && need > net_tip)
-            break; // caught up to network tip
-
         ++stats_next_height_fetches_;
+        ++api_hops;
 
         cJSON* arr = get_blockflow_hashes(from, to, need);
         if (!arr || !cJSON_IsArray(arr))
@@ -210,13 +227,17 @@ int AlephiumAdapter::fetch_next_height_for_lane_(int from, int to)
             cJSON* block_obj = get_blockflow_blocks_blockhash(main_hash.c_str());
             if (!block_obj)
             {
-                VerifyJob job;
-                job.hash = main_hash;
-                job.from = from;
-                job.to = to;
-                job.height = need;
-                job.hot = true;
-                enqueue_verify(std::move(job));
+                // Only enqueue verify within the same height horizon.
+                if (need <= h_c0 + kConfirmFetchHorizon)
+                {
+                    VerifyJob job;
+                    job.hash = main_hash;
+                    job.from = from;
+                    job.to = to;
+                    job.height = need;
+                    job.hot = true;
+                    enqueue_verify(std::move(job));
+                }
                 break;
             }
             admit_block_json_(block_obj, main_hash, from, to, need);
@@ -554,16 +575,26 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 if (!main_chain_cache_.is_cached_main(block_hash) &&
                     !verify_done_.count(block_hash))
                 {
-                    VerifyJob job;
-                    job.hash = block_hash;
-                    job.from = cf;
-                    job.to = ct;
-                    job.height = h;
-                    job.hot = main_chain_cache_.is_hot_zone(cf, ct, h);
-                    const size_t before = verify_q_.size();
-                    enqueue_verify(std::move(job));
-                    if (verify_q_.size() > before)
-                        ++queued;
+                    // Do not congest the verify queue with heights more than
+                    // kConfirmFetchHorizon above the sequential confirmed cursor.
+                    const uint32_t lane = lane_of(cf, ct);
+                    const int hc = scene_.confirmed_height(lane);
+                    const bool within_horizon =
+                        !scene_.cursor_initialized(lane) ||
+                        h <= hc + kConfirmFetchHorizon;
+                    if (within_horizon)
+                    {
+                        VerifyJob job;
+                        job.hash = block_hash;
+                        job.from = cf;
+                        job.to = ct;
+                        job.height = h;
+                        job.hot = main_chain_cache_.is_hot_zone(cf, ct, h);
+                        const size_t before = verify_q_.size();
+                        enqueue_verify(std::move(job));
+                        if (verify_q_.size() > before)
+                            ++queued;
+                    }
                 }
             }
         }
