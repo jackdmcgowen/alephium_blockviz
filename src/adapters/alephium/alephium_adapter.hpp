@@ -67,7 +67,8 @@ private:
     bool pop_seed_round_robin_(SeedJob& out);
     // is_main on the tip only; offline flood in-graph deps within lookback.
     void confirm_seed_(const SeedJob& seed);
-    // Offline: mark main_hash + in-graph deps at/above lookback floor (no network).
+    // Offline same-chain main trace: mark tip + in-graph deps on the same
+    // chainFrom->chainTo lane, at/above lookback floor (no network).
     int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
     // Fetch only for a missing dep of an already-proven main tip (broken link).
     bool fetch_and_admit_(const std::string& hash);

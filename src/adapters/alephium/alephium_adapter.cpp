@@ -232,12 +232,19 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
-    // In-graph only, within lookback. Skip already-confirmed. Missing deps of a
-    // proven main parent → one-shot broken-link fetch (not re-traced forever).
+    // Same-chain main trace only: follow deps that share this tip's lane
+    // (chainFrom->chainTo). Cross-shard deps are ignored (no walk, no fetch).
+    // In-graph + lookback only. Skip already-confirmed.
     if (main_hash.empty() || budget <= 0)
         return 0;
-    if (!scene_.graph().contains(main_hash))
+
+    auto root = scene_.graph().get(main_hash);
+    if (!root)
         return 0;
+
+    const uint32_t chain_lane = root->lane;
+    const int chain_from = static_cast<int>(root->group_from);
+    const int chain_to = static_cast<int>(root->group_to);
 
     std::queue<std::string> q;
     std::unordered_set<std::string> seen;
@@ -254,16 +261,20 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (!node)
             continue;
 
+        // Strict same-chain filter (lane == chainFrom*4+chainTo).
+        if (node->lane != chain_lane ||
+            static_cast<int>(node->group_from) != chain_from ||
+            static_cast<int>(node->group_to) != chain_to)
+            continue;
+
         const int from = static_cast<int>(node->group_from);
         const int to = static_cast<int>(node->group_to);
         const int height = static_cast<int>(node->height);
-        const uint32_t lane = node->lane;
 
-        if (!height_in_lookback_(lane, height))
+        if (!height_in_lookback_(chain_lane, height))
             continue;
 
-        const bool already = main_chain_cache_.is_cached_main(cur);
-        if (!already)
+        if (!main_chain_cache_.is_cached_main(cur))
         {
             main_chain_cache_.mark_main(cur);
             mark_scene_confirmed_(cur, from, to, height);
@@ -282,16 +293,23 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
             if (auto dn = scene_.graph().get(dep))
             {
-                if (!height_in_lookback_(dn->lane, static_cast<int>(dn->height)))
+                // Only same-chain dependencies.
+                if (dn->lane != chain_lane ||
+                    static_cast<int>(dn->group_from) != chain_from ||
+                    static_cast<int>(dn->group_to) != chain_to)
+                    continue;
+                if (!height_in_lookback_(chain_lane, static_cast<int>(dn->height)))
                     continue;
                 if (main_chain_cache_.is_cached_main(dep))
-                    continue; // already labeled — do not re-walk
+                    continue;
                 q.push(dep);
                 continue;
             }
 
-            // Broken link: missing dep of an in-window main-chain parent only.
-            if (height_in_lookback_(lane, height) &&
+            // Broken same-chain link: missing dep, parent in-window. We only
+            // know chain after fetch; still queue once — after admit, flood
+            // re-filters to same lane.
+            if (height_in_lookback_(chain_lane, height) &&
                 !broken_dep_failed_.count(dep) &&
                 broken_dep_seen_.insert(dep).second)
             {
@@ -304,7 +322,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
 void AlephiumAdapter::label_all_confirmed_tip_ancestors_()
 {
-    // Fast offline pass: every current confirmed-height tip floods its dep DAG.
+    // Per-lane tip: same-chain offline main trace only.
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
     {
         const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
