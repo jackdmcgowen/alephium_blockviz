@@ -69,9 +69,14 @@ public:
     void publish_ui_snapshot(UiSnapshot snap) override;
     UiSnapshot copy_ui_snapshot() const override;
     void publish_frame(const FrameSubmit& frame,
-                       const std::vector<std::string>& pick_map) override;
+                       const std::vector<std::string>& pick_map,
+                       const std::vector<std::string>& confirmed_tip_hashes) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
+
+    // Kill-switch for always-on confirmed-tip green Sobel (default on). Selection gold unaffected.
+    void set_visualize_confirmed_tips(bool enabled) { visualize_confirmed_tips_ = enabled; }
+    bool visualize_confirmed_tips() const { return visualize_confirmed_tips_; }
 
 private:
     void resize_internal();
@@ -168,11 +173,19 @@ private:
     // when defer_present: leave color as attachment for async Sobel overlay
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
+
+    // Mode + instance indices for async Sobel (gold selection or green confirmed tips).
+    struct SobelFrameRequest
+    {
+        enum class Mode { SelectionGold, ConfirmedTipsGreen } mode = Mode::SelectionGold;
+        std::vector<uint32_t> instance_indices; // size 1 for selection; 1..32 for tips
+    };
+
     void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
                                        VkCommandBuffer graphics_cb,
                                        VkSemaphore image_available,
                                        VkSemaphore render_finished,
-                                       uint32_t selected_instance_index);
+                                       const SobelFrameRequest& req);
 
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot
@@ -181,6 +194,7 @@ private:
         CameraUBO camera{};
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
+        std::vector<std::string> confirmed_tip_hashes;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
     mutable std::mutex submit_mutex_;
@@ -191,6 +205,11 @@ private:
 
     bool apply_published_frame();
     int  find_free_gpu_slot_unlocked() const;
+
+    // Loaded from GpuFrameSlot in apply_published_frame (paired with pick_id_to_hash_).
+    std::vector<std::string> sobel_tip_hashes_;
+    // Kill-switch: gates ConfirmedTipsGreen only; selection gold always works. Default on (K8).
+    bool visualize_confirmed_tips_ = true;
 
     mutable std::mutex ui_snap_mutex_;
     UiSnapshot ui_snap_;

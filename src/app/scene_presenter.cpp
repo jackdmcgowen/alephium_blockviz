@@ -329,6 +329,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(placed.hash);
     }
 
+    // Confirmed tips ∩ this frame's pick_map (frustum-culled tips omitted). Cap 32.
+    {
+        const auto conf_tips = scene_.confirmed_tip_ids_locked();
+        std::unordered_set<std::string> conf_set(conf_tips.begin(), conf_tips.end());
+        for (const auto& h : out.pick_map)
+        {
+            if (!conf_set.count(h))
+                continue;
+            out.confirmed_tip_hashes.push_back(h);
+            if (out.confirmed_tip_hashes.size() >= 32)
+                break;
+        }
+    }
+
     if (debug)
     {
         const float tip_len = std::max(0.18f, meters_per_height * 0.08f);

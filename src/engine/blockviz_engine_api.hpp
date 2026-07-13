@@ -38,6 +38,10 @@ struct FrameSourceOutput
     bool      has_look_target = false;
     glm::vec3 look_target_pos{ 0.f };
     UiSnapshot ui{};
+
+    // Confirmed tip hashes still present in this frame's pick_map (frustum-culled out = omitted).
+    // Engine maps hash → instance index for multi-draw Sobel depth.
+    std::vector<std::string> confirmed_tip_hashes;
 };
 
 // Host implements; engine calls prepare() each frame on the render thread.
@@ -70,9 +74,10 @@ public:
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;
     virtual UiSnapshot copy_ui_snapshot() const = 0;
 
-    // Render-loop path: instances + pick map (extends IRenderEngine::submit_frame)
+    // Render-loop path: instances + pick map + confirmed tips (extends IRenderEngine::submit_frame)
     virtual void publish_frame(const FrameSubmit& frame,
-                               const std::vector<std::string>& pick_map) = 0;
+                               const std::vector<std::string>& pick_map,
+                               const std::vector<std::string>& confirmed_tip_hashes) = 0;
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;

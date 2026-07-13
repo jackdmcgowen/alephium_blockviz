@@ -1,7 +1,7 @@
 #pragma once
 
-// Selection-only depth pass + async Sobel on CMP + edge overlay on _3D.
-// Scene depth is not used — only the selected instance is redrawn into sel_depth_.
+// Selection / confirmed-tip depth pass + async Sobel on CMP + edge overlay on _3D.
+// Scene depth is not used — only the requested instances are redrawn into sel_depth_.
 #include "graphics/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
@@ -20,6 +20,7 @@ struct SobelComputeCreateInfo
     uint32_t compute_family = 0;
 };
 
+// One clear + N indexed draws (N ≤ 32) in a single BeginRendering — no re-clear between draws.
 struct SelectionDepthDrawParams
 {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -27,7 +28,8 @@ struct SelectionDepthDrawParams
     VkBuffer vertex_buffer = VK_NULL_HANDLE;
     VkBuffer instance_buffer = VK_NULL_HANDLE;
     VkBuffer index_buffer = VK_NULL_HANDLE;
-    uint32_t first_instance = 0; // instance index of selected cube in the instance buffer
+    const uint32_t* instance_indices = nullptr;
+    uint32_t instance_index_count = 0; // required ≥1 when recording for sobel; hard-capped at 32
     uint32_t index_count = 36;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -40,7 +42,8 @@ public:
     void destroy(VkDevice device);
     void recreate(const SobelComputeCreateInfo& info);
 
-    // Clear + redraw one instance into sel_depth_ (depth-only). Leaves sel_depth_ as DEPTH_ATTACHMENT.
+    // Clear + redraw N instances into sel_depth_ (depth-only). Leaves sel_depth_ as DEPTH_ATTACHMENT.
+    // Single BeginRendering: one LOAD_OP_CLEAR then N DrawIndexed — no re-clear between draws.
     void record_selection_depth(const SelectionDepthDrawParams& p);
 
     // Transition sel_depth_ DEPTH_ATTACHMENT → SHADER_READ (and queue release if needed).
@@ -101,7 +104,7 @@ private:
     VkPipelineLayout compute_layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 
-    // Depth-only redraw of selected instance
+    // Depth-only redraw of selection / tip instances
     VkPipelineLayout depth_only_layout_ = VK_NULL_HANDLE;
     VkPipeline depth_only_pipeline_ = VK_NULL_HANDLE;
 

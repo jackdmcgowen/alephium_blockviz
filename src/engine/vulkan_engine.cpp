@@ -531,7 +531,7 @@ void VulkanEngine::render_loop()
             submit.instance_count = fout.instances.size();
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, fout.pick_map);
+            publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes);
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -545,7 +545,8 @@ void VulkanEngine::render_loop()
             FrameSubmit submit{};
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, frame_pick_map);
+            // Empty frame-source: clear tips for this frame (paired with empty pick_map).
+            publish_frame(submit, frame_pick_map, {});
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
@@ -620,23 +621,55 @@ void VulkanEngine::render()
     if (!acq.ok)
         return; // OUT_OF_DATE: resize next begin; do not submit/present
 
-    // Map selected hash → instance index in this frame's pick map (for single-instance depth).
-    uint32_t selected_instance = ~0u;
+    // Sobel mode matrix (K5): selection gold wins; else confirmed-tip green if kill-switch on.
+    SobelFrameRequest sobel_req{};
+    bool want_sobel = false;
+    if (sobel_.ready())
     {
-        std::lock_guard<std::mutex> slock(selection_mutex_);
-        if (sobel_.ready() && !selected_hash_.empty())
+        uint32_t selected_instance = ~0u;
         {
-            for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
+            std::lock_guard<std::mutex> slock(selection_mutex_);
+            if (!selected_hash_.empty())
             {
-                if (pick_id_to_hash_[i] == selected_hash_)
+                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
                 {
-                    selected_instance = static_cast<uint32_t>(i);
-                    break;
+                    if (pick_id_to_hash_[i] == selected_hash_)
+                    {
+                        selected_instance = static_cast<uint32_t>(i);
+                        break;
+                    }
                 }
             }
         }
+
+        if (selected_instance != ~0u)
+        {
+            sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
+            sobel_req.instance_indices = { selected_instance };
+            want_sobel = true;
+        }
+        else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
+        {
+            constexpr size_t kMaxTipSobel = 32;
+            sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
+            sobel_req.instance_indices.reserve(
+                std::min(sobel_tip_hashes_.size(), kMaxTipSobel));
+            for (const std::string& h : sobel_tip_hashes_)
+            {
+                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
+                {
+                    if (pick_id_to_hash_[i] == h)
+                    {
+                        sobel_req.instance_indices.push_back(static_cast<uint32_t>(i));
+                        break;
+                    }
+                }
+                if (sobel_req.instance_indices.size() >= kMaxTipSobel)
+                    break;
+            }
+            want_sobel = !sobel_req.instance_indices.empty();
+        }
     }
-    const bool want_sobel = selected_instance != ~0u;
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
@@ -646,7 +679,7 @@ void VulkanEngine::render()
     if (want_sobel)
     {
         submit_frame_with_async_sobel(begin.frame_index, acq.image_index, commandBuffer,
-                                      acq.image_available, acq.render_finished, selected_instance);
+                                      acq.image_available, acq.render_finished, sobel_req);
     }
     else
     {
@@ -667,7 +700,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
                                                  VkCommandBuffer graphics_cb,
                                                  VkSemaphore image_available,
                                                  VkSemaphore render_finished,
-                                                 uint32_t selected_instance_index)
+                                                 const SobelFrameRequest& req)
 {
     // Wait for prior Sobel chain: shared sel_depth/edge must not be rewritten while sampled.
     if (sobel_fence_in_flight_ && sobel_done_fence_ != VK_NULL_HANDLE)
@@ -684,7 +717,7 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
     const VkSemaphore g2c = sobel_.graphics_to_compute(frame_index);
     const VkSemaphore cfin = sobel_.compute_finished(frame_index);
 
-    // After main+pick: depth-only redraw of the selected instance into sel_depth_,
+    // After main+pick: depth-only redraw of requested instances into sel_depth_,
     // then release that depth for async CMP Sobel (scene depth is not used).
     {
         SelectionDepthDrawParams sp{};
@@ -693,7 +726,8 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
         sp.vertex_buffer = frame_resources_.vertex_buffer();
         sp.instance_buffer = frame_resources_.instance_buffer();
         sp.index_buffer = frame_resources_.index_buffer();
-        sp.first_instance = selected_instance_index;
+        sp.instance_indices = req.instance_indices.data();
+        sp.instance_index_count = static_cast<uint32_t>(req.instance_indices.size());
         sp.width = width;
         sp.height = height;
         sobel_.record_selection_depth(sp);
@@ -775,7 +809,11 @@ void VulkanEngine::submit_frame_with_async_sobel(uint32_t frame_index, uint32_t 
         ri.pColorAttachments = &color;
         vkCmdBeginRendering(overlay_cb, &ri);
 
-        const float highlight[4] = { 1.0f, 0.85f, 0.15f, 1.35f }; // gold selection edges
+        static const float kGoldHighlight[4]  = { 1.0f, 0.85f, 0.15f, 1.35f };
+        static const float kGreenHighlight[4] = { 0.25f, 0.95f, 0.40f, 1.35f };
+        const float* highlight = (req.mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)
+                                     ? kGreenHighlight
+                                     : kGoldHighlight;
         sobel_.record_overlay(overlay_cb, width, height, highlight);
         vkCmdEndRendering(overlay_cb);
 
@@ -1008,10 +1046,12 @@ int VulkanEngine::find_free_gpu_slot_unlocked() const
 
 void VulkanEngine::submit_frame(const FrameSubmit& frame)
 {
-    publish_frame(frame, {});
+    publish_frame(frame, {}, {});
 }
 
-void VulkanEngine::publish_frame(const FrameSubmit& frame, const std::vector<std::string>& pick_map)
+void VulkanEngine::publish_frame(const FrameSubmit& frame,
+                                 const std::vector<std::string>& pick_map,
+                                 const std::vector<std::string>& confirmed_tip_hashes)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -1025,6 +1065,7 @@ void VulkanEngine::publish_frame(const FrameSubmit& frame, const std::vector<std
     slot.camera = frame.camera;
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
+    slot.confirmed_tip_hashes = confirmed_tip_hashes;
 
     pending_slot_ = write;
 }
@@ -1048,6 +1089,7 @@ bool VulkanEngine::apply_published_frame()
     frame_resources_.upload_camera(slot.camera, &viewProj);
 
     pick_id_to_hash_ = slot.pick_map;
+    sobel_tip_hashes_ = slot.confirmed_tip_hashes;
     gpu_frame_seq_ = slot.client_seq;
     return true;
 }
