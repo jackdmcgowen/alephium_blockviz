@@ -38,6 +38,8 @@ AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
     {
         min_lookback_height_[i] = 0;
         earliest_traced_height_[i] = INT_MAX; // none traced yet
+        lockstep_tip_height_[i] = -1;
+        lockstep_lane_active_[i] = false;
     }
 }
 
@@ -66,7 +68,16 @@ void AlephiumAdapter::reset_stats()
     broken_dep_failed_.clear();
     uncle_q_.clear();
     uncle_queued_.clear();
-    completeness_pending_lanes_.clear();
+    phase_ = Phase::BootstrapPoll;
+    bootstrap_poll_done_ = false;
+    trace_offset_ = 0;
+    for (int i = 0; i < BlockScene::kLaneCount; ++i)
+    {
+        lockstep_tip_height_[i] = -1;
+        lockstep_lane_active_[i] = false;
+    }
+    scene_.clear_trace_edges();
+    publish_trace_status_();
     if (fetch_pool_)
         fetch_pool_->reset_stats();
 }
@@ -91,6 +102,11 @@ void AlephiumAdapter::on_start()
 {
     main_chain_cache_.refresh_tips();
     refresh_lookback_floors_();
+    phase_ = Phase::BootstrapPoll;
+    bootstrap_poll_done_ = false;
+    trace_offset_ = 0;
+    publish_trace_status_();
+    std::printf("[adapter] on_start phase=BootstrapPoll (poll gated after first lookback)\n");
 }
 
 void AlephiumAdapter::refresh_lookback_floors_()
@@ -182,11 +198,14 @@ bool AlephiumAdapter::tip_pending_confirmation_() const
 
 bool AlephiumAdapter::ready_for_poll() const
 {
-    // Do not block forever on intermediate / historical unconfirmed cubes —
-    // only live tips (+ uncle/broken work queues) must finish.
-    if (!seed_q_.empty() || !uncle_q_.empty() || !broken_dep_q_.empty())
+    // Bootstrap: allow exactly one lookback poll.
+    if (phase_ == Phase::BootstrapPoll)
+        return !bootstrap_poll_done_;
+    // Gate all further window polls until lockstep confirms the initial pool.
+    if (phase_ == Phase::IdentifyTips || phase_ == Phase::LockstepTrace)
         return false;
-    return !tip_pending_confirmation_();
+    // Steady: free interval polls.
+    return phase_ == Phase::Steady;
 }
 
 void AlephiumAdapter::enqueue_seed_(SeedJob job)
@@ -401,7 +420,7 @@ int AlephiumAdapter::maybe_flood_offline_(const std::string& main_hash, uint32_t
 
 void AlephiumAdapter::label_tips_needing_reflood_()
 {
-    // Per-lane confirmed tip: offline flood only when camera unlock / incomplete cover.
+    // Camera unlock only — lockstep owns bootstrap completeness.
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
     {
         if (!lane_needs_reflood_(static_cast<uint32_t>(lane)))
@@ -410,21 +429,7 @@ void AlephiumAdapter::label_tips_needing_reflood_()
         if (tip.empty())
             continue;
         flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
-        kick_completeness_trace_(tip);
     }
-}
-
-int AlephiumAdapter::min_live_height_on_lane_(uint32_t lane) const
-{
-    int min_h = INT_MAX;
-    for (const GraphNode& n : scene_.graph().nodes_snapshot())
-    {
-        if (n.lane != lane || n.height < 0)
-            continue;
-        if (static_cast<int>(n.height) < min_h)
-            min_h = static_cast<int>(n.height);
-    }
-    return min_h == INT_MAX ? -1 : min_h;
 }
 
 bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
@@ -441,13 +446,8 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
     ++stats_trace_missing_;
 
     if (fetch_pool_)
-    {
-        if (fetch_pool_->enqueue(dep_hash))
-            return true;
-        return false;
-    }
+        return fetch_pool_->enqueue(dep_hash);
 
-    // No pool: one-shot sync fetch (fallback).
     if (!broken_dep_seen_.insert(dep_hash).second)
         return false;
     if (fetch_and_admit_(dep_hash))
@@ -459,66 +459,228 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
     return false;
 }
 
-void AlephiumAdapter::kick_completeness_trace_(const std::string& tip_hash)
+void AlephiumAdapter::publish_trace_status_()
 {
-    if (tip_hash.empty())
-        return;
-    auto root = scene_.graph().get(tip_hash);
-    if (!root)
-        return;
-    completeness_pending_lanes_.insert(root->lane);
-    run_completeness_trace_(tip_hash, kMaxCompletenessNodes);
+    scene_.set_trace_status(static_cast<int>(phase_), trace_offset_);
 }
 
-int AlephiumAdapter::run_completeness_trace_(const std::string& start_hash, int budget)
+void AlephiumAdapter::set_phase_(Phase p)
 {
-    // Walk same-chain from confirmed tip down to the initial (smallest) height
-    // on that chain in the live window. Enqueue any missing deps for fetch.
-    if (start_hash.empty() || budget <= 0)
-        return 0;
-
-    auto root = scene_.graph().get(start_hash);
-    if (!root)
-        return 0;
-
-    const uint32_t chain_lane = root->lane;
-    const int chain_from = static_cast<int>(root->group_from);
-    const int chain_to = static_cast<int>(root->group_to);
-    // Initial (smallest) end of the unlocked window for this chain.
-    const int stop_h = effective_lookback_floor_(chain_lane);
-
-    std::queue<std::string> q;
-    std::unordered_set<std::string> seen;
-    q.push(start_hash);
-    seen.insert(start_hash);
-    int visited = 0;
-    int missing_enqueued = 0;
-
-    while (!q.empty() && visited < budget)
+    if (phase_ == p)
+        return;
+    phase_ = p;
+    publish_trace_status_();
+    const char* name = "Bootstrap";
+    switch (p)
     {
-        const std::string cur = std::move(q.front());
-        q.pop();
+    case Phase::BootstrapPoll: name = "BootstrapPoll"; break;
+    case Phase::IdentifyTips:  name = "IdentifyTips";  break;
+    case Phase::LockstepTrace: name = "LockstepTrace"; break;
+    case Phase::Steady:        name = "Steady";        break;
+    }
+    std::printf("[adapter] phase → %s (offset=%d)\n", name, trace_offset_);
+}
 
-        auto node = scene_.graph().get(cur);
+bool AlephiumAdapter::fetch_work_pending_() const
+{
+    if (!fetch_pool_)
+        return false;
+    return fetch_pool_->pending_jobs() > 0 || fetch_pool_->in_flight() > 0;
+}
+
+NodeId AlephiumAdapter::find_block_at_height_(uint32_t lane, int height) const
+{
+    if (height < 0)
+        return {};
+    // Prefer confirmed tip hash when it matches the target height.
+    if (scene_.confirmed_height(lane) == height)
+    {
+        const NodeId tip = scene_.confirmed_tip_hash(lane);
+        if (!tip.empty())
+            return tip;
+    }
+    NodeId best;
+    for (const GraphNode& n : scene_.graph().nodes_snapshot())
+    {
+        if (n.lane != lane || static_cast<int>(n.height) != height)
+            continue;
+        // Prefer main-cached / confirmed.
+        if (main_chain_cache_.is_cached_main(n.id))
+            return n.id;
+        if (best.empty())
+            best = n.id;
+    }
+    return best;
+}
+
+bool AlephiumAdapter::lockstep_lane_done_(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+        return true;
+    if (!lockstep_lane_active_[lane])
+        return true;
+    const int tip_h = lockstep_tip_height_[lane];
+    if (tip_h < 0)
+        return true;
+    const int target = tip_h - trace_offset_;
+    const int floor_h = effective_lookback_floor_(lane);
+    return target < floor_h;
+}
+
+bool AlephiumAdapter::lockstep_all_below_floor_() const
+{
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        if (!lockstep_lane_active_[lane])
+            continue;
+        if (!lockstep_lane_done_(static_cast<uint32_t>(lane)))
+            return false;
+    }
+    return true;
+}
+
+bool AlephiumAdapter::lockstep_step_complete_() const
+{
+    if (fetch_work_pending_())
+        return false;
+
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        if (!lockstep_lane_active_[lane])
+            continue;
+        if (lockstep_lane_done_(static_cast<uint32_t>(lane)))
+            continue;
+
+        const int tip_h = lockstep_tip_height_[lane];
+        const int target = tip_h - trace_offset_;
+        const NodeId block = find_block_at_height_(static_cast<uint32_t>(lane), target);
+        if (block.empty())
+            continue; // no live block at this height — treat as done for step
+
+        // Must be confirmed (main path).
+        if (!main_chain_cache_.is_cached_main(block))
+            return false;
+
+        auto detail = scene_.detail_store().get(block);
+        if (!detail)
+            return false;
+
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty())
+                continue;
+            if (scene_.graph().contains(dep))
+                continue;
+            // Failed permanently: do not block lockstep forever.
+            if (broken_dep_failed_.count(dep))
+                continue;
+            if (fetch_pool_ && fetch_pool_->is_failed(dep))
+                continue;
+            return false; // still missing and not failed
+        }
+    }
+    return true;
+}
+
+void AlephiumAdapter::maybe_enter_lockstep_()
+{
+    if (phase_ != Phase::IdentifyTips)
+        return;
+    if (tip_pending_confirmation_())
+        return;
+    if (!seed_q_.empty())
+        return;
+
+    // Snapshot tip heights for lockstep (offset from each lane's tip).
+    bool any = false;
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        lockstep_lane_active_[lane] = false;
+        lockstep_tip_height_[lane] = -1;
+        const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
+        if (tip.empty())
+            continue;
+        auto n = scene_.graph().get(tip);
+        const int h = n ? static_cast<int>(n->height) : scene_.confirmed_height(static_cast<uint32_t>(lane));
+        if (h < 0)
+            continue;
+        lockstep_tip_height_[lane] = h;
+        lockstep_lane_active_[lane] = true;
+        any = true;
+    }
+
+    if (!any)
+    {
+        // No tips — go steady rather than hang.
+        set_phase_(Phase::Steady);
+        scene_.clear_trace_edges();
+        return;
+    }
+
+    trace_offset_ = 0;
+    set_phase_(Phase::LockstepTrace);
+    std::printf("[adapter] lockstep start: all tips identified, offset=0\n");
+    advance_lockstep_trace_();
+}
+
+void AlephiumAdapter::advance_lockstep_trace_()
+{
+    if (phase_ != Phase::LockstepTrace)
+        return;
+
+    // Admit fetches so current step can complete.
+    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+
+    if (lockstep_all_below_floor_())
+    {
+        std::printf("[adapter] lockstep complete → Steady (offset=%d)\n", trace_offset_);
+        scene_.clear_trace_edges();
+        set_phase_(Phase::Steady);
+        return;
+    }
+
+    std::vector<TraceEdge> edges;
+    edges.reserve(64);
+    bool waiting_fetch = false;
+
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        if (!lockstep_lane_active_[lane])
+            continue;
+        if (lockstep_lane_done_(static_cast<uint32_t>(lane)))
+            continue;
+
+        const int tip_h = lockstep_tip_height_[lane];
+        const int target = tip_h - trace_offset_;
+        NodeId block = find_block_at_height_(static_cast<uint32_t>(lane), target);
+        if (block.empty())
+            continue;
+
+        auto node = scene_.graph().get(block);
         if (!node)
             continue;
 
-        if (node->lane != chain_lane ||
-            static_cast<int>(node->group_from) != chain_from ||
-            static_cast<int>(node->group_to) != chain_to)
-            continue;
+        // Confirm main path at this height if tip flood already marked ancestors.
+        if (main_chain_cache_.is_cached_main(block))
+        {
+            mark_scene_confirmed_(block, static_cast<int>(node->group_from),
+                                  static_cast<int>(node->group_to), target);
+        }
+        else if (phase_ == Phase::LockstepTrace)
+        {
+            // Parent tip is main → offline-mark same-chain via tip flood once.
+            const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
+            if (!tip.empty())
+                maybe_flood_offline_(tip, static_cast<uint32_t>(lane), tip_h, /*force=*/false);
+            if (main_chain_cache_.is_cached_main(block))
+                mark_scene_confirmed_(block, static_cast<int>(node->group_from),
+                                      static_cast<int>(node->group_to), target);
+        }
 
-        const int height = static_cast<int>(node->height);
-        if (height >= 0 && height < stop_h)
-            continue;
-
-        ++visited;
-
-        auto detail = scene_.detail_store().get(cur);
+        auto detail = scene_.detail_store().get(block);
         if (!detail)
             continue;
 
-        // All deps must exist in the live pool; enqueue fetch if not.
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty())
@@ -526,36 +688,46 @@ int AlephiumAdapter::run_completeness_trace_(const std::string& start_hash, int 
 
             if (!scene_.graph().contains(dep))
             {
-                if (enqueue_missing_dep_(dep))
-                    ++missing_enqueued;
+                if (!broken_dep_failed_.count(dep) &&
+                    !(fetch_pool_ && fetch_pool_->is_failed(dep)))
+                {
+                    if (enqueue_missing_dep_(dep))
+                        waiting_fetch = true;
+                }
                 continue;
             }
 
-            auto dn = scene_.graph().get(dep);
-            if (!dn)
-                continue;
-
-            // Continue same-chain walk only for same-lane deps above floor.
-            if (dn->lane != chain_lane ||
-                static_cast<int>(dn->group_from) != chain_from ||
-                static_cast<int>(dn->group_to) != chain_to)
-                continue;
-
-            const int dh = static_cast<int>(dn->height);
-            if (dh >= 0 && dh < stop_h)
-                continue;
-            if (!seen.insert(dep).second)
-                continue;
-            q.push(dep);
+            // Animate listing → dep for this lockstep height.
+            if (edges.size() < static_cast<size_t>(kMaxTraceEdges))
+            {
+                TraceEdge e;
+                e.from = block;
+                e.to = dep;
+                edges.push_back(std::move(e));
+            }
         }
     }
 
-    if (missing_enqueued == 0)
-        completeness_pending_lanes_.erase(chain_lane);
-    else
-        completeness_pending_lanes_.insert(chain_lane);
+    scene_.set_trace_edges(std::move(edges));
+    publish_trace_status_();
 
-    return missing_enqueued;
+    if (waiting_fetch || fetch_work_pending_())
+        return;
+
+    if (!lockstep_step_complete_())
+        return;
+
+    // Advance one height back for all lanes together.
+    ++trace_offset_;
+    publish_trace_status_();
+    std::printf("[adapter] lockstep advance → offset=%d\n", trace_offset_);
+
+    if (lockstep_all_below_floor_())
+    {
+        std::printf("[adapter] lockstep complete → Steady (offset=%d)\n", trace_offset_);
+        scene_.clear_trace_edges();
+        set_phase_(Phase::Steady);
+    }
 }
 
 void AlephiumAdapter::drain_fetch_results_(int max_admits)
@@ -592,18 +764,7 @@ void AlephiumAdapter::drain_fetch_results_(int max_admits)
         cJSON_Delete(obj);
 
         if (added || scene_.graph().contains(r.hash))
-        {
             ++stats_fetch_admitted_;
-            // If parent chain had this as main-dep, offline flood may label it later.
-            // Re-kick completeness from confirmed tip on that lane if known.
-            auto n = scene_.graph().get(r.hash);
-            if (n)
-            {
-                const NodeId tip = scene_.confirmed_tip_hash(n->lane);
-                if (!tip.empty())
-                    kick_completeness_trace_(tip);
-            }
-        }
     }
 }
 
@@ -778,7 +939,6 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
     mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
     const uint32_t mlane = lane_of(job.from, job.to);
     const int m = maybe_flood_offline_(main_hash, mlane, job.height, /*force=*/true);
-    kick_completeness_trace_(main_hash);
     ++stats_replaced_;
     ++stats_verified_ok_;
     if (reselect)
@@ -796,8 +956,8 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         // Already known main: only re-flood if lane incomplete / camera unlocked.
+        // Completeness is lockstep during bootstrap (not full BFS here).
         maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/false);
-        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         return;
     }
@@ -813,7 +973,6 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
-        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         if (m > 0)
             std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood marked=%d\n",
@@ -830,7 +989,6 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
-        kick_completeness_trace_(seed.hash);
         ++stats_verified_ok_;
         if (m > 0)
             std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood marked=%d\n",
@@ -897,13 +1055,10 @@ void AlephiumAdapter::maybe_refill_selection_detail()
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
     maybe_refill_selection_detail();
-
-    // Admit multi-thread block fetches first so traces can advance.
     drain_fetch_results_(kMaxFetchAdmitsPerDrain);
 
-    // Split budget: uncles are an independent queue (not starved by tip seeds).
-    const int uncle_budget = std::max(1, max_jobs / 2);
-    const int tip_budget = std::max(1, max_jobs - uncle_budget);
+    const int uncle_budget = (max_jobs / 2) > 0 ? (max_jobs / 2) : 1;
+    const int tip_budget = (max_jobs - uncle_budget) > 0 ? (max_jobs - uncle_budget) : 1;
     int n = 0;
 
     while (n < uncle_budget && running.load() && !uncle_q_.empty())
@@ -914,64 +1069,55 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         ++n;
     }
 
-    // Camera unlock / incomplete cover only — not every drain cycle.
-    label_tips_needing_reflood_();
-
-    // Continue completeness on lanes with pending missing deps.
-    if (running.load() && !completeness_pending_lanes_.empty())
+    // Tip identify (and Steady new tips): seed is_main work.
+    if (phase_ == Phase::IdentifyTips || phase_ == Phase::Steady ||
+        phase_ == Phase::BootstrapPoll)
     {
-        std::vector<uint32_t> lanes(completeness_pending_lanes_.begin(),
-                                    completeness_pending_lanes_.end());
-        for (uint32_t lane : lanes)
+        if (seed_q_.empty() && tip_pending_confirmation_())
         {
-            if (!running.load())
-                break;
-            const NodeId tip = scene_.confirmed_tip_hash(lane);
-            if (!tip.empty())
-                run_completeness_trace_(tip, kMaxCompletenessNodes);
-        }
-    }
-
-    // Re-seed current live tips for main-chain confirmation (does not gate poll).
-    if (seed_q_.empty() && tip_pending_confirmation_())
-    {
-        for (const NodeId& tip : scene_.tip_ids())
-        {
-            auto node = scene_.graph().get(tip);
-            if (!node)
-                continue;
-            if (!height_in_lookback_(node->lane, static_cast<int>(node->height)))
-                continue;
-            if (main_chain_cache_.is_cached_main(tip))
+            for (const NodeId& tip : scene_.tip_ids())
             {
-                const int h = static_cast<int>(node->height);
-                mark_scene_confirmed_(tip, static_cast<int>(node->group_from),
-                                      static_cast<int>(node->group_to), h);
-                maybe_flood_offline_(tip, node->lane, h, /*force=*/false);
-                kick_completeness_trace_(tip);
-                continue;
+                auto node = scene_.graph().get(tip);
+                if (!node)
+                    continue;
+                if (!height_in_lookback_(node->lane, static_cast<int>(node->height)))
+                    continue;
+                if (main_chain_cache_.is_cached_main(tip))
+                {
+                    const int h = static_cast<int>(node->height);
+                    mark_scene_confirmed_(tip, static_cast<int>(node->group_from),
+                                          static_cast<int>(node->group_to), h);
+                    maybe_flood_offline_(tip, node->lane, h, /*force=*/false);
+                    continue;
+                }
+                SeedJob job;
+                job.hash = tip;
+                job.from = static_cast<int>(node->group_from);
+                job.to = static_cast<int>(node->group_to);
+                job.height = static_cast<int>(node->height);
+                enqueue_seed_(std::move(job));
             }
+        }
+
+        int tip_n = 0;
+        while (tip_n < tip_budget && running.load())
+        {
             SeedJob job;
-            job.hash = tip;
-            job.from = static_cast<int>(node->group_from);
-            job.to = static_cast<int>(node->group_to);
-            job.height = static_cast<int>(node->height);
-            enqueue_seed_(std::move(job));
+            if (!pop_seed_round_robin_(job))
+                break;
+            confirm_seed_(job);
+            ++tip_n;
         }
     }
 
-    int tip_n = 0;
-    while (tip_n < tip_budget && running.load())
-    {
-        SeedJob job;
-        if (!pop_seed_round_robin_(job))
-            break;
-        confirm_seed_(job);
-        ++tip_n;
-    }
+    if (phase_ == Phase::IdentifyTips)
+        maybe_enter_lockstep_();
+    else if (phase_ == Phase::LockstepTrace && running.load())
+        advance_lockstep_trace_();
 
-    // After new tip proves, only re-flood lanes that still need camera cover.
-    label_tips_needing_reflood_();
+    if (phase_ == Phase::Steady)
+        label_tips_needing_reflood_();
+
     drain_fetch_results_(kMaxFetchAdmitsPerDrain);
 }
 
@@ -979,12 +1125,13 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
 {
     maybe_refill_selection_detail();
 
-    // Poll always admits the latest window (unconfirmed OK). Confirmation is
-    // concurrent via drain_verify — never blocks the next poll.
+    // Caller must gate on ready_for_poll(). Bootstrap = first lookback window only
+    // until IdentifyTips + LockstepTrace complete.
 
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    std::printf("\n[adapter] Polling blockflow from %lld to %lld\n",
-                static_cast<long long>(last_poll_ts), static_cast<long long>(now));
+    std::printf("\n[adapter] Polling blockflow from %lld to %lld (phase=%d)\n",
+                static_cast<long long>(last_poll_ts), static_cast<long long>(now),
+                static_cast<int>(phase_));
 
     ++poll_count_;
     if (poll_count_ == 1 || (poll_count_ % kTipRefreshEveryNPolls) == 0)
@@ -1085,9 +1232,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
             const int h = static_cast<int>(n->height);
             mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
                                   static_cast<int>(n->group_to), h);
-            // Skip redundant offline flood when lane already covered.
             maybe_flood_offline_(tip, n->lane, h, /*force=*/false);
-            kick_completeness_trace_(tip);
             continue;
         }
         SeedJob job;
@@ -1112,15 +1257,23 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 "seed_q=%zu uncle_q=%zu unconfirmed=%zu is_main_api=%d floods=%d "
                 "uncles_checked=%d uncles_rm=%d confirmed_marks=%d removed=%d "
                 "fetch_q=%zu inflight=%zu fetch_ok=%d fetch_fail=%d fetch_adm=%d "
-                "trace_missing=%d\n",
+                "trace_missing=%d phase=%d offset=%d\n",
                 seen, added, seeded, skipped_bad, seed_q_.size(), uncle_q_.size(),
                 scene_.unconfirmed_live_count(), stats_api_is_main_, stats_dag_floods_,
                 stats_uncles_checked_, stats_uncles_removed_, stats_confirmed_marks_,
                 stats_removed_, fetch_pend, fetch_inflight, fetch_ok, fetch_fail,
-                stats_fetch_admitted_, stats_trace_missing_);
+                stats_fetch_admitted_, stats_trace_missing_,
+                static_cast<int>(phase_), trace_offset_);
 
     last_poll_ts = now;
     cJSON_Delete(obj);
+
+    // After first bootstrap lookback poll: gate further polls until lockstep done.
+    if (phase_ == Phase::BootstrapPoll)
+    {
+        bootstrap_poll_done_ = true;
+        set_phase_(Phase::IdentifyTips);
+    }
 
     prune_detail_store();
     maybe_refill_selection_detail();

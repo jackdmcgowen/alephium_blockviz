@@ -23,6 +23,13 @@ struct RecentFeedItem
     int    height    = 0;
 };
 
+// Active lockstep completeness edge: listing block → dependency (animated magenta).
+struct TraceEdge
+{
+    NodeId from; // listing (owns deps[])
+    NodeId to;   // dependency
+};
+
 class BlockScene
 {
 public:
@@ -88,6 +95,15 @@ public:
     // Fill out[16]; -1 = no confirmed block on that lane yet.
     void copy_confirmed_heights_locked(int out[kLaneCount]) const;
 
+    // Lockstep trace visualization (adapter writes self-locking; presenter reads under mutex).
+    void set_trace_edges(std::vector<TraceEdge> edges);
+    void clear_trace_edges();
+    // Presenter only: call while holding scene.mutex().
+    std::vector<TraceEdge> trace_edges_locked() const;
+    void set_trace_status(int phase, int offset); // self-locking (adapter)
+    // Presenter only: call while holding scene.mutex().
+    void get_trace_status_locked(int* phase_out, int* offset_out) const;
+
     // Thread-safe detail resolve (AlphDetailStore only).
     AlphBlock resolve_detail(const std::string& hash) const;
 
@@ -113,4 +129,9 @@ private:
     int    confirmed_height_[kLaneCount]{};
     NodeId confirmed_hash_[kLaneCount]{};
     bool   frontier_valid_[kLaneCount]{};
+
+    // Active lockstep dep edges (listing → dep) for magenta arrows.
+    std::vector<TraceEdge> trace_edges_;
+    int trace_phase_  = 0; // adapter Phase enum as int
+    int trace_offset_ = 0;
 };

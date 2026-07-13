@@ -16,6 +16,8 @@ float meters_per_height = static_cast<float>(ALPH_TARGET_BLOCK_SECONDS);
 
 const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);    // cyan unconfirmed
 const glm::vec4 kConfirmedArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // green main-chain tip
+// Magenta/violet — lockstep completeness trace (stands out from cyan/green/gold).
+const glm::vec4 kTraceArrowColor(0.92f, 0.28f, 0.95f, 0.98f);
 constexpr float kConfirmBlendSec = 0.35f; // cyan→green lerp duration
 const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
 const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
@@ -37,6 +39,10 @@ bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
 std::string tip_edge_key(const std::string& listing, const std::string& dep)
 {
     return std::string("t|") + listing + '|' + dep;
+}
+std::string trace_edge_key(const std::string& listing, const std::string& dep)
+{
+    return std::string("tr|") + listing + '|' + dep;
 }
 } // namespace
 
@@ -151,6 +157,37 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         tip_stagger_base += 2; // slight global cascade across tips
     }
 
+    // Lockstep completeness edges (adapter-published) — magenta, animated.
+    struct TraceActive
+    {
+        std::string key;
+        glm::vec3 from_pos{};
+        glm::vec3 to_pos{};
+        int stagger_i = 0;
+    };
+    std::vector<TraceActive> trace_active;
+    std::unordered_set<std::string> trace_keys;
+    {
+        const auto tedges = scene_.trace_edges_locked();
+        int ti = 0;
+        for (const TraceEdge& te : tedges)
+        {
+            if (te.from.empty() || te.to.empty())
+                continue;
+            auto from_it = positions.find(te.from);
+            auto to_it = positions.find(te.to);
+            if (from_it == positions.end() || to_it == positions.end())
+                continue;
+            TraceActive ta;
+            ta.key = trace_edge_key(te.from, te.to);
+            ta.from_pos = from_it->second;
+            ta.to_pos = to_it->second;
+            ta.stagger_i = ti++;
+            trace_keys.insert(ta.key);
+            trace_active.push_back(std::move(ta));
+        }
+    }
+
     // Admit / refresh active edges (Growing/Held). Confirm blend updates only here;
     // Fading/Gone freeze last confirm_blend_t. Never reset birth_sec for confirm.
     for (const ActiveEdge& e : active)
@@ -209,13 +246,46 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         // Held: stay
     }
 
+    // Trace edges: separate anim map entries with tr| prefix; magenta color.
+    for (const TraceActive& ta : trace_active)
+    {
+        DepArrowAnim& anim = tip_dep_anims_[ta.key];
+        anim.from_pos = ta.from_pos;
+        anim.to_pos = ta.to_pos;
+        anim.has_pos = true;
+        anim.base_alpha = kTraceArrowColor.a;
+        anim.tip_scale = 1.15f; // slightly larger for standout
+        anim.tip_confirmed = false;
+        anim.confirm_blend_t = 0.f;
+        if (anim.phase == ArrowPhase::Gone || anim.phase == ArrowPhase::Fading)
+        {
+            anim.phase = ArrowPhase::Held;
+            anim.fade_start_sec = 0.f;
+            if (anim.birth_sec < 0.f)
+                anim.birth_sec = now;
+            continue;
+        }
+        if (anim.birth_sec < 0.f)
+        {
+            anim.birth_sec = now + kArrowStagger * static_cast<float>(ta.stagger_i);
+            anim.phase = ArrowPhase::Growing;
+        }
+        else if (anim.phase == ArrowPhase::Growing)
+        {
+            const float age = now - anim.birth_sec;
+            if (age >= kArrowGrowSec)
+                anim.phase = ArrowPhase::Held;
+        }
+    }
+
     // Edges no longer active tips: fade if nodes still live; erase if removed from graph.
     for (auto it = tip_dep_anims_.begin(); it != tip_dep_anims_.end(); )
     {
         const std::string& key = it->first;
         DepArrowAnim& anim = it->second;
+        const bool is_trace = key.size() >= 3 && key[0] == 't' && key[1] == 'r' && key[2] == '|';
 
-        // Parse listing|dep from key "t|listing|dep"
+        // Parse listing|dep from key "t|listing|dep" or "tr|listing|dep"
         std::string listing, dep;
         {
             const size_t p0 = key.find('|');
@@ -236,13 +306,14 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             continue;
         }
 
-        if (active_keys.count(key) == 0)
+        const bool still_active = is_trace ? (trace_keys.count(key) != 0)
+                                           : (active_keys.count(key) != 0);
+        if (!still_active)
         {
             if (anim.phase == ArrowPhase::Growing || anim.phase == ArrowPhase::Held)
             {
                 anim.phase = ArrowPhase::Fading;
                 anim.fade_start_sec = now;
-                // Keep full length during fade (grow_u = 1).
             }
             else if (anim.phase == ArrowPhase::Fading)
             {
@@ -250,7 +321,6 @@ void ScenePresenter::tip_dep_tick_and_draw_(
                 if (fade_age >= kArrowFadeSec)
                     anim.phase = ArrowPhase::Gone;
             }
-            // Gone: keep entry until node removal so re-tip doesn't re-grow
         }
         ++it;
     }
@@ -271,6 +341,8 @@ void ScenePresenter::tip_dep_tick_and_draw_(
 
         float grow_u = 1.f;
         float alpha = anim.base_alpha;
+        const bool is_trace =
+            kv.first.size() >= 3 && kv.first[0] == 't' && kv.first[1] == 'r' && kv.first[2] == '|';
 
         if (anim.phase == ArrowPhase::Growing)
         {
@@ -294,8 +366,17 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             }
         }
 
-        glm::vec4 color = glm::mix(kActiveArrowColor, kConfirmedArrowColor, anim.confirm_blend_t);
-        color.a = alpha;
+        glm::vec4 color;
+        if (is_trace)
+        {
+            color = kTraceArrowColor;
+            color.a = alpha;
+        }
+        else
+        {
+            color = glm::mix(kActiveArrowColor, kConfirmedArrowColor, anim.confirm_blend_t);
+            color.a = alpha;
+        }
         debug.add_arrow(from_inset, to_inset, color,
                         tip_len * anim.tip_scale, tip_rad * anim.tip_scale,
                         shaft_r * anim.tip_scale, kDepRadial, grow_u);
@@ -616,6 +697,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     out.ui.total_blocks = scene_.total_blocks();
     out.ui.selected_hash = in.selected_hash;
     out.ui.selected_detail = in.selected_detail;
+    scene_.get_trace_status_locked(&out.ui.trace_phase, &out.ui.trace_offset);
     {
         // HUD: live max-height tips vs sequential confirmed frontier + per-chain H_c.
         const auto tips = scene_.tip_ids();

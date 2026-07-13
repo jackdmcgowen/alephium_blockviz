@@ -353,3 +353,36 @@ AlphBlock BlockScene::resolve_detail(const std::string& hash) const
     empty.hash = hash;
     return empty;
 }
+
+void BlockScene::set_trace_edges(std::vector<TraceEdge> edges)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    trace_edges_ = std::move(edges);
+}
+
+void BlockScene::clear_trace_edges()
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    trace_edges_.clear();
+}
+
+std::vector<TraceEdge> BlockScene::trace_edges_locked() const
+{
+    return trace_edges_;
+}
+
+void BlockScene::set_trace_status(int phase, int offset)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    trace_phase_ = phase;
+    trace_offset_ = offset;
+}
+
+void BlockScene::get_trace_status_locked(int* phase_out, int* offset_out) const
+{
+    // Caller holds mu_.
+    if (phase_out)
+        *phase_out = trace_phase_;
+    if (offset_out)
+        *offset_out = trace_offset_;
+}
