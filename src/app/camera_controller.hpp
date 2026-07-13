@@ -1,7 +1,7 @@
 #pragma once
 
-// Render-thread camera: Z-track scroll + LMB pan + RMB free look + selection look-aim.
-// Eye = (pan_x, pan_y, scroll_z). Look uses smoothed yaw/pitch (exp tween).
+// Render-thread camera: Z-track scroll + LMB look + RMB pan + selection look-aim.
+// Eye = pan + (0,0,scroll_z). Look uses smoothed yaw/pitch (exp tween).
 #include "alph_block.hpp"
 #include "graphics/camera.hpp"
 
@@ -64,7 +64,7 @@ public:
         scroll_z_ = std::clamp(scroll_z_ + world_delta, kEyeZMin, kEyeZMax);
     }
 
-    // LMB drag: pan in the camera right / camera-up plane (eye stays on Z for scroll axis).
+    // RMB drag: pan in the camera right / camera-up plane.
     void add_pan_delta(float dx_px, float dy_px)
     {
         const glm::vec3 f = yaw_pitch_to_dir_(yaw_, pitch_);
@@ -74,18 +74,17 @@ public:
             right = glm::vec3(1.f, 0.f, 0.f);
         else
             right /= rlen;
-        // Camera up: with world up (0,-1,0), screen-up is -cross(f, right) or similar.
         glm::vec3 cam_up = glm::normalize(glm::cross(f, right));
 
         // Grab-pan: content follows cursor (camera moves opposite to drag).
         pan_target_ -= right * (dx_px * kPanSens);
-        pan_target_ -= cam_up * (dy_px * kPanSens); // screen dy down → move opposite cam_up
+        pan_target_ -= cam_up * (dy_px * kPanSens);
         pan_target_.x = std::clamp(pan_target_.x, kPanMin, kPanMax);
         pan_target_.y = std::clamp(pan_target_.y, kPanMin, kPanMax);
         pan_target_.z = std::clamp(pan_target_.z, kPanMin, kPanMax);
     }
 
-    // RMB drag: free look (eye Z track + pan offsets preserved).
+    // LMB drag: free look (Z scroll + pan offsets preserved).
     void add_look_delta(float dx_px, float dy_px)
     {
         look_engaged_ = false;
@@ -120,6 +119,7 @@ public:
         pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
     }
 
+    // Short RMB reset: home look (+Z) and pan back to XY origin (smooth via tick).
     void clear_look_target()
     {
         look_engaged_ = false;
@@ -127,6 +127,7 @@ public:
         free_look_ = false;
         yaw_target_ = 0.f;
         pitch_target_ = 0.f;
+        pan_target_ = glm::vec3(0.f);
     }
 
     const std::string& look_aim_hash() const { return look_aim_hash_; }
@@ -152,7 +153,7 @@ private:
 
     glm::vec3 eye_position_() const
     {
-        // Z-track: scroll_z on Z; LMB pan offsets in XYZ (mostly lateral).
+        // Z-track: scroll_z on Z; RMB pan offsets in XYZ (mostly lateral).
         return glm::vec3(pan_.x, pan_.y, scroll_z_ + pan_.z);
     }
 

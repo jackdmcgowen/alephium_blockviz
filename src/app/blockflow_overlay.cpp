@@ -68,7 +68,7 @@ void BlockflowOverlay::draw()
 
     constexpr float kDragThresholdPx = 4.f;
 
-    // Left-click drag: pan camera (smoothed). Short LMB click still picks (engine).
+    // Left-hold drag: free look. Short LMB click still picks (engine).
     if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
         lmb_down_over_scene_ = true;
@@ -83,7 +83,7 @@ void BlockflowOverlay::draw()
         if (lmb_drag_dist_px_ >= kDragThresholdPx)
             lmb_dragged_ = true;
         if (lmb_dragged_ && (dx != 0.f || dy != 0.f))
-            camera_.add_pan_delta(dx, dy);
+            camera_.add_look_delta(dx, dy);
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     {
@@ -92,7 +92,7 @@ void BlockflowOverlay::draw()
         lmb_drag_dist_px_ = 0.f;
     }
 
-    // Right-click drag: free look. Short RMB click: clear selection + home look.
+    // Right-hold drag: pan. Short RMB click: clear selection + home look + pan to origin.
     if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         rmb_down_over_scene_ = true;
@@ -107,12 +107,12 @@ void BlockflowOverlay::draw()
         if (rmb_drag_dist_px_ >= kDragThresholdPx)
             rmb_dragged_ = true;
         if (rmb_dragged_ && (dx != 0.f || dy != 0.f))
-            camera_.add_look_delta(dx, dy);
+            camera_.add_pan_delta(dx, dy);
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         if (rmb_down_over_scene_ && !rmb_dragged_)
-            engine_.clear_selection();
+            engine_.clear_selection(); // clear_look_target: home look + pan origin
         rmb_down_over_scene_ = false;
         rmb_dragged_ = false;
         rmb_drag_dist_px_ = 0.f;
@@ -381,7 +381,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled(
-            "Camera: wheel/arrows Z · LMB-drag pan · short LMB pick · RMB-drag look · short RMB clear");
+            "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
     ImGui::End();

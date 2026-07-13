@@ -1118,9 +1118,8 @@ void VulkanEngine::record_command_buffer(VkCommandBuffer buffer, uint32_t imageI
             mx < static_cast<float>(width) - inspector_w &&
             my < static_cast<float>(height) - toolbar_h;
 
-        // RMB clear-selection is handled in BlockflowOverlay (short click vs look-drag).
-
-        // Short LMB click = pick; LMB drag is camera pan (overlay). Use ImGui drag distance.
+        // Short RMB reset (look home + pan origin) is in BlockflowOverlay.
+        // Short LMB click = pick; LMB drag is free look (overlay).
         constexpr float kPickMaxDragSqr = 4.f * 4.f;
         PickKind request = PickKind::None;
         if (over_scene && io.MouseReleased[ImGuiMouseButton_Left] &&

@@ -26,12 +26,12 @@ private:
     IBlockvizEngine&  engine_;
     int64_t           session_start_ms_ = 0;
 
-    // RMB free-look: drag vs click-to-clear-selection
+    // RMB pan: drag vs short-click reset (clear selection, home look + pan origin)
     bool  rmb_down_over_scene_ = false;
     bool  rmb_dragged_         = false;
     float rmb_drag_dist_px_    = 0.f;
 
-    // LMB pan: drag vs short-click pick (pick stays on engine via MouseDragMaxDistance)
+    // LMB look: drag vs short-click pick (engine uses MouseDragMaxDistance)
     bool  lmb_down_over_scene_ = false;
     bool  lmb_dragged_         = false;
     float lmb_drag_dist_px_    = 0.f;

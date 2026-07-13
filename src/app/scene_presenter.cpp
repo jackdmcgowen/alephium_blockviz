@@ -11,7 +11,6 @@
 
 namespace
 {
-// Layout spacing (mirrors previous engine static)
 float meters_per_height = static_cast<float>(ALPH_TARGET_BLOCK_SECONDS);
 
 const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);
@@ -30,6 +29,11 @@ bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
     to_out = to - dir * clearance;
     return true;
 }
+
+std::string tip_edge_key(const std::string& from, const std::string& to)
+{
+    return std::string("t|") + from + '|' + to;
+}
 } // namespace
 
 ScenePresenter::ScenePresenter(BlockScene& scene)
@@ -37,23 +41,210 @@ ScenePresenter::ScenePresenter(BlockScene& scene)
 {
 }
 
-float ScenePresenter::arrow_grow_u_(const std::string& key, float stagger_delay,
-                                    std::unordered_set<std::string>& seen_this_frame)
+float ScenePresenter::now_sec_() const
 {
-    seen_this_frame.insert(key);
-    const float now = std::chrono::duration<float>(
-                          std::chrono::steady_clock::now() - clock0_)
-                          .count();
-    auto it = arrow_birth_sec_.find(key);
-    if (it == arrow_birth_sec_.end())
+    return std::chrono::duration<float>(std::chrono::steady_clock::now() - clock0_).count();
+}
+
+float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_delay,
+                                        std::unordered_set<std::string>& seen)
+{
+    seen.insert(key);
+    const float now = now_sec_();
+    auto it = ephemeral_birth_sec_.find(key);
+    if (it == ephemeral_birth_sec_.end())
     {
-        arrow_birth_sec_[key] = now + stagger_delay;
-        it = arrow_birth_sec_.find(key);
+        ephemeral_birth_sec_[key] = now + stagger_delay;
+        it = ephemeral_birth_sec_.find(key);
     }
     const float age = now - it->second;
     if (age <= 0.f)
         return 0.f;
     return std::clamp(age / kArrowGrowSec, 0.f, 1.f);
+}
+
+void ScenePresenter::tip_dep_tick_and_draw_(
+    DebugDrawer& debug,
+    const std::unordered_map<std::string, glm::vec3>& positions,
+    const std::unordered_set<std::string>& live_nodes,
+    float tip_len, float tip_rad, float shaft_r, float clearance)
+{
+    const float now = now_sec_();
+    constexpr uint32_t kDepRadial = 8;
+    constexpr uint32_t kMaxDepArrows = 512;
+
+    // Active tip → dep edges this frame.
+    std::unordered_set<std::string> active_keys;
+    active_keys.reserve(64);
+
+    struct ActiveEdge
+    {
+        std::string key;
+        std::string from;
+        std::string to;
+        glm::vec3 from_pos{};
+        glm::vec3 to_pos{};
+        int stagger_i = 0;
+    };
+    std::vector<ActiveEdge> active;
+    active.reserve(64);
+
+    int tip_stagger_base = 0;
+    for (const NodeId& tip_hash : scene_.tip_ids())
+    {
+        auto d = scene_.detail_store().get(tip_hash);
+        if (!d)
+            continue;
+        auto to_it = positions.find(tip_hash);
+        if (to_it == positions.end())
+            continue;
+
+        int stagger_i = 0;
+        for (const std::string& dep_hash : d->deps)
+        {
+            auto from_it = positions.find(dep_hash);
+            if (from_it == positions.end())
+                continue;
+            ActiveEdge e;
+            e.key = tip_edge_key(dep_hash, tip_hash);
+            e.from = dep_hash;
+            e.to = tip_hash;
+            e.from_pos = from_it->second;
+            e.to_pos = to_it->second;
+            e.stagger_i = tip_stagger_base + stagger_i++;
+            active_keys.insert(e.key);
+            active.push_back(std::move(e));
+        }
+        tip_stagger_base += 2; // slight global cascade across tips
+    }
+
+    // Admit / refresh active edges.
+    for (const ActiveEdge& e : active)
+    {
+        DepArrowAnim& anim = tip_dep_anims_[e.key];
+        anim.from_pos = e.from_pos;
+        anim.to_pos = e.to_pos;
+        anim.has_pos = true;
+        anim.base_alpha = kActiveArrowColor.a;
+        anim.tip_scale = 1.f;
+
+        if (anim.phase == ArrowPhase::Gone || anim.phase == ArrowPhase::Fading)
+        {
+            // Tip active again: full length, no re-grow.
+            anim.phase = ArrowPhase::Held;
+            anim.fade_start_sec = 0.f;
+            if (anim.birth_sec < 0.f)
+                anim.birth_sec = now; // never grew (edge case)
+            continue;
+        }
+
+        if (anim.birth_sec < 0.f)
+        {
+            // New edge: start grow with stagger (one dep at a time).
+            anim.birth_sec = now + kArrowStagger * static_cast<float>(e.stagger_i);
+            anim.phase = ArrowPhase::Growing;
+        }
+        else if (anim.phase == ArrowPhase::Growing)
+        {
+            const float age = now - anim.birth_sec;
+            if (age >= kArrowGrowSec)
+                anim.phase = ArrowPhase::Held;
+        }
+        // Held: stay
+    }
+
+    // Edges no longer active tips: fade if nodes still live; erase if removed from graph.
+    for (auto it = tip_dep_anims_.begin(); it != tip_dep_anims_.end(); )
+    {
+        const std::string& key = it->first;
+        DepArrowAnim& anim = it->second;
+
+        // Parse from|to from key "t|from|to"
+        std::string from, to;
+        {
+            const size_t p0 = key.find('|');
+            const size_t p1 = (p0 == std::string::npos) ? std::string::npos : key.find('|', p0 + 1);
+            if (p0 != std::string::npos && p1 != std::string::npos)
+            {
+                from = key.substr(p0 + 1, p1 - p0 - 1);
+                to = key.substr(p1 + 1);
+            }
+        }
+
+        const bool live = !from.empty() && !to.empty() &&
+                          live_nodes.count(from) && live_nodes.count(to);
+
+        if (!live)
+        {
+            it = tip_dep_anims_.erase(it);
+            continue;
+        }
+
+        if (active_keys.count(key) == 0)
+        {
+            if (anim.phase == ArrowPhase::Growing || anim.phase == ArrowPhase::Held)
+            {
+                anim.phase = ArrowPhase::Fading;
+                anim.fade_start_sec = now;
+                // Keep full length during fade (grow_u = 1).
+            }
+            else if (anim.phase == ArrowPhase::Fading)
+            {
+                const float fade_age = now - anim.fade_start_sec;
+                if (fade_age >= kArrowFadeSec)
+                    anim.phase = ArrowPhase::Gone;
+            }
+            // Gone: keep entry until node removal so re-tip doesn't re-grow
+        }
+        ++it;
+    }
+
+    // Draw Growing / Held / Fading (not Gone).
+    uint32_t drawn = 0;
+    for (auto& kv : tip_dep_anims_)
+    {
+        if (drawn >= kMaxDepArrows)
+            break;
+        DepArrowAnim& anim = kv.second;
+        if (anim.phase == ArrowPhase::Gone || !anim.has_pos)
+            continue;
+
+        glm::vec3 from_inset, to_inset;
+        if (!inset_segment(anim.from_pos, anim.to_pos, clearance, from_inset, to_inset))
+            continue;
+
+        float grow_u = 1.f;
+        float alpha = anim.base_alpha;
+
+        if (anim.phase == ArrowPhase::Growing)
+        {
+            const float age = now - anim.birth_sec;
+            if (age <= 0.f)
+                continue;
+            grow_u = std::clamp(age / kArrowGrowSec, 0.f, 1.f);
+            if (grow_u >= 1.f)
+                anim.phase = ArrowPhase::Held;
+        }
+        else if (anim.phase == ArrowPhase::Fading)
+        {
+            grow_u = 1.f; // full length — alpha only
+            const float fade_age = now - anim.fade_start_sec;
+            const float t = std::clamp(fade_age / kArrowFadeSec, 0.f, 1.f);
+            alpha = anim.base_alpha * (1.f - t);
+            if (t >= 1.f)
+            {
+                anim.phase = ArrowPhase::Gone;
+                continue;
+            }
+        }
+
+        glm::vec4 color = kActiveArrowColor;
+        color.a = alpha;
+        debug.add_arrow(from_inset, to_inset, color,
+                        tip_len * anim.tip_scale, tip_rad * anim.tip_scale,
+                        shaft_r * anim.tip_scale, kDepRadial, grow_u);
+        ++drawn;
+    }
 }
 
 void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
@@ -71,6 +262,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot();
     LayoutResult layout = layout_.build(graph_nodes, layout_params);
     const auto& block_positions = layout.positions;
+
+    std::unordered_set<std::string> live_nodes;
+    live_nodes.reserve(graph_nodes.size());
+    for (const GraphNode& n : graph_nodes)
+        live_nodes.insert(n.id);
 
     if (!in.selected_hash.empty())
     {
@@ -93,10 +289,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
 
         const float scale = kDefaultBlockScale;
-        // Mesh verts at ±1 → half-extents = scale (inflate slightly for cull).
         const glm::vec3 half = in.instance_half_extents * scale;
 
-        // Frustum cull before GPU submit (pick_map stays index-aligned with instances).
         if (in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
             continue;
 
@@ -118,14 +312,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const float clearance = std::max(0.55f, meters_per_height * 0.12f);
         constexpr uint32_t kDepRadial = 8;
         constexpr uint32_t kMaxDepArrows = 512;
-        uint32_t arrow_count = 0;
-        std::unordered_set<std::string> arrows_seen;
 
-        auto arrow_key = [](char kind, const std::string& from, const std::string& to) {
+        // Active tip deps: grow once → hold → fade on confirm (no false re-grow).
+        tip_dep_tick_and_draw_(*debug, block_positions, live_nodes,
+                               tip_len, tip_rad, shaft_r, clearance);
+
+        // Selection / hover: ephemeral grow (separate keys).
+        uint32_t arrow_count = 0;
+        std::unordered_set<std::string> eph_seen;
+
+        auto eph_key = [](char kind, const std::string& from, const std::string& to) {
             return std::string(1, kind) + '|' + from + '|' + to;
         };
 
-        auto add_dep_arrow = [&](char kind, const std::string& from_hash,
+        auto add_eph_arrow = [&](char kind, const std::string& from_hash,
                                  const std::string& to_hash,
                                  const glm::vec3& from, const glm::vec3& to,
                                  const glm::vec4& color, float tip_scale, int stagger_i) {
@@ -134,9 +334,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             glm::vec3 from_inset, to_inset;
             if (!inset_segment(from, to, clearance, from_inset, to_inset))
                 return;
-            const std::string key = arrow_key(kind, from_hash, to_hash);
-            const float grow = arrow_grow_u_(key, kArrowStagger * static_cast<float>(stagger_i),
-                                             arrows_seen);
+            const std::string key = eph_key(kind, from_hash, to_hash);
+            const float grow = ephemeral_grow_u_(key, kArrowStagger * static_cast<float>(stagger_i),
+                                                 eph_seen);
             if (grow <= 0.f)
                 return;
             debug->add_arrow(from_inset, to_inset, color,
@@ -144,30 +344,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                              shaft_r * tip_scale, kDepRadial, grow);
             ++arrow_count;
         };
-
-        auto draw_deps_of = [&](char kind, const AlphBlock& block, const glm::vec4& color,
-                                float tip_scale) {
-            auto to_it = block_positions.find(block.hash);
-            if (to_it == block_positions.end())
-                return;
-            int stagger_i = 0;
-            for (const std::string& dep_hash : block.deps)
-            {
-                if (arrow_count >= kMaxDepArrows)
-                    break;
-                auto from_it = block_positions.find(dep_hash);
-                if (from_it == block_positions.end())
-                    continue;
-                add_dep_arrow(kind, dep_hash, block.hash, from_it->second, to_it->second,
-                              color, tip_scale, stagger_i++);
-            }
-        };
-
-        for (const NodeId& tip_hash : scene_.tip_ids())
-        {
-            if (auto d = scene_.detail_store().get(tip_hash))
-                draw_deps_of('t', *d, kActiveArrowColor, 1.f);
-        }
 
         const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
         const float ghost_half = 1.0f;
@@ -186,7 +362,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 auto from_it = block_positions.find(dep_hash);
                 if (from_it != block_positions.end())
                 {
-                    add_dep_arrow('s', dep_hash, block.hash, from_it->second, to_pos,
+                    add_eph_arrow('s', dep_hash, block.hash, from_it->second, to_pos,
                                   kSelectionArrowColor, 1.15f, stagger_i++);
                     continue;
                 }
@@ -218,14 +394,28 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash)
         {
             if (auto d = scene_.detail_store().get(in.hovered_hash))
-                draw_deps_of('h', *d, kHoverArrowColor, 1.05f);
+            {
+                auto to_it = block_positions.find(d->hash);
+                if (to_it != block_positions.end())
+                {
+                    int stagger_i = 0;
+                    for (const std::string& dep_hash : d->deps)
+                    {
+                        auto from_it = block_positions.find(dep_hash);
+                        if (from_it == block_positions.end())
+                            continue;
+                        add_eph_arrow('h', dep_hash, d->hash, from_it->second, to_it->second,
+                                      kHoverArrowColor, 1.05f, stagger_i++);
+                    }
+                }
+            }
         }
 
-        // Drop birth times for arrows no longer drawn (re-grow when they return).
-        for (auto it = arrow_birth_sec_.begin(); it != arrow_birth_sec_.end(); )
+        // Ephemeral birth times only — tip deps never reset here.
+        for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end(); )
         {
-            if (arrows_seen.find(it->first) == arrows_seen.end())
-                it = arrow_birth_sec_.erase(it);
+            if (eph_seen.find(it->first) == eph_seen.end())
+                it = ephemeral_birth_sec_.erase(it);
             else
                 ++it;
         }

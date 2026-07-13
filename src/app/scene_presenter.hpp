@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <glm/glm.hpp>
+
 class ScenePresenter : public IFrameSource
 {
 public:
@@ -19,17 +21,40 @@ public:
                  DebugDrawer* debug) override;
 
 private:
-    static constexpr size_t kMaxInstances = 1024 * 1024;
-    static constexpr float  kArrowGrowSec = 0.38f;
-    static constexpr float  kArrowStagger = 0.045f; // seconds between sibling deps
+    static constexpr size_t kMaxInstances   = 1024 * 1024;
+    static constexpr float  kArrowGrowSec   = 0.40f;
+    static constexpr float  kArrowFadeSec   = 0.32f;
+    static constexpr float  kArrowStagger   = 0.045f; // seconds between sibling deps
 
-    // Birth time (steady seconds) for grow animation; key = kind|from|to
-    float arrow_grow_u_(const std::string& key, float stagger_delay,
-                        std::unordered_set<std::string>& seen_this_frame);
+    enum class ArrowPhase : uint8_t { Growing, Held, Fading, Gone };
+
+    struct DepArrowAnim
+    {
+        float      birth_sec      = -1.f; // <0 = not started; else time grow begins
+        float      fade_start_sec = 0.f;
+        ArrowPhase phase          = ArrowPhase::Growing;
+        glm::vec3  from_pos{ 0.f };
+        glm::vec3  to_pos{ 0.f };
+        bool       has_pos        = false;
+        float      base_alpha     = 0.95f;
+        float      tip_scale      = 1.f;
+    };
+
+    float now_sec_() const;
+    // Tip-dep only: grow once → hold while tip active → fade on supersede; no re-grow unless removed.
+    void tip_dep_tick_and_draw_(DebugDrawer& debug,
+                                const std::unordered_map<std::string, glm::vec3>& positions,
+                                const std::unordered_set<std::string>& live_nodes,
+                                float tip_len, float tip_rad, float shaft_r, float clearance);
+
+    // Ephemeral selection/hover: simple grow; OK to forget when not drawn.
+    float ephemeral_grow_u_(const std::string& key, float stagger_delay,
+                            std::unordered_set<std::string>& seen);
 
     BlockScene& scene_;
     PolarShardLayout layout_;
 
     std::chrono::steady_clock::time_point clock0_{ std::chrono::steady_clock::now() };
-    std::unordered_map<std::string, float> arrow_birth_sec_;
+    std::unordered_map<std::string, DepArrowAnim> tip_dep_anims_;
+    std::unordered_map<std::string, float>        ephemeral_birth_sec_;
 };
