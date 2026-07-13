@@ -408,8 +408,9 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             if (ui.trace_phase == 1) pname = "IdentifyTips";
             else if (ui.trace_phase == 2) pname = "DfsTrace";
             else if (ui.trace_phase == 3) pname = "Steady";
-            ImGui::TextDisabled("Confirm phase: %s · DFS lanes open=%d (poll gated until Steady)",
-                                pname, ui.trace_offset);
+            ImGui::TextDisabled(
+                "Confirm phase: %s · DFS open=%d · history only if camera unlocks lookback",
+                pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }

@@ -1,8 +1,10 @@
 #pragma once
 
 // Domain/network policy for Alephium BlockFlow ingest.
-// Bootstrap: one lookback poll → identify tips → per-chain DFS dep walk
-// (terminate at first unknown dep) → Steady interval polls. Fetch pool for missing.
+// Bootstrap: one lookback poll → identify tips → pool-only per-chain DFS
+// (terminate at first unknown dep, no blockhash fetch) → Steady.
+// Older history: large window poll only when camera unlocks lookback periods;
+// DFS resumes from per-lane stop points.
 #include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
@@ -101,16 +103,17 @@ private:
     bool tip_pending_confirmation_() const;
 
     void drain_fetch_results_(int max_admits);
-    bool enqueue_missing_dep_(const std::string& dep_hash);
+    bool enqueue_missing_dep_(const std::string& dep_hash); // selection/legacy only
 
-    // Phase / per-chain DFS
+    // Phase / per-chain pool-only DFS
     void set_phase_(Phase p);
     void maybe_enter_dfs_();
     void advance_dfs_traces_();
-    // Returns true if lane finished (done or terminated); false if waiting on fetch.
-    bool run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& edges_out);
+    // Pool-only walk; terminate at first missing dep (no fetch). Always finishes.
+    void run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges_out, bool from_stop);
     bool all_dfs_done_() const;
-    bool fetch_work_pending_() const;
+    void maybe_camera_history_extend_();
+    int  admit_blocks_with_events_(cJSON* obj, int* seen_out, int* added_out);
     void publish_trace_status_();
 
     void mark_scene_confirmed_(const std::string& hash);
@@ -134,9 +137,12 @@ private:
 
     Phase phase_ = Phase::BootstrapPoll;
     bool bootstrap_poll_done_ = false;
-    // Per-lane DFS: inactive or finished.
-    bool dfs_active_[BlockScene::kLaneCount]{};
-    bool dfs_done_[BlockScene::kLaneCount]{};
+    // Per-lane DFS: inactive or finished for current unlocked floor.
+    bool   dfs_active_[BlockScene::kLaneCount]{};
+    bool   dfs_done_[BlockScene::kLaneCount]{};
+    NodeId dfs_stop_hash_[BlockScene::kLaneCount]{};
+    int    dfs_stop_height_[BlockScene::kLaneCount]{};
+    int    last_camera_extra_heights_ = 0;
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
     int earliest_traced_height_[BlockScene::kLaneCount]{};
@@ -160,7 +166,7 @@ private:
     static constexpr size_t kMaxSeedQueue = 512;
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxFloodPerSeed = 256;
-    static constexpr int kMaxFetchAdmitsPerDrain = 16;
+    static constexpr int kMaxFetchAdmitsPerDrain = 4; // selection path only
     static constexpr int kMaxTraceEdges = 256;
     static constexpr int kMaxDfsNodes = 256;
 };

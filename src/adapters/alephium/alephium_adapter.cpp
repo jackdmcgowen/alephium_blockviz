@@ -40,7 +40,10 @@ AlephiumAdapter::AlephiumAdapter(BlockScene& scene, IBlockvizEngine& engine)
         earliest_traced_height_[i] = INT_MAX; // none traced yet
         dfs_active_[i] = false;
         dfs_done_[i] = true;
+        dfs_stop_hash_[i].clear();
+        dfs_stop_height_[i] = -1;
     }
+    last_camera_extra_heights_ = 0;
 }
 
 void AlephiumAdapter::configure(const Config& cfg)
@@ -74,7 +77,10 @@ void AlephiumAdapter::reset_stats()
     {
         dfs_active_[i] = false;
         dfs_done_[i] = true;
+        dfs_stop_hash_[i].clear();
+        dfs_stop_height_[i] = -1;
     }
+    last_camera_extra_heights_ = 0;
     scene_.clear_trace_edges();
     publish_trace_status_();
     if (fetch_pool_)
@@ -107,9 +113,13 @@ void AlephiumAdapter::on_start()
     {
         dfs_active_[i] = false;
         dfs_done_[i] = true;
+        dfs_stop_hash_[i].clear();
+        dfs_stop_height_[i] = -1;
     }
+    last_camera_extra_heights_ = 0;
     publish_trace_status_();
-    std::printf("[adapter] on_start phase=BootstrapPoll (poll gated after first lookback)\n");
+    std::printf("[adapter] on_start phase=BootstrapPoll (poll gated after first lookback; "
+                "no dep fetch; camera unlocks older windows)\n");
 }
 
 void AlephiumAdapter::refresh_lookback_floors_()
@@ -509,13 +519,6 @@ void AlephiumAdapter::set_phase_(Phase p)
     std::printf("[adapter] phase → %s (dfs_lanes_active=%d)\n", name, trace_offset());
 }
 
-bool AlephiumAdapter::fetch_work_pending_() const
-{
-    if (!fetch_pool_)
-        return false;
-    return fetch_pool_->pending_jobs() > 0 || fetch_pool_->in_flight() > 0;
-}
-
 bool AlephiumAdapter::all_dfs_done_() const
 {
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
@@ -526,36 +529,41 @@ bool AlephiumAdapter::all_dfs_done_() const
     return true;
 }
 
-bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& edges_out)
+void AlephiumAdapter::run_dfs_lane_(uint32_t lane, std::vector<TraceEdge>& edges_out,
+                                   bool from_stop)
 {
-    // Independent DFS per chain from confirmed tip. Terminate at first block
-    // with any dependency not found in the live pool (after permanent fail).
+    // Pool-only DFS: never request missing deps. Terminate at first unknown dep
+    // and record stop so camera-unlocked history can resume later.
     if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
-        return true;
+        return;
 
     const NodeId tip = scene_.confirmed_tip_hash(lane);
     if (tip.empty())
     {
         dfs_done_[lane] = true;
-        return true;
+        return;
     }
 
     auto tip_n = scene_.graph().get(tip);
     if (!tip_n)
     {
         dfs_done_[lane] = true;
-        return true;
+        return;
     }
 
     const int chain_from = static_cast<int>(tip_n->group_from);
     const int chain_to = static_cast<int>(tip_n->group_to);
     const int floor_h = effective_lookback_floor_(lane);
 
+    std::string start = tip;
+    if (from_stop && !dfs_stop_hash_[lane].empty() &&
+        scene_.graph().contains(dfs_stop_hash_[lane]))
+        start = dfs_stop_hash_[lane];
+
     std::vector<std::string> stack;
     std::unordered_set<std::string> visited;
-    stack.push_back(tip);
+    stack.push_back(start);
     int nodes = 0;
-    bool waiting = false;
 
     while (!stack.empty() && nodes < kMaxDfsNodes)
     {
@@ -578,14 +586,12 @@ bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& e
 
         ++nodes;
 
-        // Main-path confirm if tip flood already knows this block.
         if (main_chain_cache_.is_cached_main(cur))
         {
             mark_scene_confirmed_(cur, chain_from, chain_to, height);
         }
         else
         {
-            // Propagate main labels from tip without walking past holes.
             maybe_flood_offline_(tip, lane, static_cast<int>(tip_n->height), /*force=*/false);
             if (main_chain_cache_.is_cached_main(cur))
                 mark_scene_confirmed_(cur, chain_from, chain_to, height);
@@ -593,13 +599,9 @@ bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& e
 
         auto detail = scene_.detail_store().get(cur);
         if (!detail)
-        {
-            // No detail: cannot expand; treat as terminal for this branch.
             continue;
-        }
 
         bool any_missing = false;
-        bool any_permanent_fail = false;
         std::vector<std::string> same_chain_deps;
 
         for (const std::string& dep : detail->deps)
@@ -610,16 +612,9 @@ bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& e
             if (!scene_.graph().contains(dep))
             {
                 any_missing = true;
-                const bool failed = broken_dep_failed_.count(dep) != 0 ||
-                                    (fetch_pool_ && fetch_pool_->is_failed(dep));
-                if (failed)
-                    any_permanent_fail = true;
-                else if (enqueue_missing_dep_(dep))
-                    waiting = true;
                 continue;
             }
 
-            // Magenta edge for found deps.
             if (edges_out.size() < static_cast<size_t>(kMaxTraceEdges))
             {
                 TraceEdge e;
@@ -641,23 +636,17 @@ bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& e
             }
         }
 
-        // Terminate DFS at this block if any dep is unknown (cannot continue past).
+        // End trace here — no fetch. Resume only after camera history poll fills pool.
         if (any_missing)
         {
-            if (any_permanent_fail)
-            {
-                std::printf("[adapter] DFS terminate lane %d at h=%d %s (dep not found)\n",
-                            static_cast<int>(lane), height, cur.c_str());
-                dfs_done_[lane] = true;
-                return true;
-            }
-            // Waiting for fetch — do not expand past this block.
-            waiting = true;
-            // Keep lane not-done; stop expanding this branch.
-            continue;
+            dfs_stop_hash_[lane] = cur;
+            dfs_stop_height_[lane] = height;
+            dfs_done_[lane] = true;
+            std::printf("[adapter] DFS end lane %d at h=%d (unknown dep, no fetch) %s\n",
+                        static_cast<int>(lane), height, cur.c_str());
+            return;
         }
 
-        // All deps found: push same-chain deps for DFS (reverse so first dep is next).
         for (auto it = same_chain_deps.rbegin(); it != same_chain_deps.rend(); ++it)
         {
             if (!visited.count(*it))
@@ -665,14 +654,10 @@ bool AlephiumAdapter::run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& e
         }
     }
 
-    if (waiting || fetch_work_pending_())
-    {
-        dfs_done_[lane] = false;
-        return false;
-    }
-
+    // Exhausted within floor without a hole — clear stop (fully built in window).
+    dfs_stop_hash_[lane].clear();
+    dfs_stop_height_[lane] = -1;
     dfs_done_[lane] = true;
-    return true;
 }
 
 void AlephiumAdapter::maybe_enter_dfs_()
@@ -689,6 +674,8 @@ void AlephiumAdapter::maybe_enter_dfs_()
     {
         dfs_active_[lane] = false;
         dfs_done_[lane] = true;
+        dfs_stop_hash_[lane].clear();
+        dfs_stop_height_[lane] = -1;
         const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
         if (tip.empty())
             continue;
@@ -705,8 +692,136 @@ void AlephiumAdapter::maybe_enter_dfs_()
     }
 
     set_phase_(Phase::DfsTrace);
-    std::printf("[adapter] DFS start: all tips identified (independent per chain)\n");
+    std::printf("[adapter] DFS start: pool-only (no block requests beyond initial window)\n");
     advance_dfs_traces_();
+}
+
+int AlephiumAdapter::admit_blocks_with_events_(cJSON* obj, int* seen_out, int* added_out)
+{
+    int seen = 0, added = 0, skipped_bad = 0;
+    if (!obj)
+    {
+        if (seen_out) *seen_out = 0;
+        if (added_out) *added_out = 0;
+        return 0;
+    }
+
+    GET_OBJECT_ITEM(obj, blocksAndEvents);
+    if (blocksAndEvents && cJSON_IsArray(blocksAndEvents))
+    {
+        const int count = cJSON_GetArraySize(blocksAndEvents);
+        for (int i = 0; i < count; i++)
+        {
+            cJSON* shard = cJSON_GetArrayItem(blocksAndEvents, i);
+            if (!shard || !cJSON_IsArray(shard))
+                continue;
+            const int bn = cJSON_GetArraySize(shard);
+            for (int j = 0; j < bn; ++j)
+            {
+                cJSON* iter = cJSON_GetArrayItem(shard, j);
+                GET_OBJECT_ITEM(iter, block);
+                if (!block)
+                    continue;
+                ++seen;
+                GET_OBJECT_ITEM(block, hash);
+                GET_OBJECT_ITEM(block, height);
+                GET_OBJECT_ITEM(block, chainFrom);
+                GET_OBJECT_ITEM(block, chainTo);
+                if (!hash || !cJSON_IsString(hash) || !hash->valuestring ||
+                    !height || !chainFrom || !chainTo)
+                {
+                    ++skipped_bad;
+                    continue;
+                }
+                const std::string block_hash = hash->valuestring;
+                const int h = height->valueint;
+                const int cf = chainFrom->valueint;
+                const int ct = chainTo->valueint;
+
+                if (proven_not_main_.count(block_hash))
+                {
+                    if (scene_.graph().contains(block_hash))
+                    {
+                        scene_.remove_block(block_hash);
+                        ++stats_uncles_removed_;
+                        ++stats_removed_;
+                    }
+                    continue;
+                }
+
+                if (scene_.add_block(block))
+                    ++added;
+
+                {
+                    AlphBlock alph(block);
+                    if (!alph.hash.empty())
+                        enqueue_uncles_from_block_(alph);
+                }
+                if (main_chain_cache_.is_cached_main(block_hash))
+                    mark_scene_confirmed_(block_hash, cf, ct, h);
+            }
+        }
+    }
+    if (seen_out) *seen_out = seen;
+    if (added_out) *added_out = added;
+    (void)skipped_bad;
+    return added;
+}
+
+void AlephiumAdapter::maybe_camera_history_extend_()
+{
+    // Only in Steady: large lookback windows when camera scrolls into older Z.
+    if (phase_ != Phase::Steady)
+        return;
+
+    const int extra = camera_extra_lookback_heights_();
+    if (extra <= last_camera_extra_heights_)
+        return;
+
+    const int lookback_blocks =
+        (ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS) > 0
+            ? (ALPH_LOOKBACK_WINDOW_SECONDS / ALPH_TARGET_BLOCK_SECONDS)
+            : 1;
+    const int old_periods = last_camera_extra_heights_ / lookback_blocks;
+    const int new_periods = extra / lookback_blocks;
+    if (new_periods <= old_periods)
+    {
+        last_camera_extra_heights_ = extra;
+        return;
+    }
+
+    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    const int64_t window_ms =
+        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+
+    for (int p = old_periods + 1; p <= new_periods; ++p)
+    {
+        // Period p: older swath [now - (p+1)*window, now - p*window].
+        const int64_t to_ts = now - static_cast<int64_t>(p) * window_ms;
+        const int64_t from_ts = to_ts - window_ms;
+        std::printf("[adapter] camera unlock history poll period=%d from=%lld to=%lld\n",
+                    p, static_cast<long long>(from_ts), static_cast<long long>(to_ts));
+        cJSON* obj = get_blockflow_blocks_with_events(from_ts, to_ts);
+        if (!obj)
+            continue;
+        int seen = 0, added = 0;
+        admit_blocks_with_events_(obj, &seen, &added);
+        cJSON_Delete(obj);
+        std::printf("[adapter] history admit seen=%d added=%d\n", seen, added);
+    }
+
+    last_camera_extra_heights_ = extra;
+
+    // Resume DFS from last stop on each lane (pool may now have older deps).
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        if (dfs_stop_hash_[lane].empty() && scene_.confirmed_tip_hash(static_cast<uint32_t>(lane)).empty())
+            continue;
+        dfs_active_[lane] = true;
+        dfs_done_[lane] = false;
+    }
+    std::printf("[adapter] resume DFS from stop points after camera unlock (extra_h=%d)\n",
+                extra);
 }
 
 void AlephiumAdapter::advance_dfs_traces_()
@@ -714,7 +829,8 @@ void AlephiumAdapter::advance_dfs_traces_()
     if (phase_ != Phase::DfsTrace && phase_ != Phase::Steady)
         return;
 
-    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+    if (phase_ == Phase::Steady)
+        maybe_camera_history_extend_();
 
     std::vector<TraceEdge> edges;
     edges.reserve(64);
@@ -725,7 +841,7 @@ void AlephiumAdapter::advance_dfs_traces_()
         {
             if (!dfs_active_[lane] || dfs_done_[lane])
                 continue;
-            run_dfs_from_tip_(static_cast<uint32_t>(lane), edges);
+            run_dfs_lane_(static_cast<uint32_t>(lane), edges, /*from_stop=*/false);
         }
 
         scene_.set_trace_edges(std::move(edges));
@@ -733,14 +849,21 @@ void AlephiumAdapter::advance_dfs_traces_()
 
         if (all_dfs_done_())
         {
-            std::printf("[adapter] DFS complete → Steady\n");
+            std::printf("[adapter] DFS complete (pool-only) → Steady; "
+                        "older history only on camera unlock\n");
             scene_.clear_trace_edges();
             set_phase_(Phase::Steady);
         }
         return;
     }
 
-    // Steady: light DFS on tips that are main (refresh / new tips).
+    // Steady: resume stopped lanes if reactivated; light DFS from new tips (pool only).
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        if (dfs_active_[lane] && !dfs_done_[lane])
+            run_dfs_lane_(static_cast<uint32_t>(lane), edges, /*from_stop=*/true);
+    }
+
     for (const NodeId& tip : scene_.tip_ids())
     {
         auto n = scene_.graph().get(tip);
@@ -751,9 +874,13 @@ void AlephiumAdapter::advance_dfs_traces_()
         mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
                               static_cast<int>(n->group_to),
                               static_cast<int>(n->height));
-        dfs_active_[n->lane] = true;
-        dfs_done_[n->lane] = false;
-        run_dfs_from_tip_(n->lane, edges);
+        // Forward tip only: re-walk within unlocked floor (no history fetch).
+        if (dfs_done_[n->lane] && dfs_stop_hash_[n->lane].empty())
+        {
+            dfs_active_[n->lane] = true;
+            dfs_done_[n->lane] = false;
+            run_dfs_lane_(n->lane, edges, /*from_stop=*/false);
+        }
     }
     if (!edges.empty())
         scene_.set_trace_edges(std::move(edges));
@@ -1149,6 +1276,7 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         advance_dfs_traces_();
     }
 
+    // Selection detail refill only — not used for chain DFS backfill.
     drain_fetch_results_(kMaxFetchAdmitsPerDrain);
 }
 
