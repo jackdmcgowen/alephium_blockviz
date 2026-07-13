@@ -20,7 +20,8 @@ struct SobelComputeCreateInfo
     uint32_t compute_family = 0;
 };
 
-// One clear + N indexed draws (N ≤ 32) in a single BeginRendering — no re-clear between draws.
+// One clear + N indexed draws of cube instances in a single BeginRendering.
+// Cubes only — never debug arrows. Safety cap is high (see record_selection_depth).
 struct SelectionDepthDrawParams
 {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -29,11 +30,14 @@ struct SelectionDepthDrawParams
     VkBuffer instance_buffer = VK_NULL_HANDLE;
     VkBuffer index_buffer = VK_NULL_HANDLE;
     const uint32_t* instance_indices = nullptr;
-    uint32_t instance_index_count = 0; // required ≥1 when recording for sobel; hard-capped at 32
+    uint32_t instance_index_count = 0; // ≥1 when recording; capped at kMaxSobelInstances
     uint32_t index_count = 36;
     uint32_t width = 0;
     uint32_t height = 0;
 };
+
+// Soft safety ceiling (not a product limit of 32). All eligible cubes may be highlighted.
+static constexpr uint32_t kMaxSobelInstances = 4096;
 
 class SobelCompute
 {

@@ -468,7 +468,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Pool-first incomplete set (for force-draw + orange Sobel).
+    // All incomplete pool hashes (orange Sobel can highlight every drawn cube).
     std::vector<std::string> incomplete_pool;
     incomplete_pool.reserve(64);
     for (const GraphNode& n : graph_nodes)
@@ -476,8 +476,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!missing_dep[n.id])
             continue;
         incomplete_pool.push_back(n.id);
-        if (incomplete_pool.size() >= 64)
-            break;
     }
 
     out.instances.reserve(layout.placements.size());
@@ -530,27 +528,26 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     {
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
 
-        // Green: one frontier tip per lane (not the whole confirmed spine).
+        // Green: frontier tip only if confirmed main (free-confirm can make tip main
+        // without is_main when referenced as dep of another confirmed tip).
         for (const auto& h : scene_.confirmed_frontier_ids_locked())
         {
             if (h.empty() || !pick_set.count(h))
                 continue;
-            // Prefer solid tips for green; incomplete tips can use orange instead.
+            if (!scene_.is_confirmed_locked(h))
+                continue;
+            // Incomplete tip → orange path instead of green.
             if (missing_dep[h])
                 continue;
             out.confirmed_tip_hashes.push_back(h);
-            if (out.confirmed_tip_hashes.size() >= 16)
-                break;
         }
 
-        // Orange: missing deps (including confirmed-but-incomplete).
+        // Orange: every incomplete cube with an instance (no 32/64 product cap).
         for (const auto& h : incomplete_pool)
         {
             if (!pick_set.count(h))
                 continue;
             out.incomplete_trace_hashes.push_back(h);
-            if (out.incomplete_trace_hashes.size() >= 64)
-                break;
         }
     }
 

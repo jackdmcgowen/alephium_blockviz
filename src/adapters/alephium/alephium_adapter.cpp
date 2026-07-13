@@ -93,6 +93,7 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
         return;
     scene_.mark_confirmed(hash);
     ++stats_confirmed_marks_;
+    propagate_main_from_confirmed_deps_(hash);
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, int to, int height)
@@ -101,6 +102,54 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, i
         return;
     scene_.mark_confirmed(hash, lane_of(from, to), height);
     ++stats_confirmed_marks_;
+    propagate_main_from_confirmed_deps_(hash);
+}
+
+void AlephiumAdapter::propagate_main_from_confirmed_deps_(const std::string& confirmed_hash)
+{
+    // Free main-chain advance: in-pool deps of a confirmed block are on-path without is_main.
+    // Same-chain deps recurse (bounded); cross-shard one hop only.
+    if (confirmed_hash.empty())
+        return;
+
+    std::vector<std::string> stack;
+    std::unordered_set<std::string> seen;
+    stack.push_back(confirmed_hash);
+    seen.insert(confirmed_hash);
+    int hops = 0;
+    constexpr int kMaxFreeHops = 256;
+
+    while (!stack.empty() && hops < kMaxFreeHops)
+    {
+        const std::string cur = std::move(stack.back());
+        stack.pop_back();
+        ++hops;
+
+        auto detail = scene_.detail_store().get(cur);
+        auto self = scene_.graph().get(cur);
+        if (!detail || !self)
+            continue;
+
+        for (const std::string& dep : detail->deps)
+        {
+            if (dep.empty() || !scene_.graph().contains(dep))
+                continue;
+            auto dn = scene_.graph().get(dep);
+            if (!dn)
+                continue;
+
+            const bool already = main_chain_cache_.is_cached_main(dep);
+            if (!already)
+                main_chain_cache_.mark_main(dep);
+            scene_.mark_confirmed(dep, dn->lane, static_cast<int>(dn->height));
+            if (!already)
+                ++stats_confirmed_marks_;
+
+            // Same-chain: keep walking free. Cross-shard: mark only (no further recurse).
+            if (dn->lane == self->lane && seen.insert(dep).second)
+                stack.push_back(dep);
+        }
+    }
 }
 
 void AlephiumAdapter::on_start()

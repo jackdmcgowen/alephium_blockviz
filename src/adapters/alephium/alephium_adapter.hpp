@@ -122,6 +122,8 @@ private:
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
+    // Mark in-pool deps of a confirmed block as main (no is_main API).
+    void propagate_main_from_confirmed_deps_(const std::string& confirmed_hash);
     void prune_detail_store();
 
     BlockScene& scene_;

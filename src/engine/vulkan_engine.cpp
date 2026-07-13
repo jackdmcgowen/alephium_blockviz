@@ -645,10 +645,9 @@ void VulkanEngine::render()
             }
         }
 
-        auto resolve_hashes = [&](const std::vector<std::string>& hashes,
-                                  size_t cap) {
+        auto resolve_hashes = [&](const std::vector<std::string>& hashes) {
             std::vector<uint32_t> idxs;
-            idxs.reserve(std::min(hashes.size(), cap));
+            idxs.reserve(hashes.size());
             for (const std::string& h : hashes)
             {
                 for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
@@ -659,13 +658,13 @@ void VulkanEngine::render()
                         break;
                     }
                 }
-                if (idxs.size() >= cap)
+                if (idxs.size() >= kMaxSobelInstances)
                     break;
             }
             return idxs;
         };
 
-        // Selection gold > incomplete orange > frontier-tip green (single mode).
+        // Cubes only (not arrows). Gold > orange (all incomplete) > green (frontier tips).
         if (selected_instance != ~0u)
         {
             sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
@@ -675,14 +674,13 @@ void VulkanEngine::render()
         else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
         {
             sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
-            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_, 32);
+            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_);
             want_sobel = !sobel_req.instance_indices.empty();
         }
         else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
         {
-            // One frontier tip per lane (presenter), not whole confirmed spine.
             sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
-            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_, 16);
+            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_);
             want_sobel = !sobel_req.instance_indices.empty();
         }
     }

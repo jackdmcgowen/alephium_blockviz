@@ -519,9 +519,7 @@ void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
     vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_only_layout_,
                             0, 1, &p.ubo_set, 0, nullptr);
 
-    // One clear already applied via LOAD_OP_CLEAR. Draw each instance index (union silhouette).
-    // Cap 32: 16 lanes + rare height ties. No re-clear / no second BeginRendering.
-    constexpr uint32_t kMaxSobelInstances = 32;
+    // One clear via LOAD_OP_CLEAR; N cube instance draws (union silhouette). Not arrows.
     const uint32_t n = (p.instance_indices && p.instance_index_count > 0)
                            ? (p.instance_index_count < kMaxSobelInstances
                                   ? p.instance_index_count
