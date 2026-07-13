@@ -1,8 +1,8 @@
 #pragma once
 
 // Domain/network policy for Alephium BlockFlow ingest.
-// Bootstrap: one lookback poll → identify all tips → lockstep height trace
-// (one offset back at a time) → Steady interval polls. Missing deps use fetch pool.
+// Bootstrap: one lookback poll → identify tips → per-chain DFS dep walk
+// (terminate at first unknown dep) → Steady interval polls. Fetch pool for missing.
 #include "adapters/alephium/block_fetch_pool.hpp"
 #include "adapters/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
@@ -13,16 +13,17 @@
 #include <deque>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 class AlephiumAdapter
 {
 public:
-    // Bootstrap → identify tips → lockstep completeness → free polling.
+    // Bootstrap → identify tips → independent per-chain DFS → free polling.
     enum class Phase : int
     {
         BootstrapPoll = 0, // allow first lookback poll only
         IdentifyTips  = 1, // is_main all live tips; poll gated
-        LockstepTrace = 2, // one height offset at a time; poll gated
+        DfsTrace      = 2, // per-lane DFS (not lockstep); poll gated
         Steady        = 3, // normal interval polls
     };
 
@@ -43,7 +44,7 @@ public:
 
     void poll_once(int64_t& last_poll_ts);
 
-    // False during IdentifyTips / LockstepTrace (and before first poll done).
+    // False during IdentifyTips / DfsTrace (and before first poll done).
     bool ready_for_poll() const;
 
     void drain_verify(int max_jobs, const std::atomic<bool>& running);
@@ -51,7 +52,8 @@ public:
     void maybe_refill_selection_detail();
 
     Phase phase() const { return phase_; }
-    int   trace_offset() const { return trace_offset_; }
+    // HUD: number of lanes still running DFS (0 when idle).
+    int   trace_offset() const;
 
     size_t verify_queue_size() const { return seed_q_.size(); }
     int stats_verified_ok() const { return stats_verified_ok_; }
@@ -81,6 +83,7 @@ private:
     void enqueue_seed_(SeedJob job);
     bool pop_seed_round_robin_(SeedJob& out);
     void confirm_seed_(const SeedJob& seed);
+    // Same-chain offline mark from tip; does not walk past missing deps.
     int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
     int maybe_flood_offline_(const std::string& main_hash, uint32_t lane, int height,
                              bool force);
@@ -100,14 +103,13 @@ private:
     void drain_fetch_results_(int max_admits);
     bool enqueue_missing_dep_(const std::string& dep_hash);
 
-    // Phase / lockstep
+    // Phase / per-chain DFS
     void set_phase_(Phase p);
-    void maybe_enter_lockstep_();
-    void advance_lockstep_trace_();
-    bool lockstep_lane_done_(uint32_t lane) const;
-    bool lockstep_step_complete_() const;
-    bool lockstep_all_below_floor_() const;
-    NodeId find_block_at_height_(uint32_t lane, int height) const;
+    void maybe_enter_dfs_();
+    void advance_dfs_traces_();
+    // Returns true if lane finished (done or terminated); false if waiting on fetch.
+    bool run_dfs_from_tip_(uint32_t lane, std::vector<TraceEdge>& edges_out);
+    bool all_dfs_done_() const;
     bool fetch_work_pending_() const;
     void publish_trace_status_();
 
@@ -132,10 +134,9 @@ private:
 
     Phase phase_ = Phase::BootstrapPoll;
     bool bootstrap_poll_done_ = false;
-    int  trace_offset_ = 0;
-    // Snapshot tip heights when entering LockstepTrace (-1 = inactive lane).
-    int  lockstep_tip_height_[BlockScene::kLaneCount]{};
-    bool lockstep_lane_active_[BlockScene::kLaneCount]{};
+    // Per-lane DFS: inactive or finished.
+    bool dfs_active_[BlockScene::kLaneCount]{};
+    bool dfs_done_[BlockScene::kLaneCount]{};
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
     int earliest_traced_height_[BlockScene::kLaneCount]{};
@@ -161,4 +162,5 @@ private:
     static constexpr int kMaxFloodPerSeed = 256;
     static constexpr int kMaxFetchAdmitsPerDrain = 16;
     static constexpr int kMaxTraceEdges = 256;
+    static constexpr int kMaxDfsNodes = 256;
 };

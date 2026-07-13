@@ -402,13 +402,13 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
         ImGui::TextDisabled(
-            "Solid=confirmed+deps · orange=missing · green=confirmed · magenta=lockstep trace · gold=select");
+            "Solid=main+all deps in pool · orange=missing · green=confirmed · magenta=DFS trace · gold=select");
         {
             const char* pname = "Bootstrap";
             if (ui.trace_phase == 1) pname = "IdentifyTips";
-            else if (ui.trace_phase == 2) pname = "LockstepTrace";
+            else if (ui.trace_phase == 2) pname = "DfsTrace";
             else if (ui.trace_phase == 3) pname = "Steady";
-            ImGui::TextDisabled("Confirm phase: %s · trace offset=%d (poll gated until Steady)",
+            ImGui::TextDisabled("Confirm phase: %s · DFS lanes open=%d (poll gated until Steady)",
                                 pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");

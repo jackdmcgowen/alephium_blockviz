@@ -64,14 +64,14 @@ void NetworkPoller::thread_main()
     while (running_)
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-        // Bootstrap: first poll only. IdentifyTips/Lockstep: no new window until ready.
+        // Bootstrap: first poll only. IdentifyTips/DfsTrace: no new window until ready.
         // Steady: normal interval polls.
         if (adapter_.ready_for_poll() &&
             (adapter_.phase() == AlephiumAdapter::Phase::BootstrapPoll ||
              now - last_poll_ts >= adapter_.poll_interval_ms()))
             adapter_.poll_once(last_poll_ts);
 
-        // Tip is_main, lockstep completeness, fetch admits.
+        // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
         for (int i = 0; i < 10 && running_; ++i)

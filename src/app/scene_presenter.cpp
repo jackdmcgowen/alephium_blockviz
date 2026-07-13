@@ -16,7 +16,7 @@ float meters_per_height = static_cast<float>(ALPH_TARGET_BLOCK_SECONDS);
 
 const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);    // cyan unconfirmed
 const glm::vec4 kConfirmedArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // green main-chain tip
-// Magenta/violet — lockstep completeness trace (stands out from cyan/green/gold).
+// Magenta/violet — per-chain DFS completeness trace.
 const glm::vec4 kTraceArrowColor(0.92f, 0.28f, 0.95f, 0.98f);
 constexpr float kConfirmBlendSec = 0.35f; // cyan→green lerp duration
 const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
@@ -157,7 +157,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         tip_stagger_base += 2; // slight global cascade across tips
     }
 
-    // Lockstep completeness edges (adapter-published) — magenta, animated.
+    // DFS completeness edges (adapter-published) — magenta, animated.
     struct TraceActive
     {
         std::string key;
@@ -415,9 +415,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    // --- Live pool classification (graph + detail), never frustum/draw set ---
-    // solid[h]: sequenced from main tip AND all deps in pool AND same-chain deps solid
-    //   (cascade so nothing above a broken / unsequenced link becomes opaque).
+    // --- Live pool classification ---
+    // solid[h]: known main-chain AND every deps[] entry is in the live pool.
+    // No cascade / sequenced gate — opaque as soon as main + deps known.
     std::unordered_map<std::string, bool> missing_dep;
     missing_dep.reserve(graph_nodes.size());
     for (const GraphNode& n : graph_nodes)
@@ -439,42 +439,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         missing_dep[n.id] = missing;
     }
 
-    std::unordered_map<std::string, int> solid_memo; // 0 unknown, 1 solid, -1 not
-    solid_memo.reserve(graph_nodes.size());
-    std::function<bool(const std::string&)> is_solid;
-    is_solid = [&](const std::string& h) -> bool {
-        auto it = solid_memo.find(h);
-        if (it != solid_memo.end())
-            return it->second > 0;
-        solid_memo[h] = -1; // cycle guard
-        // Opaque only for successfully sequenced main-path blocks.
-        if (!scene_.is_sequenced_locked(h))
+    auto is_solid = [&](const std::string& h) -> bool {
+        if (!scene_.is_confirmed_locked(h))
             return false;
-        if (missing_dep[h])
+        auto it = missing_dep.find(h);
+        if (it != missing_dep.end() && it->second)
             return false;
-        auto d = scene_.detail_store().get(h);
-        auto self = scene_.graph().get(h);
-        if (d && self)
-        {
-            for (const std::string& dep : d->deps)
-            {
-                if (dep.empty() || live_nodes.count(dep) == 0)
-                    continue;
-                auto dn = scene_.graph().get(dep);
-                if (!dn)
-                    continue;
-                // Same-chain deps must also be solid (cascade stops at break).
-                if (dn->lane != self->lane)
-                    continue;
-                if (!is_solid(dep))
-                    return false;
-            }
-        }
-        solid_memo[h] = 1;
         return true;
     };
-    for (const GraphNode& n : graph_nodes)
-        (void)is_solid(n.id);
 
     // Pool-first incomplete set (for force-draw + orange Sobel).
     std::vector<std::string> incomplete_pool;
@@ -506,7 +478,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
             color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-        // Opaque only when sequenced from tip and all deps known (cascade solid).
+        // Opaque as soon as main-chain confirmed and all deps are in the pool.
         const float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
         out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
