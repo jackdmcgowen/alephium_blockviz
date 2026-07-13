@@ -47,9 +47,15 @@ void AlephiumAdapter::reset_stats()
     stats_confirmed_marks_ = 0;
     stats_dag_floods_ = 0;
     stats_api_is_main_ = 0;
+    stats_uncles_checked_ = 0;
+    stats_uncles_removed_ = 0;
     seed_q_.clear();
     seed_queued_.clear();
     proven_not_main_.clear();
+    broken_dep_q_.clear();
+    broken_dep_seen_.clear();
+    uncle_q_.clear();
+    uncle_queued_.clear();
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
@@ -75,7 +81,7 @@ void AlephiumAdapter::on_start()
 
 bool AlephiumAdapter::ready_for_poll() const
 {
-    if (!seed_q_.empty())
+    if (!seed_q_.empty() || !uncle_q_.empty() || !broken_dep_q_.empty())
         return false;
     if (scene_.unconfirmed_live_count() != 0)
         return false;
@@ -166,8 +172,10 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
     return scene_.graph().contains(hash);
 }
 
-int AlephiumAdapter::flood_confirm_deps_(const std::string& main_hash, int budget)
+int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
 {
+    // Pure in-graph DAG label: no network, no is_main. Missing deps = broken links
+    // queued for a single fetch later (not assumed main until present).
     if (main_hash.empty() || budget <= 0)
         return 0;
 
@@ -184,8 +192,10 @@ int AlephiumAdapter::flood_confirm_deps_(const std::string& main_hash, int budge
 
         if (!scene_.graph().contains(cur))
         {
-            if (!fetch_and_admit_(cur))
-                continue;
+            // Broken link — fetch later; do not call is_main on deps.
+            if (broken_dep_seen_.insert(cur).second)
+                broken_dep_q_.push_back(cur);
+            continue;
         }
 
         auto node = scene_.graph().get(cur);
@@ -209,6 +219,104 @@ int AlephiumAdapter::flood_confirm_deps_(const std::string& main_hash, int budge
         }
     }
     return marked;
+}
+
+void AlephiumAdapter::label_all_confirmed_tip_ancestors_()
+{
+    // Fast offline pass: every current confirmed-height tip floods its dep DAG.
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
+        if (tip.empty())
+            continue;
+        flood_confirm_deps_offline_(tip, kMaxFloodPerSeed);
+    }
+}
+
+void AlephiumAdapter::enqueue_uncles_from_block_(const AlphBlock& alph)
+{
+    for (const std::string& unc : alph.uncles)
+    {
+        if (unc.empty() || uncle_queued_.count(unc) || proven_not_main_.count(unc))
+            continue;
+        if (main_chain_cache_.is_cached_main(unc))
+        {
+            // Main uncle: confirm (opaque cube ok) but Sobel only if it becomes frontier.
+            mark_scene_confirmed_(unc);
+            flood_confirm_deps_offline_(unc, kMaxFloodPerSeed);
+            continue;
+        }
+        SeedJob uj;
+        uj.hash = unc;
+        uj.from = alph.chainFrom;
+        uj.to = alph.chainTo;
+        uj.height = alph.height; // uncle height often parent-1; refine after fetch
+        uncle_queued_.insert(unc);
+        uncle_q_.push_back(std::move(uj));
+    }
+}
+
+void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_from,
+                                   int parent_to, int parent_height)
+{
+    uncle_queued_.erase(uncle_hash);
+    if (uncle_hash.empty())
+        return;
+    ++stats_uncles_checked_;
+
+    if (main_chain_cache_.is_cached_main(uncle_hash))
+    {
+        mark_scene_confirmed_(uncle_hash);
+        flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        return;
+    }
+
+    // Ensure we have the uncle body for lane/height (and for DAG flood).
+    if (!scene_.graph().contains(uncle_hash))
+        fetch_and_admit_(uncle_hash);
+
+    auto node = scene_.graph().get(uncle_hash);
+    const int from = node ? static_cast<int>(node->group_from) : parent_from;
+    const int to = node ? static_cast<int>(node->group_to) : parent_to;
+    const int height = node ? static_cast<int>(node->height) : parent_height;
+
+    if (height >= 0 &&
+        main_chain_cache_.try_hashes_singleton(uncle_hash, from, to, height))
+    {
+        mark_scene_confirmed_(uncle_hash, from, to, height);
+        flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        // Sobel: only if this uncle is the highest confirmed on its lane (frontier).
+        return;
+    }
+
+    bool transport_ok = false;
+    ++stats_api_is_main_;
+    if (main_chain_cache_.query_is_main(uncle_hash, &transport_ok))
+    {
+        mark_scene_confirmed_(uncle_hash, from, to, height);
+        flood_confirm_deps_offline_(uncle_hash, kMaxFloodPerSeed);
+        return;
+    }
+
+    if (!transport_ok)
+    {
+        // Retry later
+        SeedJob uj;
+        uj.hash = uncle_hash;
+        uj.from = from;
+        uj.to = to;
+        uj.height = height;
+        if (uncle_queued_.insert(uncle_hash).second)
+            uncle_q_.push_back(std::move(uj));
+        return;
+    }
+
+    // Not main — remove uncle from the scene.
+    std::printf("[adapter] uncle NOT main %s — remove\n", uncle_hash.c_str());
+    scene_.remove_block(uncle_hash);
+    proven_not_main_.insert(uncle_hash);
+    ++stats_uncles_removed_;
+    ++stats_removed_;
 }
 
 void AlephiumAdapter::replace_non_main_(const SeedJob& job)
@@ -267,7 +375,8 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 
     main_chain_cache_.mark_main(main_hash);
     mark_scene_confirmed_(main_hash, job.from, job.to, job.height);
-    flood_confirm_deps_(main_hash, kMaxFloodPerSeed);
+    flood_confirm_deps_offline_(main_hash, kMaxFloodPerSeed);
+    label_all_confirmed_tip_ancestors_();
     ++stats_replaced_;
     ++stats_verified_ok_;
     if (reselect)
@@ -282,13 +391,14 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     if (main_chain_cache_.is_cached_main(seed.hash))
     {
         mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
-        flood_confirm_deps_(seed.hash, kMaxFloodPerSeed);
+        flood_confirm_deps_offline_(seed.hash, kMaxFloodPerSeed);
+        label_all_confirmed_tip_ancestors_();
         ++stats_verified_ok_;
         return;
     }
 
     // BFS ancestors from the seed (tip-first). For each unproven node, one is_main
-    // query. On first main hit: flood all of its deps as confirmed (no further API).
+    // query. On first main hit: offline flood all of its in-graph deps (no API).
     std::queue<std::string> walk;
     std::unordered_set<std::string> visited;
     walk.push(seed.hash);
@@ -308,13 +418,15 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
             const int to = n ? static_cast<int>(n->group_to) : seed.to;
             const int height = n ? static_cast<int>(n->height) : seed.height;
             mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
+            label_all_confirmed_tip_ancestors_();
             ++stats_verified_ok_;
             return;
         }
 
         if (!scene_.graph().contains(cur))
         {
+            // Broken link only — fetch once, then continue offline.
             if (!fetch_and_admit_(cur))
                 continue;
         }
@@ -329,7 +441,8 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
             main_chain_cache_.try_hashes_singleton(cur, from, to, height))
         {
             mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
+            label_all_confirmed_tip_ancestors_();
             ++stats_verified_ok_;
             return;
         }
@@ -339,16 +452,16 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
         if (main_chain_cache_.query_is_main(cur, &transport_ok))
         {
             mark_scene_confirmed_(cur, from, to, height);
-            flood_confirm_deps_(cur, kMaxFloodPerSeed);
+            flood_confirm_deps_offline_(cur, kMaxFloodPerSeed);
+            label_all_confirmed_tip_ancestors_();
             ++stats_verified_ok_;
-            std::printf("[adapter] DAG hit main %s [%d->%d] h=%d — flood deps\n",
+            std::printf("[adapter] DAG hit main %s [%d->%d] h=%d — offline flood\n",
                         cur.c_str(), from, to, height);
             return;
         }
 
         if (!transport_ok)
         {
-            // Retry later
             SeedJob retry = seed;
             retry.hash = cur;
             retry.from = from;
@@ -358,14 +471,13 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
             return;
         }
 
-        // Not main: if this is the original tip seed, replace; else keep walking deps.
+        // Not main: if this is the original tip seed, replace; else walk deps.
         if (cur == seed.hash)
         {
             replace_non_main_(seed);
             return;
         }
 
-        // Walk further back through deps of this non-main block.
         if (auto d = scene_.detail_store().get(cur))
         {
             for (const std::string& dep : d->deps)
@@ -425,7 +537,34 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 {
     maybe_refill_selection_detail();
 
-    // Re-seed from latest unconfirmed (tips first, then any remaining live).
+    // Offline pass first: label all prior blocks of confirmed tips (no network).
+    label_all_confirmed_tip_ancestors_();
+
+    // Repair broken dep links (one fetch each), then offline flood again.
+    int n = 0;
+    while (n < max_jobs && running.load() && !broken_dep_q_.empty())
+    {
+        const std::string dep = std::move(broken_dep_q_.front());
+        broken_dep_q_.pop_front();
+        broken_dep_seen_.erase(dep);
+        if (fetch_and_admit_(dep))
+        {
+            // Parent tips can now offline-flood through this link.
+            label_all_confirmed_tip_ancestors_();
+        }
+        ++n;
+    }
+
+    // Manual uncle main-chain check (remove non-main uncles).
+    while (n < max_jobs && running.load() && !uncle_q_.empty())
+    {
+        SeedJob uj = std::move(uncle_q_.front());
+        uncle_q_.pop_front();
+        verify_uncle_(uj.hash, uj.from, uj.to, uj.height);
+        ++n;
+    }
+
+    // Re-seed from latest unconfirmed tips if needed.
     if (seed_q_.empty() && scene_.unconfirmed_live_count() > 0)
     {
         auto seed_node = [&](const NodeId& id) {
@@ -437,7 +576,7 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
                 mark_scene_confirmed_(id, static_cast<int>(n->group_from),
                                       static_cast<int>(n->group_to),
                                       static_cast<int>(n->height));
-                flood_confirm_deps_(id, kMaxFloodPerSeed);
+                flood_confirm_deps_offline_(id, kMaxFloodPerSeed);
                 return;
             }
             SeedJob job;
@@ -453,17 +592,15 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
 
         if (seed_q_.empty())
         {
-            // Fallback: any unconfirmed live node (highest first via tips already tried).
-            for (const GraphNode& n : scene_.nodes_snapshot())
+            for (const GraphNode& gn : scene_.nodes_snapshot())
             {
-                if (main_chain_cache_.is_cached_main(n.id))
+                if (main_chain_cache_.is_cached_main(gn.id))
                     continue;
-                seed_node(n.id);
+                seed_node(gn.id);
             }
         }
     }
 
-    int n = 0;
     while (n < max_jobs && running.load())
     {
         SeedJob job;
@@ -472,6 +609,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         confirm_seed_(job);
         ++n;
     }
+
+    // Final offline sweep after seeds.
+    label_all_confirmed_tip_ancestors_();
 }
 
 void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
@@ -539,17 +679,24 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 const std::string block_hash = hash->valuestring;
 
                 // Admit unconfirmed; confirmation is DAG work, not assume-main.
-                if (scene_.add_block(block))
+                const bool added_now = scene_.add_block(block);
+                if (added_now)
                     ++added;
+
+                // Queue ghost uncles for manual is_main (remove if not main).
+                {
+                    AlphBlock alph(block);
+                    if (!alph.hash.empty())
+                        enqueue_uncles_from_block_(alph);
+                }
 
                 if (main_chain_cache_.is_cached_main(block_hash))
                 {
                     mark_scene_confirmed_(block_hash, cf, ct, h);
-                    flood_confirm_deps_(block_hash, kMaxFloodPerSeed);
+                    flood_confirm_deps_offline_(block_hash, kMaxFloodPerSeed);
                 }
                 else
                 {
-                    // Seed from every admit near tip; drain will RR across lanes.
                     SeedJob job;
                     job.hash = block_hash;
                     job.from = cf;
@@ -579,11 +726,12 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     }
 
     std::printf("[adapter] seen=%d added=%d seeds+=%d skipped_bad=%d "
-                "seed_q=%zu unconfirmed=%zu is_main_api=%d floods=%d "
-                "confirmed_marks=%d removed=%d replaced=%d\n",
-                seen, added, seeded, skipped_bad, seed_q_.size(),
+                "seed_q=%zu uncle_q=%zu unconfirmed=%zu is_main_api=%d floods=%d "
+                "uncles_checked=%d uncles_rm=%d confirmed_marks=%d removed=%d\n",
+                seen, added, seeded, skipped_bad, seed_q_.size(), uncle_q_.size(),
                 scene_.unconfirmed_live_count(), stats_api_is_main_, stats_dag_floods_,
-                stats_confirmed_marks_, stats_removed_, stats_replaced_);
+                stats_uncles_checked_, stats_uncles_removed_, stats_confirmed_marks_,
+                stats_removed_);
 
     last_poll_ts = now;
     cJSON_Delete(obj);

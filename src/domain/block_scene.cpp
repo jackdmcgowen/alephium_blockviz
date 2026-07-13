@@ -25,13 +25,9 @@ bool BlockScene::add_block(cJSON* block)
     if (graph_.contains(alph_block.hash))
         return false;
 
-    // Uncle eviction: drop uncles still live in the graph
-    std::vector<NodeId> removed_uncles;
-    for (const auto& unc : alph_block.uncles)
-    {
-        if (!unc.empty() && graph_.contains(unc))
-            removed_uncles.push_back(unc);
-    }
+    // Uncles are NOT auto-evicted here — adapter verifies is-in-main-chain and
+    // removes only non-main uncles (main uncles may remain but are not Sobel tips
+    // unless they are the current confirmed-height frontier).
 
     GraphDelta delta;
     GraphNode node;
@@ -45,15 +41,9 @@ bool BlockScene::add_block(cJSON* block)
     node.chain_label =
         std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
     delta.upsert_nodes.push_back(std::move(node));
-    delta.remove_nodes = removed_uncles;
 
     graph_.apply(delta);
     detail_store_.upsert(alph_block);
-    if (!removed_uncles.empty())
-        detail_store_.remove_many(removed_uncles);
-
-    for (const NodeId& unc : removed_uncles)
-        erase_confirmed_unlocked_(unc);
 
     RecentFeedItem item;
     item.hash = alph_block.hash;
@@ -61,16 +51,6 @@ bool BlockScene::add_block(cJSON* block)
     item.chainTo = alph_block.chainTo;
     item.height = alph_block.height;
     feed_.push_back(std::move(item));
-
-    if (!removed_uncles.empty())
-    {
-        feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
-                                   [&](const RecentFeedItem& f) {
-                                       return std::find(removed_uncles.begin(), removed_uncles.end(),
-                                                        f.hash) != removed_uncles.end();
-                                   }),
-                    feed_.end());
-    }
 
     ++total_blocks_;
     if (feed_.size() > 120)

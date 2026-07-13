@@ -48,6 +48,8 @@ public:
     int stats_confirmed_marks() const { return stats_confirmed_marks_; }
     int stats_dag_floods() const { return stats_dag_floods_; }
     int stats_api_is_main() const { return stats_api_is_main_; }
+    int stats_uncles_checked() const { return stats_uncles_checked_; }
+    int stats_uncles_removed() const { return stats_uncles_removed_; }
 
     int64_t poll_interval_ms() const { return cfg_.poll_interval_ms; }
     int64_t lookback_ms() const { return cfg_.lookback_ms; }
@@ -65,12 +67,19 @@ private:
     bool pop_seed_round_robin_(SeedJob& out);
     // Backward DAG search from a tip/seed; one is_main per unproven ancestor until hit.
     void confirm_seed_(const SeedJob& seed);
-    // Mark hash + transitive deps confirmed (no is_main API). Fetch missing deps.
-    int flood_confirm_deps_(const std::string& main_hash, int budget);
-    // Fetch block by hash and admit unconfirmed (for missing deps).
+    // Offline DAG: mark main_hash + all deps already in the graph (no network).
+    // Broken links (missing deps) are queued for a single fetch; no is_main on deps.
+    int flood_confirm_deps_offline_(const std::string& main_hash, int budget);
+    // Fetch one missing dep by hash and re-run offline flood from parent.
     bool fetch_and_admit_(const std::string& hash);
     // Non-main tip: remove and try admit main at that height.
     void replace_non_main_(const SeedJob& job);
+    // Manually confirm/remove ghost-uncle hashes listed by a block.
+    void verify_uncle_(const std::string& uncle_hash, int parent_from, int parent_to,
+                       int parent_height);
+    void enqueue_uncles_from_block_(const AlphBlock& alph);
+    // After tips confirm: offline label all in-graph ancestors of each frontier tip.
+    void label_all_confirmed_tip_ancestors_();
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
@@ -85,6 +94,10 @@ private:
     std::deque<SeedJob> seed_q_;
     std::unordered_set<std::string> seed_queued_;
     std::unordered_set<std::string> proven_not_main_; // avoid re-query thrash
+    std::deque<std::string> broken_dep_q_;            // missing deps (fetch only)
+    std::unordered_set<std::string> broken_dep_seen_;
+    std::deque<SeedJob> uncle_q_;
+    std::unordered_set<std::string> uncle_queued_;
 
     int poll_count_ = 0;
     int stats_verified_ok_ = 0;
@@ -94,10 +107,12 @@ private:
     int stats_confirmed_marks_ = 0;
     int stats_dag_floods_ = 0;
     int stats_api_is_main_ = 0;
+    int stats_uncles_checked_ = 0;
+    int stats_uncles_removed_ = 0;
     int seed_lane_rr_ = 0;
 
     static constexpr size_t kMaxSeedQueue = 4096;
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxAncestorWalk = 64;
-    static constexpr int kMaxFloodPerSeed = 256;
+    static constexpr int kMaxFloodPerSeed = 512;
 };

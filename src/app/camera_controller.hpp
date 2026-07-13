@@ -24,8 +24,9 @@ public:
     static constexpr float kPanMax    =  800.f;
     static constexpr float kEyeZStep  = 40.f;    // world units / second while key held
     static constexpr float kWheelStep = 25.f;    // world units per mouse-wheel notch
-    static constexpr float kLookOmega = 12.f;    // look angle tween rate
-    static constexpr float kPanOmega  = 14.f;    // pan position tween rate
+    static constexpr float kLookOmega   = 12.f;    // look angle tween rate
+    static constexpr float kPanOmega    = 14.f;    // pan position tween rate
+    static constexpr float kScrollOmega = 12.f;    // Z-scroll tween rate
     static constexpr float kLookSens  = 0.0045f; // radians per mouse pixel
     static constexpr float kPanSens   = 0.12f;   // world units per mouse pixel
     static constexpr float kPitchMin  = -1.35f;
@@ -33,6 +34,7 @@ public:
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
+        , scroll_z_target_(scroll_z_)
     {
         camera_.forward = kForward;
         camera_.up = kUp;
@@ -51,17 +53,20 @@ public:
         camera_.far_z = far_z;
     }
 
+    // Smoothed eye Z (use for display / HUD).
     float scroll_z() const { return scroll_z_; }
     glm::vec3 pan() const { return pan_; }
 
     void set_scroll_z(float z)
     {
-        scroll_z_ = std::clamp(z, kEyeZMin, kEyeZMax);
+        scroll_z_target_ = std::clamp(z, kEyeZMin, kEyeZMax);
     }
 
+    // Accumulate wheel / key deltas into the scroll *target* (tweened in tick).
     void nudge_scroll(float world_delta)
     {
-        scroll_z_ = std::clamp(scroll_z_ + world_delta, kEyeZMin, kEyeZMax);
+        scroll_z_target_ =
+            std::clamp(scroll_z_target_ + world_delta, kEyeZMin, kEyeZMax);
     }
 
     // RMB drag: pan in the camera right / camera-up plane.
@@ -137,6 +142,7 @@ public:
     {
         update_look_(dt_sec);
         update_pan_(dt_sec);
+        update_scroll_(dt_sec);
         rebuild_camera_();
         return camera_;
     }
@@ -205,6 +211,12 @@ private:
         pan_.z = exp_smooth_(pan_.z, pan_target_.z, dt, kPanOmega);
     }
 
+    void update_scroll_(float dt)
+    {
+        scroll_z_ = exp_smooth_(scroll_z_, scroll_z_target_, dt, kScrollOmega);
+        scroll_z_ = std::clamp(scroll_z_, kEyeZMin, kEyeZMax);
+    }
+
     void rebuild_camera_()
     {
         camera_.eye = eye_position_();
@@ -219,6 +231,7 @@ private:
     }
 
     float scroll_z_ = 0.f;
+    float scroll_z_target_ = 0.f;
     glm::vec3 pan_{ 0.f };
     glm::vec3 pan_target_{ 0.f };
 
