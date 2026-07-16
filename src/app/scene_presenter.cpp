@@ -1,6 +1,6 @@
 #include "app/scene_presenter.hpp"
 
-#include "alph_block.hpp"
+#include "domain/alph_block.hpp"
 #include "graphics/debug/debug_drawer.h"
 
 #include <algorithm>

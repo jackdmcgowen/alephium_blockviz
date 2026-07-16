@@ -2,7 +2,7 @@
 
 // Render-thread camera: Z-track scroll + LMB look + RMB pan + selection look-aim.
 // Eye = pan + (0,0,scroll_z). Look uses smoothed yaw/pitch (exp tween).
-#include "alph_block.hpp"
+#include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
 
 #include <algorithm>

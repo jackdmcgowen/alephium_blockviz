@@ -2,7 +2,7 @@
 
 // Published UI view for render-thread ImGui (PR7).
 // Overlay must not read live BlockScene / adapter state without going through this.
-#include "alph_block.hpp"
+#include "domain/alph_block.hpp"
 #include "domain/block_graph.hpp"
 
 #include <cstdint>

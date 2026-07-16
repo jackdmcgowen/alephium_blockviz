@@ -96,23 +96,23 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\commands.c" />
+    <ClCompile Include="..\src\network\commands.c" />
     <ClCompile Include="..\src\network\network_system.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\network_poller.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\block_fetch_pool.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\alephium_adapter.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\main_chain_cache.cpp" />
-    <ClCompile Include="..\src\adapters\alephium\alph_detail_store.cpp" />
+    <ClCompile Include="..\src\network\alephium\network_poller.cpp" />
+    <ClCompile Include="..\src\network\alephium\block_fetch_pool.cpp" />
+    <ClCompile Include="..\src\network\alephium\alephium_adapter.cpp" />
+    <ClCompile Include="..\src\network\alephium\main_chain_cache.cpp" />
+    <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\commands.h" />
+    <ClInclude Include="..\src\network\commands.h" />
     <ClInclude Include="..\src\network\network_system.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\network_poller.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\block_fetch_pool.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\alephium_adapter.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\main_chain_cache.hpp" />
-    <ClInclude Include="..\src\adapters\alephium\alph_detail_store.hpp" />
-    <ClInclude Include="..\src\alph_block.hpp" />
+    <ClInclude Include="..\src\network\alephium\network_poller.hpp" />
+    <ClInclude Include="..\src\network\alephium\block_fetch_pool.hpp" />
+    <ClInclude Include="..\src\network\alephium\alephium_adapter.hpp" />
+    <ClInclude Include="..\src\network\alephium\main_chain_cache.hpp" />
+    <ClInclude Include="..\src\network\alephium\alph_detail_store.hpp" />
+    <ClInclude Include="..\src\domain\alph_block.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

@@ -1,7 +1,6 @@
 #pragma once
 
-// Public graphics-engine surface (no Vulkan types).
-// Implemented by GraphicsSystem via IBlockvizEngine (E6).
+// Public graphics types (no Vulkan). Used by IGraphicsSystem / IEngine.
 // See docs/graphics-modularization-design.md
 
 #include <cstddef>
@@ -85,29 +84,4 @@ public:
     virtual void draw() = 0; // ImGui::* calls only; no Vulkan
 };
 
-class IRenderEngine
-{
-public:
-    virtual ~IRenderEngine() = default;
-
-    virtual void initialize(const EngineCreateInfo& info) = 0;
-    virtual void resize(uint32_t width, uint32_t height) = 0;
-    virtual void shutdown() = 0;
-
-    virtual void start() = 0; // engine-owned render thread
-    virtual void stop() = 0;  // joins thread; safe after last submit
-
-    // Thread-safe from main: deep-copy into next publish slot (triple-buffer, latest-wins).
-    // Pointers in FrameSubmit need only live for the duration of this call.
-    // Engine applies the published slot on the render thread before GPU upload.
-    virtual void submit_frame(const FrameSubmit& frame) = 0;
-
-    virtual void set_ui_overlay(IUiOverlay* overlay) = 0; // not owned; nullptr = none
-
-    virtual void request_pick(const PickQuery& q) = 0;
-    virtual bool consume_pick(PickResult& out) = 0; // true if a new result is available
-};
-
-// Legacy alias — prefers create_graphics_system() via blockviz_engine_api.hpp
-IRenderEngine* create_vulkan_engine();
-void destroy_render_engine(IRenderEngine* engine);
+// Render lifecycle types used by IGraphicsSystem / IEngine (see engine/engine.hpp).

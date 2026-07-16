@@ -3,7 +3,7 @@
 // Host-side scene → frame builder (E14). Runs on the engine render thread via IFrameSource.
 #include "domain/block_scene.hpp"
 #include "domain/layout.hpp"
-#include "engine/blockviz_engine_api.hpp"
+#include "engine/engine.hpp"
 
 #include <chrono>
 #include <string>

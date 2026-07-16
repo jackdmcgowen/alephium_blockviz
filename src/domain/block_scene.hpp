@@ -7,9 +7,9 @@
 //   confirmed_          — proven main-chain (adapter)
 //   confirmed_hash_[L]  — highest confirmed live tip per lane (frontier)
 // Incompleteness (missing deps) is derived by the presenter from detail.deps ∩ pool.
-#include "alph_block.hpp"
+#include "domain/alph_block.hpp"
 #include "domain/block_graph.hpp"
-#include "adapters/alephium/alph_detail_store.hpp"
+#include "network/alephium/alph_detail_store.hpp"
 
 #include <atomic>
 #include <cjson/cJSON.h>

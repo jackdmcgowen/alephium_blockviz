@@ -30,7 +30,7 @@ static const glm::vec3 kShardColors[16] = {
     glm::vec3(0.00f, 1.00f, 0.00f)
 };
 
-BlockflowOverlay::BlockflowOverlay(CameraController& camera, IBlockvizEngine& engine)
+BlockflowOverlay::BlockflowOverlay(CameraController& camera, IEngine& engine)
     : camera_(camera)
     , engine_(engine)
 {

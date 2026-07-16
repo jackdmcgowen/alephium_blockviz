@@ -104,7 +104,6 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <!-- Core graphics helpers -->
     <ClCompile Include="..\src\graphics\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
     <ClCompile Include="..\src\graphics\camera.cpp" />
@@ -120,19 +119,18 @@
     <ClCompile Include="..\src\graphics\surface.cpp" />
     <ClCompile Include="..\src\graphics\swapchain.cpp" />
     <ClCompile Include="..\src\graphics\validation.cpp" />
-    <!-- Vulkan product backend (was blockviz_engine) -->
-    <ClCompile Include="..\src\engine\vulkan_engine.cpp" />
-    <ClCompile Include="..\src\engine\frame_sync.cpp" />
-    <ClCompile Include="..\src\engine\frame_resources.cpp" />
-    <ClCompile Include="..\src\engine\frame_descriptors.cpp" />
-    <ClCompile Include="..\src\engine\frame_recorder.cpp" />
-    <ClCompile Include="..\src\engine\frame_presenter.cpp" />
-    <ClCompile Include="..\src\engine\frame_graph\frame_task_graph.cpp" />
-    <ClCompile Include="..\src\engine\swapchain_targets.cpp" />
-    <ClCompile Include="..\src\engine\picker.cpp" />
-    <ClCompile Include="..\src\engine\sobel_compute.cpp" />
-    <ClCompile Include="..\src\engine\pipelines\cube_pipeline.cpp" />
-    <ClCompile Include="..\src\engine\pipelines\picker_pipeline.cpp" />
+    <ClCompile Include="..\src\graphics\graphics_system.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_sync.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_resources.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_descriptors.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp" />
+    <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
+    <ClCompile Include="..\src\graphics\frame\picker.cpp" />
+    <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp" />
+    <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp" />
+    <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp" />
     <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -144,21 +142,22 @@
     <ClInclude Include="..\src\graphics\engine_requirements.hpp" />
     <ClInclude Include="..\src\graphics\mesh_arena.h" />
     <ClInclude Include="..\src\graphics\debug\debug_drawer.h" />
-    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
+    <ClInclude Include="..\src\graphics\graphics_system.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_sync.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_resources.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_descriptors.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_recorder.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_presenter.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp" />
+    <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp" />
+    <ClInclude Include="..\src\graphics\frame\picker.hpp" />
+    <ClInclude Include="..\src\graphics\frame\sobel_compute.hpp" />
+    <ClInclude Include="..\src\graphics\frame\vertex_types.hpp" />
+    <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp" />
+    <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp" />
+    <ClInclude Include="..\src\engine\engine.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
-    <ClInclude Include="..\src\engine\vulkan_engine.hpp" />
-    <ClInclude Include="..\src\engine\frame_sync.hpp" />
-    <ClInclude Include="..\src\engine\frame_resources.hpp" />
-    <ClInclude Include="..\src\engine\frame_descriptors.hpp" />
-    <ClInclude Include="..\src\engine\frame_recorder.hpp" />
-    <ClInclude Include="..\src\engine\frame_presenter.hpp" />
-    <ClInclude Include="..\src\engine\frame_graph\frame_task_graph.hpp" />
-    <ClInclude Include="..\src\engine\swapchain_targets.hpp" />
-    <ClInclude Include="..\src\engine\picker.hpp" />
-    <ClInclude Include="..\src\engine\sobel_compute.hpp" />
-    <ClInclude Include="..\src\engine\vertex_types.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\cube_pipeline.hpp" />
-    <ClInclude Include="..\src\engine\pipelines\picker_pipeline.hpp" />
+    <ClInclude Include="..\src\engine\system.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

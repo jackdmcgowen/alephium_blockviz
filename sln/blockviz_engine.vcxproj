@@ -62,7 +62,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <!-- Vulkan-free product facade: public headers only; implementation is graphics.lib -->
+  <!-- Engine shell: IEngine + ISystem. No Vulkan / curl sources. -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
@@ -96,12 +96,12 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\engine\blockviz_engine.cpp" />
+    <ClCompile Include="..\src\engine\engine.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp" />
+    <ClInclude Include="..\src\engine\engine.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
-    <ClInclude Include="..\src\network\network_system.hpp" />
+    <ClInclude Include="..\src\engine\system.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="graphics.vcxproj">

@@ -9,21 +9,27 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
+    <Filter Include="Source Files\engine">
+      <UniqueIdentifier>{e1000001-0001-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\engine">
+      <UniqueIdentifier>{e1000001-0001-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\engine\blockviz_engine.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="..\src\engine\engine.cpp">
+      <Filter>Source Files\engine</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\engine\blockviz_engine_api.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="..\src\engine\engine.hpp">
+      <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="..\src\engine\engine_identity.hpp">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\network\network_system.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="..\src\engine\system.hpp">
+      <Filter>Header Files\engine</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
