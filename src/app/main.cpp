@@ -73,16 +73,21 @@ int main()
         return -1;
     }
 
-    // Product engine owns GraphicsSystem + NetworkSystem.
+    // Product engine: register systems, configure, init/free polymorphically.
     engine = create_engine();
-    overlay = new BlockflowOverlay(camera, *engine);
-    scene_presenter = new ScenePresenter(scene);
 
     EngineCreateInfo create_info{};
     create_info.platform_instance = hInstance;
     create_info.window = hwnd;
     create_info.application = app_identity::make();
-    engine->init(create_info);
+
+    IGraphicsSystem* graphics = create_graphics_system();
+    graphics->configure(create_info);
+    engine->add_system(graphics);
+    engine->init_system(graphics);
+
+    overlay = new BlockflowOverlay(camera, *engine);
+    scene_presenter = new ScenePresenter(scene);
 
     engine->set_scene(&scene);
     engine->set_camera(&camera);
@@ -98,6 +103,7 @@ int main()
     {
         printf("Failed to load config\n");
         engine->stop();
+        engine->free_systems();
         destroy_engine(engine);
         delete overlay;
         return -1;
@@ -109,7 +115,12 @@ int main()
     net_cfg.base_url = config_array.configs[0].url;
     net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     net_cfg.poll_interval_ms = static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
-    engine->init(net_cfg);
+
+    INetworkSystem* network = create_network_system(scene, *engine);
+    network->configure(net_cfg);
+    engine->add_system(network);
+    engine->init_system(network);
+    engine->start(); // starts any systems not yet running (network)
 
     MSG msg = { 0 };
     while (keepRunning)
@@ -129,6 +140,7 @@ int main()
     }
 
     engine->stop();
+    engine->free_systems();
     destroy_engine(engine);
     engine = nullptr;
     delete scene_presenter;

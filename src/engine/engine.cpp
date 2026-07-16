@@ -1,73 +1,115 @@
 #include "engine/engine.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
-// Product engine shell: owns GraphicsSystem + NetworkSystem. No Vulkan/curl here.
+// Product shell: owns registered ISystem components. No Vulkan/curl here.
 namespace
 {
-class Engine final : public IEngine
+class BlockVizEngine final : public IEngine
 {
 public:
-    Engine() = default;
+    BlockVizEngine() = default;
 
-    ~Engine() override
+    ~BlockVizEngine() override
     {
         stop();
-        if (network_)
-        {
-            destroy_network_system(network_);
-            network_ = nullptr;
-        }
-        if (graphics_)
-        {
-            destroy_graphics_system(graphics_);
-            graphics_ = nullptr;
-        }
+        free_systems();
+        for (ISystem* s : systems_)
+            delete s;
+        systems_.clear();
+        graphics_ = nullptr;
     }
 
-    void init(const EngineCreateInfo& info) override
+    void add_system(ISystem* system) override
     {
-        if (!graphics_)
-            graphics_ = create_graphics_system();
-        graphics_->init(info);
+        if (!system)
+            return;
+        for (ISystem* s : systems_)
+        {
+            if (s == system)
+                return;
+        }
+        systems_.push_back(system);
+        if (auto* g = dynamic_cast<IGraphicsSystem*>(system))
+            graphics_ = g;
+        std::printf("[engine] add_system %s\n", system->name());
     }
 
-    void init(const NetworkSystemConfig& cfg) override
+    ISystem* find_system(const char* name) const override
     {
-        if (!scene_)
+        if (!name)
+            return nullptr;
+        for (ISystem* s : systems_)
         {
-            std::printf("[engine] init(network): no scene set\n");
+            if (s && s->name() && std::strcmp(s->name(), name) == 0)
+                return s;
+        }
+        return nullptr;
+    }
+
+    void init_system(ISystem* system) override
+    {
+        if (!system || !owns_(system))
+        {
+            std::printf("[engine] init_system: unknown system\n");
             return;
         }
-        if (!network_)
-            network_ = create_network_system(*scene_, *this);
-        network_->init(cfg);
-        network_->start();
+        std::printf("[engine] init_system %s\n", system->name());
+        system->init();
+    }
+
+    void free_system(ISystem* system) override
+    {
+        if (!system || !owns_(system))
+            return;
+        std::printf("[engine] free_system %s\n", system->name());
+        system->stop();
+        system->free();
+    }
+
+    void init_systems() override
+    {
+        for (ISystem* s : systems_)
+        {
+            if (s)
+            {
+                std::printf("[engine] init_systems %s\n", s->name());
+                s->init();
+            }
+        }
+    }
+
+    void free_systems() override
+    {
+        for (auto it = systems_.rbegin(); it != systems_.rend(); ++it)
+        {
+            ISystem* s = *it;
+            if (!s)
+                continue;
+            s->stop();
+            s->free();
+        }
     }
 
     void start() override
     {
-        if (graphics_)
-            graphics_->start();
-        if (network_)
-            network_->start();
+        for (ISystem* s : systems_)
+        {
+            if (s)
+                s->start();
+        }
     }
 
     void stop() override
     {
-        if (network_)
-            network_->stop();
-        if (graphics_)
-            graphics_->stop();
-    }
-
-    void shutdown() override
-    {
-        stop();
-        if (network_)
-            network_->shutdown();
-        if (graphics_)
-            graphics_->shutdown();
+        for (auto it = systems_.rbegin(); it != systems_.rend(); ++it)
+        {
+            if (*it)
+                (*it)->stop();
+        }
     }
 
     void resize(uint32_t width, uint32_t height) override
@@ -179,15 +221,20 @@ public:
     }
 
 private:
+    bool owns_(ISystem* system) const
+    {
+        return std::find(systems_.begin(), systems_.end(), system) != systems_.end();
+    }
+
+    std::vector<ISystem*> systems_;
     IGraphicsSystem* graphics_ = nullptr;
-    INetworkSystem*  network_  = nullptr;
-    BlockScene*      scene_    = nullptr;
+    BlockScene* scene_ = nullptr;
 };
 } // namespace
 
 IEngine* create_engine()
 {
-    return new Engine();
+    return new BlockVizEngine();
 }
 
 void destroy_engine(IEngine* engine)

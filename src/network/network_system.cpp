@@ -19,22 +19,36 @@ public:
     {
     }
 
-    ~NetworkSystem() override { stop(); }
+    ~NetworkSystem() override { free(); }
 
     const char* name() const override { return "NetworkSystem"; }
 
-    void init(const NetworkSystemConfig& cfg) override
+    void configure(const NetworkSystemConfig& cfg) override
     {
         cfg_ = cfg;
+        configured_ = true;
+        std::printf("[net] NetworkSystem configure url=%s\n", cfg_.base_url.c_str());
+    }
+
+    void init() override
+    {
+        if (inited_)
+            return;
+        if (!configured_)
+        {
+            std::printf("[net] NetworkSystem::init: call configure() first\n");
+            return;
+        }
         if (!curl_global_ready_)
         {
             curl_global_init(CURL_GLOBAL_DEFAULT);
             curl_global_ready_ = true;
         }
+        inited_ = true;
         std::printf("[net] NetworkSystem init url=%s\n", cfg_.base_url.c_str());
     }
 
-    void shutdown() override
+    void free() override
     {
         stop();
         if (curl_global_ready_)
@@ -42,13 +56,14 @@ public:
             curl_global_cleanup();
             curl_global_ready_ = false;
         }
+        inited_ = false;
     }
 
     void start() override
     {
         if (running_)
             return;
-        if (!curl_global_ready_)
+        if (!inited_)
         {
             std::printf("[net] NetworkSystem start: call init() first\n");
             return;
@@ -77,6 +92,8 @@ private:
     IEngine& engine_;
     NetworkPoller poller_;
     NetworkSystemConfig cfg_{};
+    bool configured_ = false;
+    bool inited_ = false;
     bool running_ = false;
     bool curl_global_ready_ = false;
 };

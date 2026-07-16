@@ -1,7 +1,7 @@
 #pragma once
 
 // Product engine facade (engine.lib). No Vulkan / curl.
-// Engine shell owns GraphicsSystem + NetworkSystem (ISystem derivatives).
+// BlockVizEngine registers ISystem components and lifecycle them via init/free.
 
 #include "domain/alph_block.hpp"
 #include "app/ui_snapshot.hpp"
@@ -67,7 +67,8 @@ class INetworkSystem : public ISystem
 {
 public:
     ~INetworkSystem() override = default;
-    virtual void init(const NetworkSystemConfig& cfg) = 0;
+    // Store config before polymorphic init().
+    virtual void configure(const NetworkSystemConfig& cfg) = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -79,7 +80,9 @@ class IGraphicsSystem : public ISystem
 public:
     ~IGraphicsSystem() override = default;
 
-    virtual void init(const EngineCreateInfo& info) = 0;
+    // Store create info before polymorphic init().
+    virtual void configure(const EngineCreateInfo& info) = 0;
+
     virtual void resize(uint32_t width, uint32_t height) = 0;
     virtual void submit_frame(const FrameSubmit& frame) = 0;
     virtual void set_ui_overlay(IUiOverlay* overlay) = 0;
@@ -109,7 +112,7 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Product engine
+// Product engine interface
 // ---------------------------------------------------------------------------
 
 class IEngine
@@ -117,14 +120,20 @@ class IEngine
 public:
     virtual ~IEngine() = default;
 
-    // Create+init graphics, then (optionally later) network.
-    virtual void init(const EngineCreateInfo& info) = 0;
-    virtual void init(const NetworkSystemConfig& cfg) = 0;
+    // --- ISystem registry (engine takes ownership of added systems) ---
+    virtual void add_system(ISystem* system) = 0;
+    virtual ISystem* find_system(const char* name) const = 0;
+
+    // Polymorphic lifecycle — identical for every derived ISystem.
+    virtual void init_system(ISystem* system) = 0;
+    virtual void free_system(ISystem* system) = 0;
+    virtual void init_systems() = 0;
+    virtual void free_systems() = 0;
 
     virtual void start() = 0;
     virtual void stop() = 0;
-    virtual void shutdown() = 0;
 
+    // --- Product API (forwarded to registered GraphicsSystem) ---
     virtual void resize(uint32_t width, uint32_t height) = 0;
     virtual void submit_frame(const FrameSubmit& frame) = 0;
     virtual void set_ui_overlay(IUiOverlay* overlay) = 0;
@@ -153,14 +162,14 @@ public:
     virtual void on_resize() = 0;
 };
 
-// engine.lib
+// engine.lib — concrete type is BlockVizEngine
 IEngine* create_engine();
 void destroy_engine(IEngine* engine);
 
-// graphics.lib — used by Engine shell only
+// graphics.lib
 IGraphicsSystem* create_graphics_system();
 void destroy_graphics_system(IGraphicsSystem* graphics);
 
-// network.lib — used by Engine shell only
+// network.lib
 INetworkSystem* create_network_system(BlockScene& scene, IEngine& engine);
 void destroy_network_system(INetworkSystem* net);

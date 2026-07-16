@@ -127,10 +127,14 @@ void GraphicsSystem::on_resize()
     Resize(); // reads client rect then resize_internal
 }
 
-void GraphicsSystem::shutdown()
+void GraphicsSystem::free()
 {
     stop();
-    cleanup();
+    if (inited_)
+    {
+        cleanup();
+        inited_ = false;
+    }
 }
 
 void GraphicsSystem::request_pick(const PickQuery& /*q*/)
@@ -146,21 +150,36 @@ bool GraphicsSystem::consume_pick(PickResult& out)
 
 GraphicsSystem::~GraphicsSystem()
 {
-    stop();
-    cleanup();
+    free();
 }
 
 void GraphicsSystem::init_platform(void* hInst, void* hwnd_)
 {
-    // Prefer host calling init() with application identity filled in.
+    // Prefer host configure() + engine init_system().
     EngineCreateInfo info{};
     info.platform_instance = hInst;
     info.window = hwnd_;
-    init(info);
+    configure(info);
+    init();
 }
 
-void GraphicsSystem::init(const EngineCreateInfo& info)
+void GraphicsSystem::configure(const EngineCreateInfo& info)
 {
+    create_info_ = info;
+    configured_ = true;
+}
+
+void GraphicsSystem::init()
+{
+    if (inited_)
+        return;
+    if (!configured_)
+    {
+        std::printf("[gfx] GraphicsSystem::init: call configure() first\n");
+        return;
+    }
+
+    const EngineCreateInfo& info = create_info_;
     void* hInst = info.platform_instance;
     void* hwnd_ = info.window;
 
@@ -313,7 +332,8 @@ void GraphicsSystem::init(const EngineCreateInfo& info)
         std::printf("[engine] frame DAG: %s\n", g.debug_order_string().c_str());
     }
 
-}   /* Init() */
+    inited_ = true;
+}   /* GraphicsSystem::init() */
 
 
 void GraphicsSystem::request_detail_refill_unlocked(const std::string& hash)

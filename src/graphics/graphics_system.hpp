@@ -37,7 +37,7 @@
 #define WDW_WIDTH  1024
 #define WDW_HEIGHT 1024
 
-// Graphics backend (GPU + render thread). Product shell is Engine (engine.lib).
+// Graphics backend (GPU + render thread). Product shell is BlockVizEngine.
 class GraphicsSystem : public IGraphicsSystem
 {
 public:
@@ -48,13 +48,14 @@ public:
 
     // ISystem
     const char* name() const override { return "GraphicsSystem"; }
-
-    // IGraphicsSystem
-    void init(const EngineCreateInfo& info) override;
-    void resize(uint32_t width, uint32_t height) override;
-    void shutdown() override;
+    void init() override;
+    void free() override;
     void start() override;
     void stop() override;
+
+    // IGraphicsSystem
+    void configure(const EngineCreateInfo& info) override;
+    void resize(uint32_t width, uint32_t height) override;
     void submit_frame(const FrameSubmit& frame) override;
     void set_ui_overlay(IUiOverlay* overlay) override;
     void request_pick(const PickQuery& q) override;
@@ -220,7 +221,11 @@ private:
     mutable std::mutex ui_snap_mutex_;
     UiSnapshot ui_snap_;
 
+    EngineCreateInfo create_info_{};
+    bool configured_ = false;
+    bool inited_ = false;
+
     void cleanup();
 };
 
-#endif /* VULKAN_ENGINE_HPP */
+#endif /* GRAPHICS_SYSTEM_HPP */
