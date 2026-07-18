@@ -1,5 +1,6 @@
 #include "app/blockflow_overlay.hpp"
 #include "app/ui_chrome.hpp"
+#include "network/network_domain.hpp"
 
 #include "imgui.h"
 
@@ -37,6 +38,36 @@ BlockflowOverlay::BlockflowOverlay(CameraController& camera, IEngine& engine)
     session_start_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
 }
 
+void BlockflowOverlay::set_domain_urls(std::vector<std::string> urls)
+{
+    domain_urls_ = std::move(urls);
+}
+
+void BlockflowOverlay::set_initial_domain(NetworkDomain d)
+{
+    domain_ = d;
+}
+
+std::string BlockflowOverlay::resolve_url_(NetworkDomain d) const
+{
+    std::vector<const char*> ptrs;
+    ptrs.reserve(domain_urls_.size());
+    for (const auto& u : domain_urls_)
+        ptrs.push_back(u.c_str());
+    return network_domain_resolve_url(d, ptrs.empty() ? nullptr : ptrs.data(),
+                                      static_cast<int>(ptrs.size()));
+}
+
+void BlockflowOverlay::apply_domain_if_changed_()
+{
+    const int eng = engine_.network_domain();
+    if (eng == static_cast<int>(domain_))
+        return;
+    // Sync from engine if something else switched (should be rare).
+    if (domain_ != NetworkDomain::Debug)
+        domain_ = static_cast<NetworkDomain>(eng);
+}
+
 void BlockflowOverlay::draw()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -44,14 +75,14 @@ void BlockflowOverlay::draw()
 
     const float ui_w = io.DisplaySize.x;
     const float ui_h = io.DisplaySize.y;
-    const float inspector_w = ui_chrome::inspector_width(ui_w);
+    const float rail_w = ui_chrome::rail_width(ui_w);
     const float toolbar_h = ui_chrome::kToolbarHeight;
     const float mx = io.MousePos.x;
     const float my = io.MousePos.y;
     const bool over_scene =
         !io.WantCaptureMouse &&
-        mx >= 0.f && my >= 0.f &&
-        mx < ui_w - inspector_w &&
+        mx >= rail_w && my >= 0.f &&
+        mx < ui_w - rail_w &&
         my < ui_h - toolbar_h;
 
     // Camera motion — Z-track (keys + wheel)
@@ -123,20 +154,157 @@ void BlockflowOverlay::draw()
     }
 
     const UiSnapshot ui = engine_.copy_ui_snapshot();
+    apply_domain_if_changed_();
 
+    draw_network(ui, ui_w, ui_h);
     draw_toolbar(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
 }
 
+void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h)
+{
+    const float rail_w = ui_chrome::rail_width(ui_w);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_AlwaysVerticalScrollbar;
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(rail_w, ui_h), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.94f);
+    ImGui::Begin("Network", nullptr, flags);
+
+    // Domain combo
+    ImGui::TextDisabled("Domain");
+    const char* labels[] = { "Mainnet", "Testnet", "Debug" };
+    int domain_i = static_cast<int>(domain_);
+    if (domain_i < 0 || domain_i > 2)
+        domain_i = 0;
+    if (ImGui::BeginCombo("##domain", labels[domain_i]))
+    {
+        for (int i = 0; i < 2; ++i) // Mainnet + Testnet only
+        {
+            const bool selected = (domain_i == i);
+            if (ImGui::Selectable(labels[i], selected))
+            {
+                const NetworkDomain next = static_cast<NetworkDomain>(i);
+                if (next != domain_ && !engine_.network_is_switching())
+                {
+                    const std::string url = resolve_url_(next);
+                    if (engine_.switch_network_domain(i, url))
+                    {
+                        domain_ = next;
+                        session_start_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
+                        camera_.reattach_timeline();
+                    }
+                }
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        // Debug: visible but disabled
+        ImGui::BeginDisabled(true);
+        ImGui::Selectable(labels[2], false);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Simulator planned — not available yet");
+        ImGui::EndCombo();
+    }
+
+    const std::string url_fallback = resolve_url_(domain_);
+    const char* url_show = ui.net_base_url[0] ? ui.net_base_url : url_fallback.c_str();
+    ImGui::TextDisabled("Endpoint");
+    ImGui::TextWrapped("%s", url_show);
+    if (ImGui::IsItemHovered() && url_show[0])
+        ImGui::SetTooltip("%s", url_show);
+
+    // Status pill
+    const NetworkStatus st = static_cast<NetworkStatus>(
+        ui.net_switching ? static_cast<int>(NetworkStatus::Switching) : ui.net_status);
+    ImVec4 status_col(0.7f, 0.7f, 0.7f, 1.f);
+    if (st == NetworkStatus::Steady)
+        status_col = ImVec4(0.25f, 0.9f, 0.4f, 1.f);
+    else if (st == NetworkStatus::Bootstrapping || st == NetworkStatus::IdentifyTips ||
+             st == NetworkStatus::ConfirmWalk || st == NetworkStatus::Connecting)
+        status_col = ImVec4(1.f, 0.75f, 0.2f, 1.f);
+    else if (st == NetworkStatus::Switching)
+        status_col = ImVec4(0.4f, 0.8f, 1.f, 1.f);
+    else if (st == NetworkStatus::Error)
+        status_col = ImVec4(1.f, 0.3f, 0.25f, 1.f);
+    ImGui::Text("Status");
+    ImGui::SameLine();
+    ImGui::TextColored(status_col, "%s", network_status_label(st));
+
+    ImGui::Separator();
+    ImGui::Text("Loading");
+
+    const float win_need = static_cast<float>(std::max(1, ui.lookback_windows_need));
+    const float win_frac =
+        std::clamp(static_cast<float>(ui.lookback_windows_done) / win_need, 0.f, 1.f);
+    ImGui::ProgressBar(win_frac, ImVec2(-1.f, 0.f));
+    ImGui::TextDisabled("windows %d / %d", ui.lookback_windows_done, ui.lookback_windows_need);
+
+    const float frontier_frac =
+        std::clamp(static_cast<float>(ui.lanes_with_frontier) / 16.f, 0.f, 1.f);
+    ImGui::ProgressBar(frontier_frac, ImVec2(-1.f, 0.f));
+    ImGui::TextDisabled("frontier lanes %d / 16 · open walks %d", ui.lanes_with_frontier,
+                        ui.open_confirm_walks);
+
+    // Pool / admit activity
+    float pool_frac = 0.f;
+    if (ui.total_blocks > 0)
+        pool_frac = std::clamp(static_cast<float>(ui.total_blocks) / 256.f, 0.f, 1.f);
+    ImGui::ProgressBar(pool_frac, ImVec2(-1.f, 0.f));
+    ImGui::TextDisabled("pool blocks %d · admitted %d", ui.total_blocks, ui.stats_fetch_admitted);
+
+    ImGui::Separator();
+    ImGui::Text("Activity");
+    ImGui::TextDisabled("phase %s · open %d",
+                        network_status_label(st), ui.open_confirm_walks);
+    ImGui::Text("frontier %d / live tips %d", ui.confirmed_tip_count, ui.tip_count);
+    ImGui::TextDisabled("is_main %d · removed %d · seed_q %d", ui.stats_api_is_main,
+                        ui.stats_removed, ui.stats_seed_q);
+
+    if (ui.last_poll_ms > 0)
+    {
+        const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const float age_s = static_cast<float>(now - ui.last_poll_ms) * 0.001f;
+        ImGui::TextDisabled("last poll %.1fs ago · interval %.0fs", age_s, ui.poll_interval_sec);
+    }
+    else
+        ImGui::TextDisabled("last poll —");
+
+    if (ImGui::TreeNode("Chain tips (H_c / net tip)"))
+    {
+        for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
+        {
+            for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+            {
+                const int lane = f * ALPH_NUM_GROUPS + t;
+                const int hc = ui.confirmed_height_by_lane[lane];
+                const int tip = ui.tip_height_by_lane[lane];
+                if (t > 0)
+                    ImGui::SameLine(0.f, 8.f);
+                if (hc < 0 && tip < 0)
+                    ImGui::TextDisabled("%d→%d:—", f, t);
+                else
+                    ImGui::Text("%d→%d:%d/%d", f, t, hc, tip);
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    ImGui::End();
+}
+
 void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h)
 {
-    const float inspector_w = ui_chrome::inspector_width(ui_w);
+    const float rail_w = ui_chrome::rail_width(ui_w);
     const float toolbar_h = ui_chrome::kToolbarHeight;
-    const float scene_w = std::max(1.f, ui_w - inspector_w);
+    const float scene_w = ui_chrome::scene_width(ui_w);
 
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
-    ImGui::SetNextWindowPos(ImVec2(0, ui_h - toolbar_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(rail_w, ui_h - toolbar_h), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(scene_w, toolbar_h), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.92f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.f, 10.f));
@@ -217,9 +385,12 @@ void short_id(const std::string& s, char* buf, size_t buf_n)
     snprintf(buf, buf_n, "%.6s…%.4s", s.c_str(), s.c_str() + s.size() - 4);
 }
 
+// Host set by draw_inspector from current domain (mainnet/testnet explorer).
+const char* g_explorer_host = "https://explorer.alephium.org";
+
 void explorer_url(char* buf, size_t n, const char* kind, const std::string& id)
 {
-    snprintf(buf, n, "https://explorer.alephium.org/%s/%s", kind, id.c_str());
+    snprintf(buf, n, "%s/%s/%s", g_explorer_host, kind, id.c_str());
 }
 
 // One UTXO row: link + amount (collapsed lists stay one line).
@@ -247,7 +418,8 @@ void draw_utxo_row(UTXO& u, const char* kind, int index)
 
 void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h)
 {
-    const float inspector_w = ui_chrome::inspector_width(ui_w);
+    const float rail_w = ui_chrome::rail_width(ui_w);
+    g_explorer_host = network_domain_explorer_host(domain_);
 
     // Prefer live selection detail if feed click updated selection this frame
     AlphBlock inspector = ui.selected_detail;
@@ -261,8 +433,8 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_AlwaysVerticalScrollbar;
-    ImGui::SetNextWindowPos(ImVec2(ui_w - inspector_w, 0), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(inspector_w, ui_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(ui_w - rail_w, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(rail_w, ui_h), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.94f);
     ImGui::Begin("Block", nullptr, flags);
 

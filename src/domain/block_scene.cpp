@@ -10,7 +10,40 @@ BlockScene::BlockScene()
         confirmed_hash_[i].clear();
         frontier_valid_[i] = false;
         pending_hash_[i].clear();
+        network_hud_.tip_height_by_lane[i] = -1;
     }
+}
+
+void BlockScene::reset()
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    graph_.clear();
+    detail_store_.clear();
+    feed_.clear();
+    total_blocks_ = 0;
+    confirmed_.clear();
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        confirmed_height_[i] = -1;
+        confirmed_hash_[i].clear();
+        frontier_valid_[i] = false;
+        pending_hash_[i].clear();
+        frontier_walk_[i].clear();
+        network_hud_.tip_height_by_lane[i] = -1;
+    }
+    trace_phase_ = 0;
+    trace_offset_ = 0;
+    genesis_ms_.store(ALPH_GENESIS_TIMESTAMP_MS_FALLBACK, std::memory_order_relaxed);
+    timeline_origin_ms_.store(0, std::memory_order_relaxed);
+    network_hud_.lookback_windows_done = 0;
+    network_hud_.lookback_windows_need = 1;
+    network_hud_.lanes_with_frontier = 0;
+    network_hud_.open_confirm_walks = 0;
+    network_hud_.stats_api_is_main = 0;
+    network_hud_.stats_fetch_admitted = 0;
+    network_hud_.stats_removed = 0;
+    network_hud_.stats_seed_q = 0;
+    network_hud_.last_poll_ms = 0;
 }
 
 bool BlockScene::add_block(cJSON* block)
@@ -383,6 +416,18 @@ void BlockScene::set_trace_status(int phase, int offset)
     std::lock_guard<std::mutex> lock(mu_);
     trace_phase_ = phase;
     trace_offset_ = offset;
+}
+
+void BlockScene::set_network_hud(const NetworkHud& hud)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    network_hud_ = hud;
+}
+
+BlockScene::NetworkHud BlockScene::network_hud() const
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    return network_hud_;
 }
 
 void BlockScene::get_trace_status_locked(int* phase_out, int* offset_out) const

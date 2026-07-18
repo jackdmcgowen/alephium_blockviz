@@ -30,6 +30,12 @@ public:
     void start(const Config& cfg);
     void stop();
 
+    // Domain switch helpers (call from network system after stop / before start).
+    void prepare_domain_switch();
+    void set_domain_meta(int domain, const std::string& base_url);
+    AlephiumAdapter& adapter() { return adapter_; }
+    const AlephiumAdapter& adapter() const { return adapter_; }
+
 private:
     void thread_main();
 
@@ -38,6 +44,8 @@ private:
     Config            cfg_{};
     std::thread       thread_;
     std::atomic<bool> running_{ false };
+    int               domain_ = 0;
+    std::string       base_url_copy_; // stable c_str for baseUrl
 
     static constexpr int kVerifyJobsPerIdleSlice = 24;
     static constexpr int kFetchWorkers = 3;

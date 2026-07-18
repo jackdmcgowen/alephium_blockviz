@@ -34,6 +34,8 @@ public:
         systems_.push_back(system);
         if (auto* g = dynamic_cast<IGraphicsSystem*>(system))
             graphics_ = g;
+        if (auto* n = dynamic_cast<INetworkSystem*>(system))
+            network_ = n;
         std::printf("[engine] add_system %s\n", system->name());
     }
 
@@ -200,9 +202,25 @@ public:
             graphics_->on_resize();
     }
 
+    bool switch_network_domain(int domain, const std::string& base_url) override
+    {
+        return network_ ? network_->switch_domain(domain, base_url) : false;
+    }
+
+    int network_domain() const override
+    {
+        return network_ ? network_->domain() : 0;
+    }
+
+    bool network_is_switching() const override
+    {
+        return network_ ? network_->is_switching() : false;
+    }
+
 private:
     std::vector<ISystem*> systems_;
     IGraphicsSystem* graphics_ = nullptr;
+    INetworkSystem*  network_  = nullptr;
     BlockScene* scene_ = nullptr;
 };
 } // namespace

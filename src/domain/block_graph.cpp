@@ -121,6 +121,13 @@ void BlockGraph::prune(int64_t min_timestamp_ms, size_t max_nodes)
     }
 }
 
+void BlockGraph::clear()
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    nodes_.clear();
+    out_edges_.clear();
+}
+
 size_t BlockGraph::node_count() const
 {
     std::lock_guard<std::mutex> lock(mu_);

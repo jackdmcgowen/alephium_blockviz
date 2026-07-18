@@ -27,6 +27,7 @@ public:
     void upsert(const AlphBlock& block);
     void remove(const NodeId& id);
     void remove_many(const std::vector<NodeId>& ids);
+    void clear();
 
     std::optional<AlphBlock> get(const NodeId& id) const;
     AlphBlock get_or_empty(const NodeId& id) const;

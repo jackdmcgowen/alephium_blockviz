@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <cstring>
 #include <functional>
 
 #include <glm/glm.hpp>
@@ -745,6 +746,25 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.tip_count = static_cast<int>(tips.size());
         out.ui.confirmed_tip_count = static_cast<int>(frontier_ids.size());
         scene_.copy_confirmed_heights_locked(out.ui.confirmed_height_by_lane);
+    }
+    {
+        const auto hud = scene_.network_hud();
+        out.ui.net_domain = hud.domain;
+        out.ui.net_status = hud.status;
+        std::snprintf(out.ui.net_base_url, sizeof(out.ui.net_base_url), "%s", hud.base_url);
+        out.ui.lookback_windows_done = hud.lookback_windows_done;
+        out.ui.lookback_windows_need = hud.lookback_windows_need;
+        out.ui.lanes_with_frontier = hud.lanes_with_frontier;
+        out.ui.open_confirm_walks = hud.open_confirm_walks;
+        for (int i = 0; i < 16; ++i)
+            out.ui.tip_height_by_lane[i] = hud.tip_height_by_lane[i];
+        out.ui.stats_api_is_main = hud.stats_api_is_main;
+        out.ui.stats_fetch_admitted = hud.stats_fetch_admitted;
+        out.ui.stats_removed = hud.stats_removed;
+        out.ui.stats_seed_q = hud.stats_seed_q;
+        out.ui.last_poll_ms = hud.last_poll_ms;
+        out.ui.poll_interval_sec = hud.poll_interval_sec;
+        out.ui.net_switching = hud.switching;
     }
     for (const RecentFeedItem& b : scene_.feed())
     {

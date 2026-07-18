@@ -65,6 +65,7 @@ struct NetworkSystemConfig
     std::string base_url;
     int64_t     lookback_ms      = 0;
     int64_t     poll_interval_ms = 8000;
+    int         domain           = 0; // NetworkDomain as int
 };
 
 class INetworkSystem : public ISystem
@@ -73,6 +74,13 @@ public:
     ~INetworkSystem() override = default;
     // Store config before polymorphic init().
     virtual void configure(const NetworkSystemConfig& cfg) = 0;
+
+    // Hot-switch Mainnet/Testnet (Debug reserved). Resets scene + restarts poller.
+    // Safe to call from UI/render thread; blocks until poller restarted.
+    virtual bool switch_domain(int domain, const std::string& base_url) = 0;
+    virtual int  domain() const = 0;
+    virtual bool is_switching() const = 0;
+    virtual std::string base_url() const = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -163,6 +171,11 @@ public:
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;
+
+    // Convenience: find NetworkSystem and switch domain (no-op if missing).
+    virtual bool switch_network_domain(int domain, const std::string& base_url) = 0;
+    virtual int  network_domain() const = 0;
+    virtual bool network_is_switching() const = 0;
 };
 
 // engine.lib — concrete type is BlockVizEngine

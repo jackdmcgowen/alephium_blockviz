@@ -15,6 +15,15 @@ void MainChainCache::refresh_tips()
     tips_valid_ = true;
 }
 
+void MainChainCache::clear()
+{
+    main_yes_.clear();
+    tips_valid_ = false;
+    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
+        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+            tips_[f][t] = -1;
+}
+
 int MainChainCache::tip(int from_group, int to_group) const
 {
     if (from_group < 0 || from_group >= ALPH_NUM_GROUPS ||

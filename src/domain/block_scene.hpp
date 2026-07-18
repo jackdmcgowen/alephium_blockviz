@@ -36,6 +36,9 @@ public:
 
     BlockScene();
 
+    // Full clear for domain switch (graph, details, feed, frontiers, walks).
+    void reset();
+
     bool add_block(cJSON* block);
     bool remove_block(const std::string& hash);
 
@@ -99,6 +102,28 @@ public:
     void set_trace_status(int phase, int offset);
     void get_trace_status_locked(int* phase_out, int* offset_out) const;
 
+    // Network HUD published by adapter (copied into UiSnapshot on prepare).
+    struct NetworkHud
+    {
+        int         domain               = 0; // NetworkDomain
+        int         status               = 0; // NetworkStatus
+        char        base_url[160]        = {};
+        int         lookback_windows_done = 0;
+        int         lookback_windows_need = 1;
+        int         lanes_with_frontier  = 0;
+        int         open_confirm_walks   = 0;
+        int         tip_height_by_lane[kLaneCount]{};
+        int         stats_api_is_main    = 0;
+        int         stats_fetch_admitted = 0;
+        int         stats_removed        = 0;
+        int         stats_seed_q         = 0;
+        int64_t     last_poll_ms         = 0;
+        float       poll_interval_sec    = 8.f;
+        int         switching            = 0;
+    };
+    void set_network_hud(const NetworkHud& hud);
+    NetworkHud network_hud() const;
+
     AlphBlock resolve_detail(const std::string& hash) const;
 
 private:
@@ -127,4 +152,6 @@ private:
 
     int trace_phase_  = 0;
     int trace_offset_ = 0;
+
+    NetworkHud network_hud_{};
 };

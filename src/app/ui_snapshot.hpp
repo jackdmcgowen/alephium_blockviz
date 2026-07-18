@@ -39,9 +39,28 @@ struct UiSnapshot
     int                   trace_offset = 0; // lanes still walking confirm path
     uint64_t              seq                  = 0;
 
+    // --- Network left rail ---
+    int         net_domain = 0;          // NetworkDomain
+    int         net_status = 0;          // NetworkStatus
+    char        net_base_url[160]{};
+    int         lookback_windows_done = 0;
+    int         lookback_windows_need = 1;
+    int         lanes_with_frontier   = 0;
+    int         open_confirm_walks    = 0;
+    int         tip_height_by_lane[16]{};
+    int         stats_api_is_main     = 0;
+    int         stats_fetch_admitted  = 0;
+    int         stats_removed         = 0;
+    int         stats_seed_q          = 0;
+    int64_t     last_poll_ms          = 0;
+    float       poll_interval_sec     = 8.f;
+    int         net_switching         = 0;
+
     UiSnapshot()
     {
         for (int& h : confirmed_height_by_lane)
+            h = -1;
+        for (int& h : tip_height_by_lane)
             h = -1;
     }
 };

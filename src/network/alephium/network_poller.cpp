@@ -23,8 +23,9 @@ void NetworkPoller::start(const Config& cfg)
 {
     stop();
     cfg_ = cfg;
+    base_url_copy_ = cfg.base_url;
     adapter_.configure({ cfg.lookback_ms, cfg.poll_interval_ms });
-    adapter_.reset_stats();
+    adapter_.full_reset();
     fetch_pool_.start(cfg.base_url, kFetchWorkers);
     adapter_.set_fetch_pool(&fetch_pool_);
     running_ = true;
@@ -40,9 +41,21 @@ void NetworkPoller::stop()
     fetch_pool_.stop();
 }
 
+void NetworkPoller::prepare_domain_switch()
+{
+    adapter_.full_reset();
+}
+
+void NetworkPoller::set_domain_meta(int domain, const std::string& base_url)
+{
+    domain_ = domain;
+    base_url_copy_ = base_url;
+    cfg_.base_url = base_url;
+}
+
 void NetworkPoller::thread_main()
 {
-    baseUrl = cfg_.base_url.c_str();
+    baseUrl = base_url_copy_.c_str();
     curl = curl_easy_init();
     if (!curl)
     {
@@ -58,8 +71,9 @@ void NetworkPoller::thread_main()
         static_cast<int64_t>(std::time(nullptr)) * 1000 - cfg_.lookback_ms;
 
     std::printf("[net] poller started url=%s (adapter-owned policy + fetch pool)\n",
-                cfg_.base_url.c_str());
+                base_url_copy_.c_str());
     adapter_.on_start();
+    adapter_.publish_hud(domain_, base_url_copy_.c_str(), /*switching=*/false);
 
     while (running_)
     {
@@ -73,6 +87,7 @@ void NetworkPoller::thread_main()
 
         // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
+        adapter_.publish_hud(domain_, base_url_copy_.c_str(), /*switching=*/false);
 
         for (int i = 0; i < 10 && running_; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

@@ -116,6 +116,69 @@ void AlephiumAdapter::reset_stats()
         fetch_pool_->reset_stats();
 }
 
+void AlephiumAdapter::full_reset()
+{
+    reset_stats();
+    main_chain_cache_.clear();
+    seed_lane_rr_ = 0;
+    lookback_floors_valid_ = false;
+    base_lookback_ms_ = 0;
+    last_poll_wall_ms_ = 0;
+    for (int i = 0; i < BlockScene::kLaneCount; ++i)
+    {
+        min_lookback_height_[i] = 0;
+        earliest_traced_height_[i] = INT_MAX;
+    }
+}
+
+void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switching)
+{
+    int status = 1; // Connecting
+    switch (phase_)
+    {
+    case Phase::BootstrapPoll: status = 2; break; // Bootstrapping
+    case Phase::IdentifyTips:  status = 3; break;
+    case Phase::DfsTrace:      status = 4; break; // Confirm walk
+    case Phase::Steady:        status = 5; break;
+    }
+
+    BlockScene::NetworkHud hud{};
+    hud.domain = domain;
+    hud.status = switching ? 6 : status;
+    hud.switching = switching ? 1 : 0;
+    if (base_url)
+        std::snprintf(hud.base_url, sizeof(hud.base_url), "%.159s", base_url);
+
+    int done = 0;
+    for (const auto& w : lookback_windows_)
+        if (w.polled)
+            ++done;
+    hud.lookback_windows_done = done;
+    const int cam = camera_lookback_index_();
+    hud.lookback_windows_need = std::max(1, cam + 1);
+    if (static_cast<int>(lookback_windows_.size()) > hud.lookback_windows_need)
+        hud.lookback_windows_need = static_cast<int>(lookback_windows_.size());
+
+    int lanes_f = 0;
+    for (int i = 0; i < BlockScene::kLaneCount; ++i)
+        if (scene_.frontier_valid(static_cast<uint32_t>(i)))
+            ++lanes_f;
+    hud.lanes_with_frontier = lanes_f;
+    hud.open_confirm_walks = trace_offset();
+
+    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
+        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+            hud.tip_height_by_lane[f * ALPH_NUM_GROUPS + t] = main_chain_cache_.tip(f, t);
+
+    hud.stats_api_is_main = stats_api_is_main_;
+    hud.stats_fetch_admitted = stats_fetch_admitted_;
+    hud.stats_removed = stats_removed_;
+    hud.stats_seed_q = static_cast<int>(seed_q_.size());
+    hud.last_poll_ms = last_poll_wall_ms_;
+    hud.poll_interval_sec = static_cast<float>(cfg_.poll_interval_ms) * 0.001f;
+    scene_.set_network_hud(hud);
+}
+
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
 {
     if (hash.empty())
@@ -1998,6 +2061,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     maybe_refill_selection_detail();
 
     const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    last_poll_wall_ms_ = now;
     ++poll_count_;
     if (poll_count_ == 1 || (poll_count_ % kTipRefreshEveryNPolls) == 0)
     {

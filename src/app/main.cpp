@@ -11,7 +11,10 @@
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
+#include "network/network_domain.hpp"
 
+#include <string>
+#include <vector>
 #include <windows.h>
 
 // Host window defaults (no graphics/network backends in this TU).
@@ -96,7 +99,24 @@ int main()
         printf("Failed to load config\n");
         return -1;
     }
-    printf("Using config url: %s\n", config_array.configs[0].url);
+
+    std::vector<std::string> domain_urls;
+    for (int i = 0; i < config_array.count; ++i)
+    {
+        if (config_array.configs[i].url)
+            domain_urls.emplace_back(config_array.configs[i].url);
+    }
+    const NetworkDomain boot_domain =
+        network_domain_from_url(config_array.configs[0].url);
+    std::vector<const char*> url_ptrs;
+    url_ptrs.reserve(domain_urls.size());
+    for (const auto& u : domain_urls)
+        url_ptrs.push_back(u.c_str());
+    const std::string boot_url = network_domain_resolve_url(
+        boot_domain, url_ptrs.empty() ? nullptr : url_ptrs.data(),
+        static_cast<int>(url_ptrs.size()));
+    printf("Using config url: %s (domain %s)\n", boot_url.c_str(),
+           network_domain_label(boot_domain));
 
     // One init path: configure + register all systems, then init_systems / start once.
     engine = create_engine();
@@ -111,7 +131,8 @@ int main()
     engine->add_system(graphics);
 
     NetworkSystemConfig net_cfg;
-    net_cfg.base_url = config_array.configs[0].url;
+    net_cfg.base_url = boot_url;
+    net_cfg.domain = static_cast<int>(boot_domain);
     net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     net_cfg.poll_interval_ms = static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
 
@@ -122,6 +143,8 @@ int main()
     engine->init_systems();
 
     overlay = new BlockflowOverlay(camera, *engine);
+    overlay->set_domain_urls(domain_urls);
+    overlay->set_initial_domain(boot_domain);
     scene_presenter = new ScenePresenter(scene);
     engine->set_scene(&scene);
     engine->set_camera(&camera);

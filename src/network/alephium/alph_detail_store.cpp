@@ -34,6 +34,13 @@ void AlphDetailStore::remove_many(const std::vector<NodeId>& ids)
     }
 }
 
+void AlphDetailStore::clear()
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    by_id_.clear();
+    full_pin_.clear();
+}
+
 std::optional<AlphBlock> AlphDetailStore::get(const NodeId& id) const
 {
     std::lock_guard<std::mutex> lock(mu_);

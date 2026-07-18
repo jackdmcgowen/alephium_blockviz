@@ -15,6 +15,7 @@ class MainChainCache
 {
 public:
     void refresh_tips();
+    void clear();
     int tip(int from_group, int to_group) const;
     bool tips_valid() const { return tips_valid_; }
 

@@ -47,10 +47,14 @@ public:
 
     void configure(const Config& cfg);
     void reset_stats();
+    // Full internal reset for domain switch (queues, phase, caches); then call on_start().
+    void full_reset();
 
     void set_fetch_pool(BlockFetchPool* pool) { fetch_pool_ = pool; }
 
     void on_start();
+    // Publish loading/activity HUD into BlockScene (call after poll/drain).
+    void publish_hud(int domain, const char* base_url, bool switching = false);
 
     void poll_once(int64_t& last_poll_ts);
 
@@ -205,6 +209,7 @@ private:
     std::unordered_set<int64_t> history_slots_fetched_;
 
     int poll_count_ = 0;
+    int64_t last_poll_wall_ms_ = 0;
     int stats_verified_ok_ = 0;
     int stats_removed_ = 0;
     int stats_replaced_ = 0;
