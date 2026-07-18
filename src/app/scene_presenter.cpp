@@ -748,7 +748,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         scene_.copy_confirmed_heights_locked(out.ui.confirmed_height_by_lane);
     }
     {
-        const auto hud = scene_.network_hud();
+        // prepare already holds scene_.mutex() — do not call network_hud() (re-lock = deadlock).
+        const auto hud = scene_.network_hud_locked();
         out.ui.net_domain = hud.domain;
         out.ui.net_status = hud.status;
         std::snprintf(out.ui.net_base_url, sizeof(out.ui.net_base_url), "%s", hud.base_url);

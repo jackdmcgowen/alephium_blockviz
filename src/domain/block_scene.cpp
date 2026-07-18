@@ -430,6 +430,11 @@ BlockScene::NetworkHud BlockScene::network_hud() const
     return network_hud_;
 }
 
+BlockScene::NetworkHud BlockScene::network_hud_locked() const
+{
+    return network_hud_;
+}
+
 void BlockScene::get_trace_status_locked(int* phase_out, int* offset_out) const
 {
     // Caller holds mu_.

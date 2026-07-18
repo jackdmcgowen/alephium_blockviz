@@ -76,14 +76,14 @@ void BlockflowOverlay::draw()
     const float ui_w = io.DisplaySize.x;
     const float ui_h = io.DisplaySize.y;
     const float rail_w = ui_chrome::rail_width(ui_w);
-    const float toolbar_h = ui_chrome::kToolbarHeight;
     const float mx = io.MousePos.x;
     const float my = io.MousePos.y;
+    // Full-height center band between Network and Block rails.
     const bool over_scene =
         !io.WantCaptureMouse &&
         mx >= rail_w && my >= 0.f &&
         mx < ui_w - rail_w &&
-        my < ui_h - toolbar_h;
+        my < ui_h;
 
     // Camera motion — Z-track (keys + wheel)
     if (!io.WantCaptureKeyboard)
@@ -157,7 +157,6 @@ void BlockflowOverlay::draw()
     apply_domain_if_changed_();
 
     draw_network(ui, ui_w, ui_h);
-    draw_toolbar(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
 }
 
@@ -246,34 +245,37 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     const float frontier_frac =
         std::clamp(static_cast<float>(ui.lanes_with_frontier) / 16.f, 0.f, 1.f);
     ImGui::ProgressBar(frontier_frac, ImVec2(-1.f, 0.f));
-    ImGui::TextDisabled("frontier lanes %d / 16 · open walks %d", ui.lanes_with_frontier,
-                        ui.open_confirm_walks);
+    ImGui::TextDisabled("frontier lanes %d / 16", ui.lanes_with_frontier);
+    ImGui::TextDisabled("open confirm walks %d", ui.open_confirm_walks);
 
-    // Pool / admit activity
     float pool_frac = 0.f;
     if (ui.total_blocks > 0)
         pool_frac = std::clamp(static_cast<float>(ui.total_blocks) / 256.f, 0.f, 1.f);
     ImGui::ProgressBar(pool_frac, ImVec2(-1.f, 0.f));
-    ImGui::TextDisabled("pool blocks %d · admitted %d", ui.total_blocks, ui.stats_fetch_admitted);
+    ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
+    ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
 
     ImGui::Separator();
     ImGui::Text("Activity");
-    ImGui::TextDisabled("phase %s · open %d",
-                        network_status_label(st), ui.open_confirm_walks);
-    ImGui::Text("frontier %d / live tips %d", ui.confirmed_tip_count, ui.tip_count);
-    ImGui::TextDisabled("is_main %d · removed %d · seed_q %d", ui.stats_api_is_main,
-                        ui.stats_removed, ui.stats_seed_q);
+    ImGui::TextDisabled("phase: %s", network_status_label(st));
+    ImGui::Text("confirmed frontier tips: %d", ui.confirmed_tip_count);
+    ImGui::Text("live tips: %d", ui.tip_count);
+    ImGui::TextDisabled("is_main API calls: %d", ui.stats_api_is_main);
+    ImGui::TextDisabled("removed: %d", ui.stats_removed);
+    ImGui::TextDisabled("seed queue: %d", ui.stats_seed_q);
 
     if (ui.last_poll_ms > 0)
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float age_s = static_cast<float>(now - ui.last_poll_ms) * 0.001f;
-        ImGui::TextDisabled("last poll %.1fs ago · interval %.0fs", age_s, ui.poll_interval_sec);
+        ImGui::TextDisabled("last poll: %.1fs ago", age_s);
+        ImGui::TextDisabled("poll interval: %.0fs", ui.poll_interval_sec);
     }
     else
-        ImGui::TextDisabled("last poll —");
+        ImGui::TextDisabled("last poll: —");
 
-    if (ImGui::TreeNode("Chain tips (H_c / net tip)"))
+    // One shard per line so nothing clips in the narrow rail.
+    if (ImGui::TreeNode("Shard tips (H_c / net tip)"))
     {
         for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
         {
@@ -282,89 +284,84 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
                 const int lane = f * ALPH_NUM_GROUPS + t;
                 const int hc = ui.confirmed_height_by_lane[lane];
                 const int tip = ui.tip_height_by_lane[lane];
-                if (t > 0)
-                    ImGui::SameLine(0.f, 8.f);
                 if (hc < 0 && tip < 0)
-                    ImGui::TextDisabled("%d→%d:—", f, t);
+                    ImGui::TextDisabled("  %d→%d:  — / —", f, t);
+                else if (hc < 0)
+                    ImGui::Text("  %d→%d:  — / %d", f, t, tip);
+                else if (tip < 0)
+                    ImGui::Text("  %d→%d:  %d / —", f, t, hc);
                 else
-                    ImGui::Text("%d→%d:%d/%d", f, t, hc, tip);
+                    ImGui::Text("  %d→%d:  %d / %d", f, t, hc, tip);
             }
         }
         ImGui::TreePop();
     }
 
-    ImGui::End();
-}
-
-void BlockflowOverlay::draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h)
-{
-    const float rail_w = ui_chrome::rail_width(ui_w);
-    const float toolbar_h = ui_chrome::kToolbarHeight;
-    const float scene_w = ui_chrome::scene_width(ui_w);
-
-    ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
-    ImGui::SetNextWindowPos(ImVec2(rail_w, ui_h - toolbar_h), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(scene_w, toolbar_h), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.92f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.f, 10.f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.f, 8.f));
-    ImGui::Begin("Blockflow", nullptr, flags);
-
-    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
-    const float bps = ui.total_blocks / (0.001f * elapsed_ms);
-
-    // True eye Z (manual scroll only — no auto-scroll rate).
-    ImGui::Text("z: %.1f  (Up/Down / wheel)", camera_.camera().eye.z);
-    ImGui::SameLine(0.f, 24.f);
-    ImGui::Text("blocks: %d", ui.total_blocks);
-    ImGui::SameLine(0.f, 24.f);
-    ImGui::Text("rate: %1.2f/s", bps);
-    ImGui::SameLine(0.f, 24.f);
-    ImGui::Text("frontier %d / live tips %d", ui.confirmed_tip_count, ui.tip_count);
-
-    // Per-chain highest sequential confirmed height (H_c).
-    ImGui::TextDisabled("confirmed H (from->to):");
-    for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
-    {
-        for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
-        {
-            const int lane = f * ALPH_NUM_GROUPS + t;
-            const int hc = ui.confirmed_height_by_lane[lane];
-            if (t > 0)
-                ImGui::SameLine(0.f, 10.f);
-            if (hc < 0)
-                ImGui::TextDisabled("%d->%d:—", f, t);
-            else
-                ImGui::Text("%d->%d:%d", f, t, hc);
-        }
-    }
-
+    // Former bottom "Blockflow" toolbar — collapsible under Network.
     ImGui::Separator();
-    ImGui::BeginChild("feed", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-    int feed_i = 0;
-    for (const FeedEntry& entry : ui.feed)
+    if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        // Index + hash: feed can list the same hash more than once.
-        ImGui::PushID(feed_i++);
-        ImGui::PushID(entry.hash.c_str());
-        const int shardId = entry.chain_idx() & 15;
-        ImGui::TextColored(
-            ImVec4(kShardColors[shardId].r, kShardColors[shardId].g, kShardColors[shardId].b, 1.0f),
-            "[%d->%d]", entry.chainFrom, entry.chainTo);
-        ImGui::SameLine();
-        if (ImGui::Button(entry.hash.c_str()))
+        const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
+        const float bps = ui.total_blocks / (0.001f * elapsed_ms);
+
+        ImGui::Text("camera z: %.1f", camera_.camera().eye.z);
+        ImGui::TextDisabled("  (Up/Down / wheel)");
+        ImGui::Text("blocks: %d", ui.total_blocks);
+        ImGui::Text("rate: %1.2f/s", bps);
+        ImGui::Text("frontier tips: %d", ui.confirmed_tip_count);
+        ImGui::Text("live tips: %d", ui.tip_count);
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Confirmed H_c by shard:");
+        for (int f = 0; f < ALPH_NUM_GROUPS; ++f)
         {
-            engine_.set_selection(entry.hash);
-            ImGui::SetClipboardText(entry.hash.c_str());
+            for (int t = 0; t < ALPH_NUM_GROUPS; ++t)
+            {
+                const int lane = f * ALPH_NUM_GROUPS + t;
+                const int hc = ui.confirmed_height_by_lane[lane];
+                if (hc < 0)
+                    ImGui::TextDisabled("  %d→%d:  —", f, t);
+                else
+                    ImGui::Text("  %d→%d:  %d", f, t, hc);
+            }
         }
-        ImGui::PopID();
-        ImGui::PopID();
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("Recent feed");
+        ImGui::BeginChild("feed", ImVec2(0, 180.f), true, ImGuiWindowFlags_HorizontalScrollbar);
+        int feed_i = 0;
+        for (const FeedEntry& entry : ui.feed)
+        {
+            ImGui::PushID(feed_i++);
+            ImGui::PushID(entry.hash.c_str());
+            const int shardId = entry.chain_idx() & 15;
+            ImGui::TextColored(
+                ImVec4(kShardColors[shardId].r, kShardColors[shardId].g,
+                       kShardColors[shardId].b, 1.0f),
+                "[%d→%d]", entry.chainFrom, entry.chainTo);
+            ImGui::SameLine();
+            // Shorten hash label in narrow rail; full hash on hover / clipboard.
+            char short_h[20];
+            if (entry.hash.size() > 12)
+                std::snprintf(short_h, sizeof(short_h), "%.6s…%.4s", entry.hash.c_str(),
+                              entry.hash.c_str() + entry.hash.size() - 4);
+            else
+                std::snprintf(short_h, sizeof(short_h), "%s", entry.hash.c_str());
+            if (ImGui::SmallButton(short_h))
+            {
+                engine_.set_selection(entry.hash);
+                ImGui::SetClipboardText(entry.hash.c_str());
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s\n(click select + copy)", entry.hash.c_str());
+            ImGui::PopID();
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
     }
-    ImGui::EndChild();
+
     ImGui::End();
-    ImGui::PopStyleVar(2);
 }
 
 namespace

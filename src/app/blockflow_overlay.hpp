@@ -1,6 +1,6 @@
 #pragma once
 
-// App ImGui chrome: Network (left) + Block (right) + bottom feed.
+// App ImGui chrome: Network (left, Blockflow collapsible) + Block (right).
 #include "app/camera_controller.hpp"
 #include "app/ui_snapshot.hpp"
 #include "engine/engine.hpp"
@@ -25,7 +25,6 @@ public:
     void set_initial_domain(NetworkDomain d);
 
 private:
-    void draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_network(const UiSnapshot& ui, float ui_w, float ui_h);
     void apply_domain_if_changed_();

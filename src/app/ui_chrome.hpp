@@ -1,14 +1,14 @@
 #pragma once
 
 // Shared chrome layout for overlay + pick scene rect.
-// Dual rails: Network (left) + Block (right), equal width.
+// Dual rails: Network (left, includes Blockflow collapsible) + Block (right).
 
 namespace ui_chrome
 {
 inline constexpr float kRailWidth      = 340.f;
 inline constexpr float kInspectorWidth = kRailWidth; // alias
-// Status row + feed under the scene between rails.
-inline constexpr float kToolbarHeight  = 200.f;
+// Bottom toolbar removed — feed/status live under Network rail.
+inline constexpr float kToolbarHeight  = 0.f;
 
 // Left/right rail width for a given framebuffer width.
 // Cap so scene keeps a usable center band on small windows.

@@ -1382,16 +1382,15 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     {
         ImGuiIO& io = ImGui::GetIO();
 
-        // Scene rect: exclude left Network + right Block rails + bottom toolbar
+        // Scene rect: exclude left Network + right Block rails (full height).
         const float rail_w = ui_chrome::rail_width(static_cast<float>(width));
-        const float toolbar_h = ui_chrome::kToolbarHeight;
         const float mx = io.MousePos.x;
         const float my = io.MousePos.y;
         const bool over_scene =
             !io.WantCaptureMouse &&
             mx >= rail_w && my >= 0.f &&
             mx < static_cast<float>(width) - rail_w &&
-            my < static_cast<float>(height) - toolbar_h;
+            my < static_cast<float>(height);
 
         // Short RMB reset (look home + pan origin) is in BlockflowOverlay.
         // Short LMB click = pick; LMB drag is free look (overlay).

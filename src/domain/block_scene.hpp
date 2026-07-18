@@ -123,6 +123,8 @@ public:
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;
+    // Caller must already hold mutex() (e.g. ScenePresenter::prepare).
+    NetworkHud network_hud_locked() const;
 
     AlphBlock resolve_detail(const std::string& hash) const;
 
