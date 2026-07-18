@@ -2,11 +2,16 @@
 
 // Domain/network policy for Alephium BlockFlow ingest.
 //
-// Phases: BootstrapPoll → IdentifyTips → DfsTrace → Steady.
+// Production keep list:
+//   sequential H_c frontier, free-main dep propagation, chain-walk multi-step confirm,
+//   pool-only confirm walk (DfsTrace), time-slot history, lookback windows.
+// set_pending_tip = next-seed bookkeeping only (cyan Sobel is ScenePresenter-side).
+//
+// Phases: BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady.
 // Live chain (base lookback window): per-hash fetches allowed to fill confirmed deps.
 // Historical (below base floor / camera unlock): time-slot interval polls only — no
-// hash fetches from DFS/trace. Free main for in-pool deps of confirmed blocks.
-// Presentation (solid/green/orange/gold) lives in ScenePresenter — not here.
+// hash fetches from confirm walk. Free main for in-pool deps of confirmed blocks.
+// Presentation (solid/green/cyan/orange/gold) lives in ScenePresenter — not here.
 #include "network/alephium/block_fetch_pool.hpp"
 #include "network/alephium/main_chain_cache.hpp"
 #include "domain/block_scene.hpp"
@@ -23,12 +28,12 @@
 class AlephiumAdapter
 {
 public:
-    // Bootstrap → identify tips → independent per-chain DFS → free polling.
+    // Bootstrap → identify tips → per-lane confirm walk → free polling.
     enum class Phase : int
     {
         BootstrapPoll = 0, // allow first lookback poll only
         IdentifyTips  = 1, // is_main all live tips; poll gated
-        DfsTrace      = 2, // per-lane DFS (not lockstep); poll gated
+        DfsTrace      = 2, // per-lane confirm walk (pool-only); poll gated
         Steady        = 3, // normal interval polls
     };
 
@@ -57,7 +62,7 @@ public:
     void maybe_refill_selection_detail();
 
     Phase phase() const { return phase_; }
-    // HUD: number of lanes still running DFS (0 when idle).
+    // HUD: lanes still on confirm walk (0 when idle).
     int   trace_offset() const;
 
     size_t verify_queue_size() const { return seed_q_.size(); }
@@ -111,7 +116,7 @@ private:
     bool is_live_block_(const std::string& hash) const;
     bool tip_pending_confirmation_() const;
 
-    // Steady: request/confirm next height H_c+1 only (cyan pending → green frontier).
+    // Steady: request/confirm next height H_c+1 (adapter pending seed → green frontier).
     void advance_sequential_tips_();
 
     // Genesis timestamp + discrete lookback windows (index 0 = live tip window).
@@ -136,7 +141,7 @@ private:
     int  request_history_slot_for_block_(const std::string& hash);
     int64_t block_timestamp_ms_(const std::string& hash) const;
 
-    // Phase / per-chain DFS (pool-only; live holes hash-fill, history uses time slots)
+    // Phase / per-chain confirm walk (pool-only; live holes hash-fill, history uses time slots)
     void set_phase_(Phase p);
     void maybe_enter_dfs_();
     void advance_dfs_traces_();
@@ -173,7 +178,7 @@ private:
 
     Phase phase_ = Phase::BootstrapPoll;
     bool bootstrap_poll_done_ = false;
-    // Per-lane DFS: inactive or finished for current unlocked floor.
+    // Per-lane confirm walk: inactive or finished for current unlocked floor.
     bool   dfs_active_[BlockScene::kLaneCount]{};
     bool   dfs_done_[BlockScene::kLaneCount]{};
     NodeId dfs_stop_hash_[BlockScene::kLaneCount]{};

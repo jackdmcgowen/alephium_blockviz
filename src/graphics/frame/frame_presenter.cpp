@@ -22,7 +22,6 @@ FramePresenter::AcquireResult FramePresenter::acquire(VkDevice device, VkSwapcha
 {
     AcquireResult out{};
     out.image_available = sync.image_available(frame_index);
-    out.render_finished = sync.render_finished(frame_index);
 
     const VkResult result = vkAcquireNextImageKHR(
         device, swapchain, UINT64_MAX, out.image_available, VK_NULL_HANDLE, &out.image_index);
@@ -38,6 +37,8 @@ FramePresenter::AcquireResult FramePresenter::acquire(VkDevice device, VkSwapcha
     else if (result != VK_SUCCESS)
         throw std::runtime_error("Failed to acquire swapchain image");
 
+    // Present wait/signal is per swapchain image (not frames-in-flight).
+    out.render_finished = sync.render_finished(out.image_index);
     out.ok = true;
     return out;
 }

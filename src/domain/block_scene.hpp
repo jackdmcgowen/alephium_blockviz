@@ -3,11 +3,12 @@
 // Domain scene model: BlockGraph + AlphDetailStore + recent feed.
 // Adapter writes; renderer reads under mutex.
 //
-// Block state model (BlockFlow viz):
-//   confirmed_          — proven main-chain bag (solid opacity when deps live)
-//   confirmed_hash_[L]  — sequential frontier tip H_c (green Sobel + green dep arrows)
-//   pending_hash_[L]    — adapter bookkeeping for next seed only (not a render input;
-//                         cyan frontier-children are computed in ScenePresenter)
+// Block state model (BlockFlow viz) — production keep list:
+//   confirmed_          — proven main-chain bag (solid when deps live)
+//   confirmed_hash_[L]  — sequential frontier tip H_c (green Sobel + full blockDeps arrows)
+//   frontier_walk_[L]   — multi-step green walk animation path (chain-walk)
+//   pending_hash_[L]    — adapter next-seed bookkeeping only (not a render input;
+//                         cyan frontier-children are classified in ScenePresenter)
 #include "domain/alph_block.hpp"
 #include "domain/block_graph.hpp"
 #include "network/alephium/alph_detail_store.hpp"
@@ -49,7 +50,7 @@ public:
     std::vector<NodeId> frontier_walk_locked(uint32_t lane) const;
     void clear_frontier_walk_locked(uint32_t lane);
 
-    // Next height candidate (cyan). Self-locking.
+    // Adapter next-seed bookkeeping (not cyan Sobel). Self-locking.
     void set_pending_tip(uint32_t lane, const NodeId& hash);
     void clear_pending_tip(uint32_t lane);
     NodeId pending_tip_hash(uint32_t lane) const;

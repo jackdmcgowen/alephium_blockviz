@@ -34,9 +34,9 @@ struct UiSnapshot
     int                   confirmed_tip_count  = 0;
     // Highest sequential confirmed height per lane (chainFrom*4+chainTo). -1 = not initialized.
     int                   confirmed_height_by_lane[16]{};
-    // Adapter confirm phase (0 Bootstrap, 1 IdentifyTips, 2 DfsTrace, 3 Steady).
+    // Adapter confirm phase (0 Bootstrap, 1 Identify tips, 2 Confirm walk, 3 Steady).
     int                   trace_phase  = 0;
-    int                   trace_offset = 0; // DFS lanes still open
+    int                   trace_offset = 0; // lanes still walking confirm path
     uint64_t              seq                  = 0;
 
     UiSnapshot()

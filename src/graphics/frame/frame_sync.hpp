@@ -23,8 +23,9 @@ public:
     void wait_frame(VkDevice device, uint32_t frame_index) const;
 
     VkSemaphore image_available(uint32_t frame_index) const;
-    // Per frames-in-flight (not per swapchain image) — safer binary reuse with wait_frame.
-    VkSemaphore render_finished(uint32_t frame_index) const;
+    // Per swapchain image — present wait/signal must not reuse a semaphore still held by
+    // a prior present of a different image (VUID-vkQueueSubmit2-semaphore-03868).
+    VkSemaphore render_finished(uint32_t image_index) const;
     VkSemaphore timeline() const { return timeline_; }
 
     void set_frame_timeline_value(uint32_t frame_index, uint64_t value);

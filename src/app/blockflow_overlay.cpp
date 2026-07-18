@@ -408,12 +408,13 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Solid=main+deps · green=frontier tip + blockDeps · cyan=unconfirmed children of frontier · orange=missing deps · gold=select");
         {
+            // User-facing names (adapter phases still Bootstrap/IdentifyTips/DfsTrace/Steady).
             const char* pname = "Bootstrap";
-            if (ui.trace_phase == 1) pname = "IdentifyTips";
-            else if (ui.trace_phase == 2) pname = "DfsTrace";
+            if (ui.trace_phase == 1) pname = "Identify tips";
+            else if (ui.trace_phase == 2) pname = "Confirm walk";
             else if (ui.trace_phase == 3) pname = "Steady";
             ImGui::TextDisabled(
-                "Confirm phase: %s · DFS open=%d · history only if camera unlocks lookback",
+                "Confirm phase: %s · open lanes=%d · history only if camera unlocks lookback",
                 pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");

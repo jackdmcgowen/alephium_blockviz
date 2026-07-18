@@ -592,7 +592,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(db.hash);
     }
 
-    // Sobel lists: pending_tip_hashes = cyan frontier-children (API name kept).
+    // Sobel lists: green tips + cyan frontier children + orange incompletes.
     {
         std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
 
@@ -606,12 +606,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const std::string& h : cyan_owners)
         {
             if (pick_set.count(h))
-                out.pending_tip_hashes.push_back(h);
+                out.cyan_frontier_hashes.push_back(h);
         }
 
         std::unordered_set<std::string> highlight_set(out.confirmed_tip_hashes.begin(),
                                                      out.confirmed_tip_hashes.end());
-        for (const auto& h : out.pending_tip_hashes)
+        for (const auto& h : out.cyan_frontier_hashes)
             highlight_set.insert(h);
         for (const auto& h : incomplete_pool)
         {

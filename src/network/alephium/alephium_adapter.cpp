@@ -1,7 +1,8 @@
-#include "network/alephium/alephium_adapter.hpp"
+﻿#include "network/alephium/alephium_adapter.hpp"
 
 #include <algorithm>
 #include <cjson/cJSON.h>
+#include <cstdarg>
 #include <climits>
 #include <cstdio>
 #include <ctime>
@@ -15,6 +16,9 @@
 
 namespace
 {
+// Production: lifecycle/phase logs only. Set true for per-block / per-lane spam.
+constexpr bool kAdapterVerbose = false;
+
 uint32_t lane_of(int from, int to)
 {
     return static_cast<uint32_t>(from * ALPH_NUM_GROUPS + to);
@@ -28,6 +32,22 @@ cJSON* unwrap_block_json(cJSON* block_obj)
         return block_obj;
     cJSON* inner = cJSON_GetObjectItem(block_obj, "block");
     return inner ? inner : block_obj;
+}
+
+// Rate-limited verbose logger (min interval between any verbose lines).
+void adapter_vlog(const char* fmt, ...)
+{
+    if (!kAdapterVerbose)
+        return;
+    static double s_last = 0.0;
+    const double now = static_cast<double>(std::time(nullptr));
+    if (now - s_last < 0.25 && s_last > 0.0)
+        return;
+    s_last = now;
+    va_list ap;
+    va_start(ap, fmt);
+    std::vprintf(fmt, ap);
+    va_end(ap);
 }
 } // namespace
 
@@ -195,7 +215,7 @@ bool AlephiumAdapter::try_chain_walk_confirm_(const std::string& tip_hash, uint3
         // From t_old, walk tip-ward: nodes that have parent[x]=t_old ... until tip
         // Actually reconstruction: start at t_old, follow reverse of parent?
         // We BFS from tip toward older. parent[older]=newer.
-        // Path tip→old: tip, ..., old. Reverse for old→tip.
+        // Path tipâ†’old: tip, ..., old. Reverse for oldâ†’tip.
         std::vector<std::string> tip_to_old;
         cur = t_old;
         tip_to_old.push_back(cur);
@@ -219,7 +239,7 @@ bool AlephiumAdapter::try_chain_walk_confirm_(const std::string& tip_hash, uint3
         // Wait: tip_to_old is t_old, next, ..., tip if we follow parent[older]=newer from t_old.
         // parent[dep]=cur means we expanded cur and found dep, so cur is closer to tip, dep is older.
         // So parent[older]=newer. From t_old walk parent repeatedly: t_old -> newer -> ... -> tip.
-        // tip_to_old built as [t_old, newer, ..., tip] — that's already old_to_new!
+        // tip_to_old built as [t_old, newer, ..., tip] â€” that's already old_to_new!
         path_old_to_new = std::move(tip_to_old);
     }
 
@@ -259,7 +279,7 @@ bool AlephiumAdapter::try_chain_walk_confirm_(const std::string& tip_hash, uint3
 
     scene_.set_frontier_walk(lane, path_old_to_new);
     propagate_main_from_confirmed_deps_(tip_hash);
-    std::printf("[adapter] chain-walk lane=%u steps=%zu tip=%s\n", lane,
+    adapter_vlog("[adapter] chain-walk lane=%u steps=%zu tip=%s\n", lane,
                 path_old_to_new.size(), tip_hash.c_str());
     return true;
 }
@@ -366,8 +386,8 @@ void AlephiumAdapter::refresh_lookback_floors_()
 
 int64_t AlephiumAdapter::camera_extra_lookback_ms_() const
 {
-    // Layout Z ≈ −seconds * 1 m/s; camera starts at −LOOKBACK_WINDOW seconds.
-    // Scrolling older (higher Z) unlocks more time history — not height counts.
+    // Layout Z â‰ˆ âˆ’seconds * 1 m/s; camera starts at âˆ’LOOKBACK_WINDOW seconds.
+    // Scrolling older (higher Z) unlocks more time history â€” not height counts.
     const float z = scene_.camera_scroll_z();
     const float z0 = initial_camera_scroll_z_;
     const float older_delta_sec = z - z0;
@@ -419,7 +439,7 @@ bool AlephiumAdapter::height_in_lookback_(uint32_t lane, int height) const
 
 bool AlephiumAdapter::is_live_height_(uint32_t lane, int height) const
 {
-    // Base lookback floor only — camera-unlocked history is not "live chain".
+    // Base lookback floor only â€” camera-unlocked history is not "live chain".
     if (height < 0)
         return false;
     if (lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
@@ -472,7 +492,7 @@ int AlephiumAdapter::poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force)
     if (force)
         history_slots_fetched_.insert(slot_key);
 
-    std::printf("[adapter] time-slot poll from=%lld to=%lld\n",
+    adapter_vlog("[adapter] time-slot poll from=%lld to=%lld\n",
                 static_cast<long long>(from_ts), static_cast<long long>(to_ts));
     cJSON* obj = get_blockflow_blocks_with_events(from_ts, to_ts);
     if (!obj)
@@ -481,7 +501,7 @@ int AlephiumAdapter::poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force)
     admit_blocks_with_events_(obj, &seen, &added);
     cJSON_Delete(obj);
     if (added > 0)
-        std::printf("[adapter] time-slot admit seen=%d added=%d\n", seen, added);
+        adapter_vlog("[adapter] time-slot admit seen=%d added=%d\n", seen, added);
     return added;
 }
 
@@ -561,7 +581,7 @@ void AlephiumAdapter::enqueue_seed_(SeedJob job)
         return;
     if (seed_queued_.count(job.hash) || proven_not_main_.count(job.hash))
         return;
-    // Already confirmed — no work.
+    // Already confirmed â€” no work.
     if (main_chain_cache_.is_cached_main(job.hash))
     {
         mark_scene_confirmed_(job.hash, job.from, job.to, job.height);
@@ -681,7 +701,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         const int to = static_cast<int>(node->group_to);
         const int height = static_cast<int>(node->height);
 
-        // Outside unlocked lookback window — stop this branch.
+        // Outside unlocked lookback window â€” stop this branch.
         if (height >= 0 && height < floor_h)
             continue;
 
@@ -698,7 +718,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
 
         // Already-confirmed intermediate nodes: only expand unconfirmed children
         // that are newly unlocked by camera lookback (below previous earliest).
-        // Fully inside previously traced band → terminate (no dep walk).
+        // Fully inside previously traced band â†’ terminate (no dep walk).
         if (already && cur != main_hash && earliest != INT_MAX && height >= earliest)
             continue;
 
@@ -722,7 +742,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (any_missing)
             continue; // stop this branch; do not enqueue children
 
-        // All deps present — main path may expand same-chain deps already in pool.
+        // All deps present â€” main path may expand same-chain deps already in pool.
         for (const std::string& dep : detail->deps)
         {
             if (dep.empty() || !seen.insert(dep).second)
@@ -738,7 +758,7 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
                 continue;
             const int dh = static_cast<int>(dn->height);
             if (dh >= 0 && dh < floor_h)
-                continue; // past beginning of unlocked window — terminate
+                continue; // past beginning of unlocked window â€” terminate
             if (main_chain_cache_.is_cached_main(dep) &&
                 earliest != INT_MAX && dh >= earliest)
                 continue;
@@ -783,7 +803,7 @@ int AlephiumAdapter::maybe_flood_offline_(const std::string& main_hash, uint32_t
 
 void AlephiumAdapter::label_tips_needing_reflood_()
 {
-    // Camera unlock only — DFS owns bootstrap completeness.
+    // Camera unlock only â€” DFS owns bootstrap completeness.
     for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
     {
         if (!lane_needs_reflood_(static_cast<uint32_t>(lane)))
@@ -826,8 +846,8 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
 int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
 {
     // When a confirmed block has missing deps:
-    //   live chain  → per-hash fetch (build the live pool tightly)
-    //   historical  → time-slot interval poll (no hash crawl)
+    //   live chain  â†’ per-hash fetch (build the live pool tightly)
+    //   historical  â†’ time-slot interval poll (no hash crawl)
     if (parent_hash.empty())
         return 0;
     auto detail = scene_.detail_store().get(parent_hash);
@@ -854,7 +874,7 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
         // History: never hash-fetch from DFS/confirm. One time-based window.
         pending_fill_parents_.erase(parent_hash);
         const int added = request_history_slot_for_block_(parent_hash);
-        std::printf("[adapter] history hole parent=%s missing~=%d time-slot added=%d "
+        adapter_vlog("[adapter] history hole parent=%s missing~=%d time-slot added=%d "
                     "(no hash fetch)\n",
                     parent_hash.c_str(), missing, added);
         return 0; // do not gate Steady on historical hash fills
@@ -873,7 +893,7 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
         if (enqueue_missing_dep_(dep))
         {
             ++enqueued;
-            std::printf("[adapter] live confirm fill dep parent=%s\n", parent_hash.c_str());
+            adapter_vlog("[adapter] live confirm fill dep parent=%s\n", parent_hash.c_str());
         }
         else if (!scene_.graph().contains(dep))
         {
@@ -886,7 +906,7 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
     if (enqueued > 0)
     {
         pending_fill_parents_.insert(parent_hash);
-        std::printf("[adapter] live confirm fill pending parent=%s missing~=%d gate=1\n",
+        adapter_vlog("[adapter] live confirm fill pending parent=%s missing~=%d gate=1\n",
                     parent_hash.c_str(), enqueued);
     }
     else
@@ -936,7 +956,7 @@ void AlephiumAdapter::recheck_confirm_fill_parents_()
                 continue;
             if (broken_dep_failed_.count(dep) ||
                 (fetch_pool_ && fetch_pool_->is_failed(dep)))
-                continue; // permanent hole — do not block forever
+                continue; // permanent hole â€” do not block forever
             still = true;
             enqueue_missing_dep_(dep); // live only
         }
@@ -944,7 +964,7 @@ void AlephiumAdapter::recheck_confirm_fill_parents_()
         {
             done.push_back(parent);
             propagate_main_from_confirmed_deps_(parent);
-            std::printf("[adapter] live confirm fill complete parent=%s\n", parent.c_str());
+            adapter_vlog("[adapter] live confirm fill complete parent=%s\n", parent.c_str());
         }
     }
     for (const std::string& p : done)
@@ -983,7 +1003,7 @@ void AlephiumAdapter::set_phase_(Phase p)
     case Phase::DfsTrace:      name = "DfsTrace";      break;
     case Phase::Steady:        name = "Steady";        break;
     }
-    std::printf("[adapter] phase → %s (dfs_lanes_active=%d)\n", name, trace_offset());
+    std::printf("[adapter] phase â†’ %s (walk_lanes_open=%d)\n", name, trace_offset());
 }
 
 bool AlephiumAdapter::all_dfs_done_() const
@@ -1094,7 +1114,7 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, bool from_stop)
             }
         }
 
-        // Incomplete: live confirmed → hash-fill; historical → time slot only.
+        // Incomplete: live confirmed â†’ hash-fill; historical â†’ time slot only.
         if (any_missing)
         {
             dfs_stop_hash_[lane] = cur;
@@ -1106,21 +1126,21 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, bool from_stop)
                 if (live)
                 {
                     dfs_done_[lane] = (n == 0 && !confirm_fills_pending_());
-                    std::printf("[adapter] DFS pause lane %d at h=%d live fill~%d %s\n",
+                    adapter_vlog("[adapter] DFS pause lane %d at h=%d live fill~%d %s\n",
                                 static_cast<int>(lane), height, n, cur.c_str());
                 }
                 else
                 {
-                    // Wait for further camera time-slots / resume later — no hash crawl.
+                    // Wait for further camera time-slots / resume later â€” no hash crawl.
                     dfs_done_[lane] = true;
-                    std::printf("[adapter] DFS pause lane %d at h=%d history time-slot %s\n",
+                    adapter_vlog("[adapter] DFS pause lane %d at h=%d history time-slot %s\n",
                                 static_cast<int>(lane), height, cur.c_str());
                 }
             }
             else
             {
                 dfs_done_[lane] = true;
-                std::printf("[adapter] DFS end lane %d at h=%d (unknown dep, not main) %s\n",
+                adapter_vlog("[adapter] DFS end lane %d at h=%d (unknown dep, not main) %s\n",
                             static_cast<int>(lane), height, cur.c_str());
             }
             return;
@@ -1133,7 +1153,7 @@ void AlephiumAdapter::run_dfs_lane_(uint32_t lane, bool from_stop)
         }
     }
 
-    // Exhausted within floor without a hole — clear stop (fully built in window).
+    // Exhausted within floor without a hole â€” clear stop (fully built in window).
     dfs_stop_hash_[lane].clear();
     dfs_stop_height_[lane] = -1;
     dfs_done_[lane] = true;
@@ -1170,7 +1190,7 @@ void AlephiumAdapter::maybe_enter_dfs_()
     }
 
     set_phase_(Phase::DfsTrace);
-    std::printf("[adapter] DFS start: pool-only (no block requests beyond initial window)\n");
+    std::printf("[adapter] Confirm walk start: pool-only (no block requests beyond initial window)\n");
     advance_dfs_traces_();
 }
 
@@ -1290,7 +1310,7 @@ void AlephiumAdapter::maybe_camera_history_extend_()
         dfs_active_[lane] = true;
         dfs_done_[lane] = false;
     }
-    std::printf("[adapter] resume DFS after camera time-slots (extra_ms=%lld)\n",
+    std::printf("[adapter] resume confirm walk after camera time-slots (extra_ms=%lld)\n",
                 static_cast<long long>(extra_ms));
 }
 
@@ -1307,7 +1327,7 @@ void AlephiumAdapter::resolve_genesis_ms_()
         return;
     genesis_resolved_ = true;
 
-    // Prefer height-0 block timestamp (chain 0→0).
+    // Prefer height-0 block timestamp (chain 0â†’0).
     cJSON* arr = get_blockflow_hashes(0, 0, 0);
     if (arr && cJSON_IsArray(arr) && cJSON_GetArraySize(arr) > 0)
     {
@@ -1359,7 +1379,7 @@ int AlephiumAdapter::max_lookback_index_() const
 int AlephiumAdapter::camera_lookback_index_() const
 {
     // Index 0 = live window. Older camera Z (higher than live anchor) unlocks k>0.
-    // scroll_z ≈ live when attached; older_delta_sec ≈ how far into the past.
+    // scroll_z â‰ˆ live when attached; older_delta_sec â‰ˆ how far into the past.
     const float z = scene_.camera_scroll_z();
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
     int64_t origin = scene_.timeline_origin_ms();
@@ -1406,7 +1426,7 @@ void AlephiumAdapter::ensure_lookback_window_(int index)
     // Live window (0): refresh every poll. Older: once.
     if (index == 0 || !slot.polled)
     {
-        std::printf("[adapter] lookback window index=%d from=%lld to=%lld\n",
+        adapter_vlog("[adapter] lookback window index=%d from=%lld to=%lld\n",
                     index, static_cast<long long>(slot.from_ms),
                     static_cast<long long>(slot.to_ms));
         poll_time_slot_(slot.from_ms, slot.to_ms, /*force=*/index == 0);
@@ -1524,7 +1544,7 @@ void AlephiumAdapter::advance_dfs_traces_()
 
         if (all_dfs_done_() && !confirm_fills_pending_())
         {
-            std::printf("[adapter] DFS complete → Steady (fills clear); "
+            std::printf("[adapter] Confirm walk complete â†’ Steady (fills clear); "
                         "older history only on camera unlock\n");
             set_phase_(Phase::Steady);
         }
@@ -1602,7 +1622,7 @@ void AlephiumAdapter::drain_fetch_results_(int max_admits)
 
 void AlephiumAdapter::enqueue_uncles_from_block_(const AlphBlock& alph)
 {
-    // Independent uncle queue — never mixed into tip seed work.
+    // Independent uncle queue â€” never mixed into tip seed work.
     for (const std::string& unc : alph.uncles)
     {
         if (unc.empty() || uncle_queued_.count(unc) || proven_not_main_.count(unc))
@@ -1635,7 +1655,7 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
     {
         if (scene_.graph().contains(uncle_hash))
         {
-            std::printf("[adapter] uncle previously not-main now live %s — remove\n",
+            adapter_vlog("[adapter] uncle previously not-main now live %s â€” remove\n",
                         uncle_hash.c_str());
             scene_.remove_block(uncle_hash);
             ++stats_uncles_removed_;
@@ -1646,7 +1666,7 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
 
     ++stats_uncles_checked_;
 
-    // Live pool only — no fetch. Not-main uncles in the pool are removed.
+    // Live pool only â€” no fetch. Not-main uncles in the pool are removed.
     auto node = scene_.graph().get(uncle_hash);
     const int from = node ? static_cast<int>(node->group_from) : parent_from;
     const int to = node ? static_cast<int>(node->group_to) : parent_to;
@@ -1701,10 +1721,10 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
     {
         // Remove from live pool (graph + detail), independent of render/cull.
         if (behind_tip)
-            std::printf("[adapter] uncle orphaned (not main, h=%d < tip %d) %s — remove\n",
+            adapter_vlog("[adapter] uncle orphaned (not main, h=%d < tip %d) %s â€” remove\n",
                         height, tip_h, uncle_hash.c_str());
         else
-            std::printf("[adapter] uncle NOT main %s — remove from pool\n",
+            adapter_vlog("[adapter] uncle NOT main %s â€” remove from pool\n",
                         uncle_hash.c_str());
         scene_.remove_block(uncle_hash);
         ++stats_uncles_removed_;
@@ -1715,7 +1735,7 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
 
 void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 {
-    std::printf("[adapter] DAG seed NOT main %s [%d->%d] h=%d — remove\n",
+    adapter_vlog("[adapter] DAG seed NOT main %s [%d->%d] h=%d â€” remove\n",
                 job.hash.c_str(), job.from, job.to, job.height);
     const bool reselect = engine_.is_selected(job.hash);
     scene_.remove_block(job.hash);
@@ -1775,13 +1795,13 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
     ++stats_verified_ok_;
     if (reselect)
         engine_.set_selection(main_hash);
-    std::printf("[adapter] replaced with main %s [%d->%d] h=%d flood_marked=%d\n",
+    adapter_vlog("[adapter] replaced with main %s [%d->%d] h=%d flood_marked=%d\n",
                 main_hash.c_str(), job.from, job.to, job.height, m);
 }
 
 void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
 {
-    // Tip-only verification — never walk the ancestor chain with is_main.
+    // Tip-only verification â€” never walk the ancestor chain with is_main.
     const uint32_t lane = lane_of(seed.from, seed.to);
 
     if (main_chain_cache_.is_cached_main(seed.hash))
@@ -1807,10 +1827,10 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
         if (m > 0)
-            std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d — offline flood marked=%d\n",
+            adapter_vlog("[adapter] tip main (singleton) %s [%d->%d] h=%d â€” offline flood marked=%d\n",
                         seed.hash.c_str(), seed.from, seed.to, seed.height, m);
         else
-            std::printf("[adapter] tip main (singleton) %s [%d->%d] h=%d\n",
+            adapter_vlog("[adapter] tip main (singleton) %s [%d->%d] h=%d\n",
                         seed.hash.c_str(), seed.from, seed.to, seed.height);
         return;
     }
@@ -1823,17 +1843,17 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
         if (m > 0)
-            std::printf("[adapter] tip main %s [%d->%d] h=%d — offline flood marked=%d\n",
+            adapter_vlog("[adapter] tip main %s [%d->%d] h=%d â€” offline flood marked=%d\n",
                         seed.hash.c_str(), seed.from, seed.to, seed.height, m);
         else
-            std::printf("[adapter] tip main %s [%d->%d] h=%d\n",
+            adapter_vlog("[adapter] tip main %s [%d->%d] h=%d\n",
                         seed.hash.c_str(), seed.from, seed.to, seed.height);
         return;
     }
 
     if (!transport_ok)
     {
-        // Retry later (same tip only — do not expand to ancestors).
+        // Retry later (same tip only â€” do not expand to ancestors).
         enqueue_seed_(seed);
         return;
     }
@@ -1847,7 +1867,7 @@ void AlephiumAdapter::prune_detail_store()
     if (slimmed == 0)
         return;
     const DetailStoreStats st = scene_.detail_store().stats();
-    std::printf("[adapter] detail slim: pruned=%zu full=%zu slim=%zu total=%zu\n",
+    adapter_vlog("[adapter] detail slim: pruned=%zu full=%zu slim=%zu total=%zu\n",
                 slimmed, st.full_blocks, st.slim_blocks, st.entries);
 }
 
@@ -2044,7 +2064,7 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     const int fetch_ok = fetch_pool_ ? fetch_pool_->stats_ok() : 0;
     const int fetch_fail = fetch_pool_ ? fetch_pool_->stats_fail() : 0;
 
-    std::printf("[adapter] windows=%zu cam_idx=%d seeds+=%d seed_q=%zu unconfirmed=%zu "
+    adapter_vlog("[adapter] windows=%zu cam_idx=%d seeds+=%d seed_q=%zu unconfirmed=%zu "
                 "fetch_q=%zu inflight=%zu fetch_ok=%d fetch_fail=%d phase=%d\n",
                 lookback_windows_.size(), camera_lookback_index_(), seeded,
                 seed_q_.size(), scene_.unconfirmed_live_count(), fetch_pend,

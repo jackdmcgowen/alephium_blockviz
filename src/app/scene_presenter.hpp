@@ -2,7 +2,7 @@
 
 // Host-side scene → frame builder. Runs on the engine render thread via IFrameSource.
 //
-// BlockFlow visual model (spacing/layout unchanged):
+// Production BlockFlow visual model (spacing/layout unchanged — keep):
 //   solid α  — confirmed bag with all deps live
 //   green    — per-lane frontier tip H_c (or walk-anim display) + full blockDeps arrows
 //   cyan     — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip

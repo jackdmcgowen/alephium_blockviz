@@ -74,7 +74,7 @@ public:
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
                        const std::vector<std::string>& confirmed_tip_hashes,
-                       const std::vector<std::string>& pending_tip_hashes,
+                       const std::vector<std::string>& cyan_frontier_hashes,
                        const std::vector<std::string>& incomplete_hashes) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
@@ -187,7 +187,7 @@ private:
         enum class Mode {
             SelectionGold,
             ConfirmedTipsGreen,
-            PendingTipCyan,
+            CyanFrontier, // unconfirmed children of domain frontier
             IncompleteTraceOrange
         };
         struct Layer
@@ -212,7 +212,7 @@ private:
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
         std::vector<std::string> confirmed_tip_hashes;
-        std::vector<std::string> pending_tip_hashes;
+        std::vector<std::string> cyan_frontier_hashes;
         std::vector<std::string> incomplete_hashes;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
@@ -227,7 +227,7 @@ private:
 
     // Loaded from GpuFrameSlot in apply_published_frame (paired with pick_id_to_hash_).
     std::vector<std::string> sobel_tip_hashes_;
-    std::vector<std::string> sobel_pending_hashes_;
+    std::vector<std::string> sobel_cyan_hashes_;
     std::vector<std::string> sobel_incomplete_hashes_;
     // Kill-switch: gates tip/incomplete Sobel; selection gold always works. Default on.
     bool visualize_confirmed_tips_ = true;
