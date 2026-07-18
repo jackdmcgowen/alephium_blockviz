@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/picker.hpp"
 
 #include "graphics/gpu_prv_lib.h"
@@ -49,7 +50,7 @@ void Picker::create_resources(const PickerResourcesCreateInfo& info)
 
     image_view_ = create_image_view(info.device, image_, kPickerColorFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    // Always 1× depth (matches 1× color + 1× picker pipeline).
+    // Always 1Ã— depth (matches 1Ã— color + 1Ã— picker pipeline).
     create_image(
         info.device,
         info.width, info.height,
@@ -147,7 +148,7 @@ void Picker::record_pass(const PickerRecordParams& p)
             { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
     }
 
-    // Private 1× depth always transitions from UNDEFINED each pick (cleared below).
+    // Private 1Ã— depth always transitions from UNDEFINED each pick (cleared below).
     pipeline_barrier(p.cmd, depth_image_,
         VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,

@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "debug_drawer.h"
 
 #include <algorithm>
@@ -107,7 +108,7 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
     if (shaft_radius < 0.0f)
         shaft_radius = 0.0f;
 
-    // Grow: tip marches start→end; only a prefix of the segment is drawn.
+    // Grow: tip marches startâ†’end; only a prefix of the segment is drawn.
     const float drawn_len = total * u;
     if (drawn_len < 1e-4f)
         return;

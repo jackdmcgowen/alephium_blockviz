@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_recorder.hpp"
 
 #include "graphics/debug/debug_drawer.h"
@@ -103,7 +104,7 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
             { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
     }
 
-    // --- Pass A: scene (cubes + debug) into MSAA or 1× color ---
+    // --- Pass A: scene (cubes + debug) into MSAA or 1Ã— color ---
     vkCmdBeginRendering(p.cmd, &renderInfo);
     vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_pipeline);
     vkCmdSetPrimitiveTopology(p.cmd, p.topology);
@@ -138,7 +139,7 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
 
     vkCmdEndRendering(p.cmd);
 
-    // --- Pass B: ImGui on resolved 1× swapchain color (after MSAA resolve) ---
+    // --- Pass B: ImGui on resolved 1Ã— swapchain color (after MSAA resolve) ---
     if (p.imgui_draw_data)
     {
         VkImageView ui_view = msaa ? p.resolve_color_view : p.color_view;

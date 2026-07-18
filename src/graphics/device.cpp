@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
 #include "engine_requirements.hpp"
 #include "queue_types.hpp"

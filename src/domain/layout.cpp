@@ -1,3 +1,4 @@
+﻿#include "app/pch.h"
 #include "domain/layout.hpp"
 #include "domain/alph_block.hpp"
 

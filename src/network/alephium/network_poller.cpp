@@ -1,3 +1,4 @@
+﻿#include "network/pch.h"
 #include "network/alephium/network_poller.hpp"
 
 #include <curl/curl.h>

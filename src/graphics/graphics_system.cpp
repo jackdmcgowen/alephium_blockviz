@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -227,7 +228,7 @@ void GraphicsSystem::init()
         picker_.create_resources(pr);
         picker_.create_staging(&buffer_manager_);
     }
-    // Picker is 1×; selection pick uses cleared depth (independent of MSAA scene depth).
+    // Picker is 1Ã—; selection pick uses cleared depth (independent of MSAA scene depth).
     picker_pipe_.create(device, frame_descriptors_.layout(), picker_.color_format(),
                         swapchain_targets_.depth_format(), width, height,
                         VK_SAMPLE_COUNT_1_BIT);
@@ -386,7 +387,7 @@ void GraphicsSystem::set_selection_unlocked(const std::string& hash)
         return;
 
     selected_hash_ = hash;
-    // Prefer detail store only (own mutex) — never lock scene from selection path
+    // Prefer detail store only (own mutex) â€” never lock scene from selection path
     // to avoid ABBA deadlock with render_loop (scene then selection).
     if (scene_)
     {
@@ -523,7 +524,7 @@ void GraphicsSystem::render_loop()
         UiSnapshot frame_ui{};
         std::vector<std::string> frame_pick_map;
 
-        // Camera: aspect → look-aim → tick → frustum (before geometry submit).
+        // Camera: aspect â†’ look-aim â†’ tick â†’ frustum (before geometry submit).
         if (camera_)
         {
             const float aspect = (height > 0) ? static_cast<float>(width) / static_cast<float>(height) : 1.f;
@@ -536,21 +537,21 @@ void GraphicsSystem::render_loop()
             fin.selected_hash = selected_hash_local;
             fin.hovered_hash = hovered_hash_local;
             fin.selected_detail = selected_detail_local;
-            // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
+            // Half-extents for unit cube mesh (Â±1); slight inflate avoids edge pop.
             fin.instance_half_extents = glm::vec3(1.05f);
 
             // Look target from layout is still needed for aim; run a thin prepare after
-            // tick if we need positions — look aim uses fout after prepare below.
+            // tick if we need positions â€” look aim uses fout after prepare below.
             // Tick camera first without new aim so frustum matches previous look;
             // then set aim when selection changes (target from prepare).
 
             FrameSourceOutput fout{};
             // Host ScenePresenter locks scene; must not hold scene mutex here.
-            // First prepare pass needs frustum — tick camera, then cull.
+            // First prepare pass needs frustum â€” tick camera, then cull.
             Frustum frame_frustum{};
             if (camera_)
             {
-                // Timeline Z: live tip at "now", past bound at genesis (no ±2000 clamp).
+                // Timeline Z: live tip at "now", past bound at genesis (no Â±2000 clamp).
                 const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
                 int64_t origin_ms = scene_ ? scene_->timeline_origin_ms() : 0;
                 if (origin_ms <= 0)
@@ -744,7 +745,7 @@ void GraphicsSystem::render()
                 layer.instance_indices = std::move(idxs);
                 sobel_req.layers.push_back(std::move(layer));
             };
-            // Paint order low → high: orange under cyan under green.
+            // Paint order low â†’ high: orange under cyan under green.
             push_layer(SobelFrameRequest::Mode::IncompleteTraceOrange, sobel_incomplete_hashes_);
             push_layer(SobelFrameRequest::Mode::CyanFrontier, sobel_cyan_hashes_);
             push_layer(SobelFrameRequest::Mode::ConfirmedTipsGreen, sobel_tip_hashes_);
@@ -940,7 +941,7 @@ void GraphicsSystem::submit_frame_with_async_sobel(uint32_t frame_index, uint32_
         }
         else
         {
-            // Fence-only extra layers — never re-signal g2c/cfin.
+            // Fence-only extra layers â€” never re-signal g2c/cfin.
             vkResetCommandBuffer(layer_depth_cb, 0);
             VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1207,7 +1208,7 @@ void GraphicsSystem::create_command_pool()
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
         throw std::runtime_error("Failed to create _3D command pool");
 
-    // CMP pool (async compute) — same family is OK when CMP shares _3D
+    // CMP pool (async compute) â€” same family is OK when CMP shares _3D
     poolInfo.queueFamilyIndex = queues_.family_index(QueueType::CMP);
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &computeCommandPool) != VK_SUCCESS)
         throw std::runtime_error("Failed to create CMP command pool");
@@ -1243,7 +1244,7 @@ void GraphicsSystem::create_sync_objects()
     FrameSyncCreateInfo info{};
     info.device = device;
     info.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
-    // render_finished is per swapchain image — match actual image count.
+    // render_finished is per swapchain image â€” match actual image count.
     info.swapchain_image_count = swapchainImages.empty()
                                      ? static_cast<uint32_t>(MAX_SWAPCHAIN_IMAGES)
                                      : static_cast<uint32_t>(swapchainImages.size());
@@ -1282,7 +1283,7 @@ void GraphicsSystem::publish_frame(const FrameSubmit& frame,
                                  const std::vector<std::string>& cyan_frontier_hashes,
                                  const std::vector<std::string>& incomplete_hashes)
 {
-    // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
+    // Deep-copy only â€” no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
 
     const int write = find_free_gpu_slot_unlocked();
@@ -1455,7 +1456,7 @@ void GraphicsSystem::cleanup()
 
     sobel_.destroy(device);
 
-    // Descriptors reference UBO in frame_resources — free pool before buffers.
+    // Descriptors reference UBO in frame_resources â€” free pool before buffers.
     frame_descriptors_.destroy(device);
     frame_resources_.destroy(device);
 

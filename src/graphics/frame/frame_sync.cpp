@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_sync.hpp"
 
 #include <stdexcept>

@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "engine_requirements.hpp"
 
 #include <cstdio>

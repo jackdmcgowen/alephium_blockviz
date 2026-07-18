@@ -1,3 +1,4 @@
+﻿#include "network/pch.h"
 #include "network/alephium/alph_detail_store.hpp"
 
 void AlphDetailStore::slim_inplace(AlphBlock& block)

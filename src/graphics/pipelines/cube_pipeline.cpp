@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/pipelines/cube_pipeline.hpp"
 #include "graphics/frame/vertex_types.hpp"
 #include "gpu_prv_lib.h"

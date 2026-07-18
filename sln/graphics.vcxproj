@@ -82,6 +82,8 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>graphics/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <PreBuildEvent>
       <Command>python "$(SolutionDir)..\src\graphics\shaders\compile_shaders.py"</Command>
@@ -97,6 +99,8 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>graphics/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <PreBuildEvent>
       <Command>python "$(SolutionDir)..\src\graphics\shaders\compile_shaders.py"</Command>
@@ -104,6 +108,12 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\graphics\pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">graphics/pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">graphics/pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="..\src\graphics\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
     <ClCompile Include="..\src\graphics\camera.cpp" />
@@ -131,7 +141,9 @@
     <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp" />
     <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp" />
     <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp" />
-    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp" />
+    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\graphics\camera.hpp" />

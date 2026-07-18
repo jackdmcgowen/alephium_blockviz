@@ -1,3 +1,4 @@
+﻿#include "app/pch.h"
 #include "app/scene_presenter.hpp"
 
 #include "domain/alph_block.hpp"
@@ -18,8 +19,8 @@ namespace
 // Keep spacing: do not change meters_per_second or base_radius.
 float meters_per_second = 1.0f;
 
-const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child → tip
-const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip → blockDeps
+const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child â†’ tip
+const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip â†’ blockDeps
 const glm::vec4 kDeathArrowColor(1.0f, 0.12f, 0.10f, 0.95f);
 const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
 const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
@@ -37,7 +38,7 @@ bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
     return true;
 }
 
-// Key: listing block (owns deps[]) then dependency. Arrow draws listing → dep.
+// Key: listing block (owns deps[]) then dependency. Arrow draws listing â†’ dep.
 std::string tip_edge_key(const std::string& listing, const std::string& dep)
 {
     return std::string("t|") + listing + '|' + dep;
@@ -143,13 +144,13 @@ void ScenePresenter::tip_dep_tick_and_draw_(
     };
 
     int tip_stagger_base = 0;
-    // Green: display frontier tip → all live blockDeps.
+    // Green: display frontier tip â†’ all live blockDeps.
     for (const std::string& tip : green_display)
     {
         add_edges_from(tip, /*green=*/true, /*only_to_frontier_deps=*/false, tip_stagger_base);
         tip_stagger_base += 2;
     }
-    // Cyan: frontier children → only edges into domain frontier tips.
+    // Cyan: frontier children â†’ only edges into domain frontier tips.
     for (const std::string& owner : cyan_owners)
     {
         add_edges_from(owner, /*green=*/false, /*only_to_frontier_deps=*/true, tip_stagger_base);
@@ -165,7 +166,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.base_alpha = e.green ? kGreenArrowColor.a : kCyanArrowColor.a;
         anim.tip_scale = 1.f;
 
-        // Cyan → green color blend when the same edge key changes role.
+        // Cyan â†’ green color blend when the same edge key changes role.
         if (anim.want_green != e.green)
         {
             const float cur = (anim.confirm_blend_start_sec < 0.f)
@@ -195,7 +196,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         }
         else if (anim.phase == ArrowPhase::Dying)
         {
-            // Edge returned to active set while dying — revive.
+            // Edge returned to active set while dying â€” revive.
             anim.phase = ArrowPhase::Held;
             anim.fade_start_sec = 0.f;
         }
@@ -398,7 +399,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot();
 
-    // Shared timeline origin: earliest block timestamp (or now − lookback).
+    // Shared timeline origin: earliest block timestamp (or now âˆ’ lookback).
     int64_t timeline_origin_ms = 0;
     {
         int64_t min_ts = 0;
@@ -437,11 +438,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     // ------------------------------------------------------------------
     // Classify once (BlockFlow visual model)
-    //   frontier_domain — domain confirmed tip hashes H_c (stable for cyan)
-    //   green_display   — walk-anim tip or domain frontier (Sobel + green arrows)
-    //   cyan_owners     — unconfirmed height>H_c that deps a domain frontier tip
-    //   incomplete      — missing live deps, excluding green/cyan
-    //   solid           — confirmed ∧ complete
+    //   frontier_domain â€” domain confirmed tip hashes H_c (stable for cyan)
+    //   green_display   â€” walk-anim tip or domain frontier (Sobel + green arrows)
+    //   cyan_owners     â€” unconfirmed height>H_c that deps a domain frontier tip
+    //   incomplete      â€” missing live deps, excluding green/cyan
+    //   solid           â€” confirmed âˆ§ complete
     // ------------------------------------------------------------------
     const std::vector<NodeId> frontier_ids = scene_.confirmed_frontier_ids_locked();
     std::unordered_set<std::string> frontier_domain;
@@ -748,7 +749,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         scene_.copy_confirmed_heights_locked(out.ui.confirmed_height_by_lane);
     }
     {
-        // prepare already holds scene_.mutex() — do not call network_hud() (re-lock = deadlock).
+        // prepare already holds scene_.mutex() â€” do not call network_hud() (re-lock = deadlock).
         const auto hud = scene_.network_hud_locked();
         out.ui.net_domain = hud.domain;
         out.ui.net_status = hud.status;

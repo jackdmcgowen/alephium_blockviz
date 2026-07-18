@@ -2,10 +2,12 @@
 
 // Product engine facade (engine.lib). No Vulkan / curl.
 // BlockVizEngine registers ISystem components and lifecycle them via init/free.
+// Prefer narrow includes: engine/frame_types.hpp, engine/system.hpp when possible.
 
 #include "domain/alph_block.hpp"
 #include "app/ui_snapshot.hpp"
 #include "engine/system.hpp"
+#include "engine/frame_types.hpp"
 #include "graphics/camera.hpp"
 #include "graphics/gpu_pub_lib.h"
 
@@ -17,44 +19,6 @@
 
 class BlockScene;
 class CameraController;
-class DebugDrawer;
-
-// ---------------------------------------------------------------------------
-// Frame source (host implements; graphics render thread calls prepare)
-// ---------------------------------------------------------------------------
-
-struct FrameSourceInput
-{
-    std::string selected_hash;
-    std::string hovered_hash;
-    AlphBlock   selected_detail;
-    const Frustum* frustum = nullptr;
-    glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };
-};
-
-struct FrameSourceOutput
-{
-    std::vector<GpuInstance> instances;
-    std::vector<std::string> pick_map;
-    bool      has_look_target = false;
-    glm::vec3 look_target_pos{ 0.f };
-    UiSnapshot ui{};
-
-    // Green Sobel: confirmed frontier tip H_c per lane (walk-anim display may lag).
-    std::vector<std::string> confirmed_tip_hashes;
-    // Cyan Sobel: frontier children — unconfirmed height>H_c that deps a frontier tip.
-    std::vector<std::string> cyan_frontier_hashes;
-    // Orange Sobel: missing-dep incompletes (excluding green/cyan).
-    std::vector<std::string> incomplete_hashes;
-};
-
-class IFrameSource
-{
-public:
-    virtual ~IFrameSource() = default;
-    virtual void prepare(const FrameSourceInput& in, FrameSourceOutput& out,
-                         DebugDrawer* debug) = 0;
-};
 
 // ---------------------------------------------------------------------------
 // Network system config + interface

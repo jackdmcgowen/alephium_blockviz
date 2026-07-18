@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
 
 void create_buffer(VkDevice device, VkPhysicalDeviceMemoryProperties *deviceMemProps, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory)

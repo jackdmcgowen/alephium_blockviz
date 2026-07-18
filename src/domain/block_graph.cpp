@@ -1,3 +1,4 @@
+﻿#include "app/pch.h"
 #include "domain/block_graph.hpp"
 
 #include <algorithm>

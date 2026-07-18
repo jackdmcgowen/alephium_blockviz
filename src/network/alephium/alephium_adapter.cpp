@@ -1,4 +1,5 @@
-﻿#include "network/alephium/alephium_adapter.hpp"
+﻿#include "network/pch.h"
+#include "network/alephium/alephium_adapter.hpp"
 
 #include <algorithm>
 #include <cjson/cJSON.h>

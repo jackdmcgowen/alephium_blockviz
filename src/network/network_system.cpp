@@ -1,3 +1,4 @@
+﻿#include "network/pch.h"
 #include "network/network_system.hpp"
 
 #include "network/alephium/network_poller.hpp"
@@ -146,7 +147,7 @@ public:
         }
 
         switching_ = false;
-        std::printf("[net] domain switch → %d url=%s\n", domain_, cfg_.base_url.c_str());
+        std::printf("[net] domain switch â†’ %d url=%s\n", domain_, cfg_.base_url.c_str());
         return true;
     }
 

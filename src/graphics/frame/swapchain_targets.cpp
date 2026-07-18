@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/swapchain_targets.hpp"
 
 #include "graphics/gpu_prv_lib.h"
@@ -39,7 +40,7 @@ VkSampleCountFlagBits SwapchainTargets::pick_sample_count(VkPhysicalDevice pd,
         VK_SAMPLE_COUNT_2_BIT,
         VK_SAMPLE_COUNT_1_BIT,
     };
-    // Prefer requested if supported, else highest ≤ requested.
+    // Prefer requested if supported, else highest â‰¤ requested.
     if ((counts & requested) == requested)
         return requested;
     for (VkSampleCountFlagBits s : try_order)
@@ -72,7 +73,7 @@ void SwapchainTargets::create_depth(VkDevice device, VkPhysicalDeviceMemoryPrope
     if (depth_format_ == VK_FORMAT_UNDEFINED)
         depth_format_ = find_depth_format(physical_device_);
 
-    // MSAA depth is attachment-only; 1× depth also SAMPLED for legacy paths.
+    // MSAA depth is attachment-only; 1Ã— depth also SAMPLED for legacy paths.
     VkImageUsageFlags usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     if (samples == VK_SAMPLE_COUNT_1_BIT)
         usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -126,7 +127,7 @@ void SwapchainTargets::create_msaa_color(VkDevice device, VkPhysicalDeviceMemory
 
     if (vkCreateImage(device, &imageInfo, nullptr, &msaa_color_image_) != VK_SUCCESS)
     {
-        // Transient may fail on some drivers — retry without TRANSIENT
+        // Transient may fail on some drivers â€” retry without TRANSIENT
         imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         if (vkCreateImage(device, &imageInfo, nullptr, &msaa_color_image_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create MSAA color image");

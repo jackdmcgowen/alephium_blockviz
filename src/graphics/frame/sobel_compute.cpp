@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/sobel_compute.hpp"
 #include "graphics/frame/vertex_types.hpp"
 
@@ -131,7 +132,7 @@ void SobelCompute::create_descriptors(VkDevice device)
     if (vkAllocateDescriptorSets(device, &alloc, &overlay_set_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: overlay set");
 
-    // Write once at create — never update while CBs are pending (VUID-03047).
+    // Write once at create â€” never update while CBs are pending (VUID-03047).
     write_static_descriptors_();
 }
 
@@ -396,7 +397,7 @@ void SobelCompute::recreate(const SobelComputeCreateInfo& info)
 
 void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
 {
-    // sel_depth → DEPTH_ATTACHMENT
+    // sel_depth â†’ DEPTH_ATTACHMENT
     image_barrier(p.cmd, sel_depth_image_,
                   VK_PIPELINE_STAGE_2_NONE, 0,
                   VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -450,8 +451,8 @@ void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
 void SobelCompute::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // Execution dependency only for depth write → external/compute. Keep DEPTH_ATTACHMENT
-    // layout; compute CB performs ATTACHMENT → SHADER_READ (valid stages on CMP queue).
+    // Execution dependency only for depth write â†’ external/compute. Keep DEPTH_ATTACHMENT
+    // layout; compute CB performs ATTACHMENT â†’ SHADER_READ (valid stages on CMP queue).
     // Avoid dstStage=COMPUTE on a pure-graphics family (can drop the barrier).
     image_barrier(cmd, sel_depth_image_,
                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -468,7 +469,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 {
     const bool split = (graphics_family_ != compute_family_);
 
-    // Acquire (if split) + layout ATTACHMENT → SHADER_READ for sampling (CMP-safe stages).
+    // Acquire (if split) + layout ATTACHMENT â†’ SHADER_READ for sampling (CMP-safe stages).
     image_barrier(cmd, sel_depth_image_,
                   VK_PIPELINE_STAGE_2_NONE, 0,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -481,7 +482,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 
     // Descriptors written once in create (write_static_descriptors_).
 
-    // Discard prior contents → GENERAL for storage write (no FRAGMENT stages on CMP).
+    // Discard prior contents â†’ GENERAL for storage write (no FRAGMENT stages on CMP).
     image_barrier(cmd, edge_image_,
                   VK_PIPELINE_STAGE_2_NONE, 0,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -501,7 +502,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 
     vkCmdDispatch(cmd, (width_ + 7) / 8, (height_ + 7) / 8, 1);
 
-    // Make edge write available; keep GENERAL — graphics does GENERAL→SHADER_READ after wait.
+    // Make edge write available; keep GENERAL â€” graphics does GENERALâ†’SHADER_READ after wait.
     // Release ownership to graphics when families differ (dst stages = NONE on CMP queue).
     image_barrier(cmd, edge_image_,
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -512,7 +513,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 
     // Return sel_depth ownership to graphics. Layout can stay SHADER_READ; next graphics
-    // pass uses UNDEFINED → DEPTH_ATTACHMENT (discard).
+    // pass uses UNDEFINED â†’ DEPTH_ATTACHMENT (discard).
     if (split)
     {
         image_barrier(cmd, sel_depth_image_,
@@ -528,7 +529,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 void SobelCompute::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // After compute_finished wait: own edge on graphics, GENERAL → SHADER_READ for sampling.
+    // After compute_finished wait: own edge on graphics, GENERAL â†’ SHADER_READ for sampling.
     image_barrier(cmd, edge_image_,
                   VK_PIPELINE_STAGE_2_NONE, 0,
                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,

@@ -1,3 +1,4 @@
+﻿#include "app/pch.h"
 #include "domain/block_scene.hpp"
 
 #include <algorithm>
@@ -59,7 +60,7 @@ bool BlockScene::add_block(cJSON* block)
     if (graph_.contains(alph_block.hash))
         return false;
 
-    // Uncles are NOT auto-evicted here — adapter verifies is-in-main-chain and
+    // Uncles are NOT auto-evicted here â€” adapter verifies is-in-main-chain and
     // removes only non-main uncles (main uncles may remain but are not Sobel tips
     // unless they are the current confirmed-height frontier).
 

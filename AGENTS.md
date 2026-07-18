@@ -42,3 +42,11 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 ## Related gates
 
 - Vulkan validation: follow `.grok/skills/vulkan-validator/SKILL.md` before committing/pushing graphics changes.
+- Build speed / PCH / IWYU / adding systems: see `docs/build-performance.md`. Use `scripts/bench_build.ps1` before claiming compile-time improvements.
+
+## Build hygiene (PCH / includes)
+
+- Product `.cpp` files start with `#include "<area>/pch.h"` (`graphics/`, `network/`, `engine/`, `app/`).
+- Do not put frequently edited product headers into PCH files.
+- Prefer forward declarations in headers; keep `gpu_pub_lib.h` Vulkan-free.
+- New static-lib systems: copy `sln/_template_system.vcxproj.example` and add a project-local PCH.

@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_resources.hpp"
 
 #include <algorithm>

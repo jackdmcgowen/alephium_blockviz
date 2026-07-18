@@ -1,3 +1,4 @@
+﻿#include "graphics/pch.h"
 #include "graphics/camera.hpp"
 
 #define GLM_FORCE_LEFT_HANDED
@@ -24,7 +25,7 @@ void extract_planes(const glm::mat4& m, glm::vec4 out[6])
     out[1] = glm::vec4(m[0][3] - m[0][0], m[1][3] - m[1][0], m[2][3] - m[2][0], m[3][3] - m[3][0]);
     out[2] = glm::vec4(m[0][3] + m[0][1], m[1][3] + m[1][1], m[2][3] + m[2][1], m[3][3] + m[3][1]);
     out[3] = glm::vec4(m[0][3] - m[0][1], m[1][3] - m[1][1], m[2][3] - m[2][1], m[3][3] - m[3][1]);
-    // Depth 0–1: near uses row z only; far is row w − row z.
+    // Depth 0â€“1: near uses row z only; far is row w âˆ’ row z.
     out[4] = glm::vec4(m[0][2], m[1][2], m[2][2], m[3][2]);
     out[5] = glm::vec4(m[0][3] - m[0][2], m[1][3] - m[1][2], m[2][3] - m[2][2], m[3][3] - m[3][2]);
 

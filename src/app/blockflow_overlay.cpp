@@ -1,3 +1,4 @@
+﻿#include "app/pch.h"
 #include "app/blockflow_overlay.hpp"
 #include "app/ui_chrome.hpp"
 #include "network/network_domain.hpp"
@@ -11,7 +12,7 @@
 
 #include <glm/glm.hpp>
 
-// Shard colors for feed / inspector labels (UX only — not engine)
+// Shard colors for feed / inspector labels (UX only â€” not engine)
 static const glm::vec3 kShardColors[16] = {
     glm::vec3(1.00f, 0.34f, 0.20f),
     glm::vec3(0.20f, 1.00f, 0.34f),
@@ -85,7 +86,7 @@ void BlockflowOverlay::draw()
         mx < ui_w - rail_w &&
         my < ui_h;
 
-    // Camera motion — Z-track (keys + wheel)
+    // Camera motion â€” Z-track (keys + wheel)
     if (!io.WantCaptureKeyboard)
     {
         if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
@@ -93,7 +94,7 @@ void BlockflowOverlay::draw()
         if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
             camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
     }
-    // Positive MouseWheel = scroll up → +scroll_z (matches Up arrow).
+    // Positive MouseWheel = scroll up â†’ +scroll_z (matches Up arrow).
     if (over_scene && io.MouseWheel != 0.f)
         camera_.nudge_scroll(io.MouseWheel * CameraController::kWheelStep);
 
@@ -205,7 +206,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::Selectable(labels[2], false);
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Simulator planned — not available yet");
+            ImGui::SetTooltip("Simulator planned â€” not available yet");
         ImGui::EndCombo();
     }
 
@@ -272,7 +273,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::TextDisabled("poll interval: %.0fs", ui.poll_interval_sec);
     }
     else
-        ImGui::TextDisabled("last poll: —");
+        ImGui::TextDisabled("last poll: â€”");
 
     // One shard per line so nothing clips in the narrow rail.
     if (ImGui::TreeNode("Shard tips (H_c / net tip)"))
@@ -285,19 +286,19 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
                 const int hc = ui.confirmed_height_by_lane[lane];
                 const int tip = ui.tip_height_by_lane[lane];
                 if (hc < 0 && tip < 0)
-                    ImGui::TextDisabled("  %d→%d:  — / —", f, t);
+                    ImGui::TextDisabled("  %dâ†’%d:  â€” / â€”", f, t);
                 else if (hc < 0)
-                    ImGui::Text("  %d→%d:  — / %d", f, t, tip);
+                    ImGui::Text("  %dâ†’%d:  â€” / %d", f, t, tip);
                 else if (tip < 0)
-                    ImGui::Text("  %d→%d:  %d / —", f, t, hc);
+                    ImGui::Text("  %dâ†’%d:  %d / â€”", f, t, hc);
                 else
-                    ImGui::Text("  %d→%d:  %d / %d", f, t, hc, tip);
+                    ImGui::Text("  %dâ†’%d:  %d / %d", f, t, hc, tip);
             }
         }
         ImGui::TreePop();
     }
 
-    // Former bottom "Blockflow" toolbar — collapsible under Network.
+    // Former bottom "Blockflow" toolbar â€” collapsible under Network.
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -321,9 +322,9 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
                 const int lane = f * ALPH_NUM_GROUPS + t;
                 const int hc = ui.confirmed_height_by_lane[lane];
                 if (hc < 0)
-                    ImGui::TextDisabled("  %d→%d:  —", f, t);
+                    ImGui::TextDisabled("  %dâ†’%d:  â€”", f, t);
                 else
-                    ImGui::Text("  %d→%d:  %d", f, t, hc);
+                    ImGui::Text("  %dâ†’%d:  %d", f, t, hc);
             }
         }
 
@@ -339,12 +340,12 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
             ImGui::TextColored(
                 ImVec4(kShardColors[shardId].r, kShardColors[shardId].g,
                        kShardColors[shardId].b, 1.0f),
-                "[%d→%d]", entry.chainFrom, entry.chainTo);
+                "[%dâ†’%d]", entry.chainFrom, entry.chainTo);
             ImGui::SameLine();
             // Shorten hash label in narrow rail; full hash on hover / clipboard.
             char short_h[20];
             if (entry.hash.size() > 12)
-                std::snprintf(short_h, sizeof(short_h), "%.6s…%.4s", entry.hash.c_str(),
+                std::snprintf(short_h, sizeof(short_h), "%.6sâ€¦%.4s", entry.hash.c_str(),
                               entry.hash.c_str() + entry.hash.size() - 4);
             else
                 std::snprintf(short_h, sizeof(short_h), "%s", entry.hash.c_str());
@@ -371,7 +372,7 @@ void short_id(const std::string& s, char* buf, size_t buf_n)
 {
     if (s.empty())
     {
-        snprintf(buf, buf_n, "—");
+        snprintf(buf, buf_n, "â€”");
         return;
     }
     if (s.size() <= 14)
@@ -379,7 +380,7 @@ void short_id(const std::string& s, char* buf, size_t buf_n)
         snprintf(buf, buf_n, "%s", s.c_str());
         return;
     }
-    snprintf(buf, buf_n, "%.6s…%.4s", s.c_str(), s.c_str() + s.size() - 4);
+    snprintf(buf, buf_n, "%.6sâ€¦%.4s", s.c_str(), s.c_str() + s.size() - 4);
 }
 
 // Host set by draw_inspector from current domain (mainnet/testnet explorer).
@@ -442,7 +443,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         explorer_url(url, sizeof(url), "blocks", inspector.hash);
         short_id(inspector.hash, id_buf, sizeof(id_buf));
 
-        // ── Block header (always open, compact) ──
+        // â”€â”€ Block header (always open, compact) â”€â”€
         ImGui::TextDisabled("hash");
         ImGui::SameLine();
         ImGui::TextLinkOpenURL(id_buf, url);
@@ -454,7 +455,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::SameLine(0.f, 16.f);
         ImGui::TextColored(
             ImVec4(kShardColors[shardId].r, kShardColors[shardId].g, kShardColors[shardId].b, 1.0f),
-            "chain [%d→%d]", inspector.chainFrom, inspector.chainTo);
+            "chain [%dâ†’%d]", inspector.chainFrom, inspector.chainTo);
 
         if (inspector.timestamp > 0)
         {
@@ -464,12 +465,12 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             ImGui::TextDisabled("time %s", tbuf);
         }
 
-        ImGui::TextDisabled("%d tx · %d deps · %d uncles",
+        ImGui::TextDisabled("%d tx Â· %d deps Â· %d uncles",
                             static_cast<int>(inspector.txns.size()),
                             static_cast<int>(inspector.deps.size()),
                             static_cast<int>(inspector.uncles.size()));
 
-        // ── Dependencies (collapsed by default) ──
+        // â”€â”€ Dependencies (collapsed by default) â”€â”€
         if (!inspector.deps.empty() &&
             ImGui::TreeNodeEx("##deps", ImGuiTreeNodeFlags_SpanAvailWidth,
                               "Deps (%d)", static_cast<int>(inspector.deps.size())))
@@ -491,7 +492,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
 
         ImGui::Separator();
 
-        // ── Transactions: one-line headers, expand for detail ──
+        // â”€â”€ Transactions: one-line headers, expand for detail â”€â”€
         ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
         if (inspector.txns.empty())
             ImGui::TextDisabled("No transactions loaded (detail may still be fetching).");
@@ -512,7 +513,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             const bool open = ImGui::TreeNodeEx(
                 "##tx",
                 ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
-                "%s  in %d · out %d · gas %d",
+                "%s  in %d Â· out %d Â· gas %d",
                 id_buf, n_in, n_out, tx.gasAmount);
 
             if (ImGui::IsItemHovered() && !tx.txid.empty())
@@ -573,9 +574,9 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled(
-            "Camera: wheel/arrows Z (detaches timeline) · LMB look · short LMB pick · RMB pan · short RMB reattach live tip");
+            "Camera: wheel/arrows Z (detaches timeline) Â· LMB look Â· short LMB pick Â· RMB pan Â· short RMB reattach live tip");
         ImGui::TextDisabled(
-            "Solid=main+deps · green=frontier tip + blockDeps · cyan=unconfirmed children of frontier · orange=missing deps · gold=select");
+            "Solid=main+deps Â· green=frontier tip + blockDeps Â· cyan=unconfirmed children of frontier Â· orange=missing deps Â· gold=select");
         {
             // User-facing names (adapter phases still Bootstrap/IdentifyTips/DfsTrace/Steady).
             const char* pname = "Bootstrap";
@@ -583,7 +584,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             else if (ui.trace_phase == 2) pname = "Confirm walk";
             else if (ui.trace_phase == 3) pname = "Steady";
             ImGui::TextDisabled(
-                "Confirm phase: %s · open lanes=%d · history only if camera unlocks lookback",
+                "Confirm phase: %s Â· open lanes=%d Â· history only if camera unlocks lookback",
                 pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");

@@ -1,6 +1,10 @@
 #ifndef GRAPHICS_SYSTEM_HPP
 #define GRAPHICS_SYSTEM_HPP
 
+// Internal to graphics.lib only (create_graphics_system returns IGraphicsSystem*).
+// Host/app code must not include this header — keeps Vulkan out of product TUs.
+// Future: full PIMPL (Impl in .cpp) if external includes become necessary.
+
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>

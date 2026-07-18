@@ -1,7 +1,8 @@
-# compile_shaders.py
+# compile_shaders.py — incremental: only rebuild .spv when .glsl is newer.
 import os
 import subprocess
 import glob
+import sys
 
 def get_shader_stage(filename):
     """Infer shader stage from filename."""
@@ -22,55 +23,53 @@ def get_shader_stage(filename):
         print(f"Warning: Could not infer stage for {filename}, defaulting to vertex")
         return "vertex"
 
+def needs_compile(input_file, output_file):
+    if not os.path.exists(output_file):
+        return True
+    return os.path.getmtime(input_file) > os.path.getmtime(output_file)
+
 def compile_shader(input_file, output_file):
     if not os.path.exists(input_file):
         print(f"Error: {input_file} not found")
         return False
-    
+
     stage = get_shader_stage(input_file)
     cmd = ["glslc", "-fshader-stage=" + stage, input_file, "-o", output_file]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     if result.returncode != 0:
         print(f"Failed to compile {input_file}: {result.stderr}")
         return False
-    
+
     print(f"Compiled {input_file} to {output_file} as {stage} shader")
     return True
 
-def delete_spv_files(directory):
-    """Delete all .spv files in the specified directory."""
-    spv_files = glob.glob(os.path.join(directory, "*.spv"))
-    if not spv_files:
-        print("No .spv files found to delete")
-    else:
-        for spv_file in spv_files:
-            try:
-                os.remove(spv_file)
-                print(f"Deleted {spv_file}")
-            except OSError as e:
-                print(f"Error deleting {spv_file}: {e}")
-
 if __name__ == "__main__":
-    # Change to script's directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
-    print(f"Working directory set to: {script_dir}")
 
-    # Delete all existing .spv files
-    delete_spv_files(script_dir)
-
-    # Find all .glsl files
     glsl_files = glob.glob("*.glsl")
     if not glsl_files:
         print("No .glsl files found in directory")
-        exit(1)
+        sys.exit(1)
 
     success = True
+    compiled = 0
+    skipped = 0
     for glsl_file in glsl_files:
         output_file = os.path.splitext(glsl_file)[0] + ".spv"
+        if not needs_compile(glsl_file, output_file):
+            skipped += 1
+            continue
         if not compile_shader(glsl_file, output_file):
             success = False
+        else:
+            compiled += 1
+
+    if compiled == 0 and skipped > 0:
+        print(f"Shaders up to date ({skipped} skipped)")
+    else:
+        print(f"Shaders: compiled={compiled} skipped={skipped}")
 
     if not success:
-        exit(1)
+        sys.exit(1)
