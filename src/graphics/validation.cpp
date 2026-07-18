@@ -21,8 +21,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
     void* pUserData
 )
 {
-    if (enableValidationLogging) {
-        fprintf(validationFile, "%s", pCallbackData->pMessage);
+    if (enableValidationLogging && validationFile) {
+        fprintf(validationFile, "%s\n", pCallbackData->pMessage);
+        fflush(validationFile); // survive hard kill during /vulkan-validator re-verify
     }
     OutputDebugStringA(pCallbackData->pMessage);
 

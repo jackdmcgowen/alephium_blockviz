@@ -2,17 +2,24 @@
 
 // Domain scene model: BlockGraph + AlphDetailStore + recent feed.
 // Adapter writes; renderer reads under mutex.
-#include "alph_block.hpp"
+//
+// Block state model (BlockFlow viz):
+//   confirmed_          — proven main-chain bag (solid opacity when deps live)
+//   confirmed_hash_[L]  — sequential frontier tip H_c (green Sobel + green dep arrows)
+//   pending_hash_[L]    — adapter bookkeeping for next seed only (not a render input;
+//                         cyan frontier-children are computed in ScenePresenter)
+#include "domain/alph_block.hpp"
 #include "domain/block_graph.hpp"
-#include "adapters/alephium/alph_detail_store.hpp"
+#include "network/alephium/alph_detail_store.hpp"
 
+#include <atomic>
 #include <cjson/cJSON.h>
 #include <deque>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
-// Compact feed row (metadata only; full txns live in AlphDetailStore).
 struct RecentFeedItem
 {
     NodeId hash;
@@ -24,17 +31,36 @@ struct RecentFeedItem
 class BlockScene
 {
 public:
-    BlockScene() = default;
+    static constexpr int kLaneCount = 16;
 
-    // Network-thread ingest (thread-safe). Returns true if the hash was newly admitted.
+    BlockScene();
+
     bool add_block(cJSON* block);
-    // Returns true if a block with this hash was present and removed
     bool remove_block(const std::string& hash);
+
+    // Sequential frontier: H_c+1 default; chain_walk allows validated multi-step jump.
+    // Bag membership always records proven main for solid drawing.
+    void mark_confirmed(const NodeId& hash);
+    void mark_confirmed(const NodeId& hash, uint32_t lane, int height, bool chain_walk = false);
+
+    // Green-tip walk path (old frontier → new tip); presenter animates.
+    void set_frontier_walk(uint32_t lane, std::vector<NodeId> path_old_to_new);
+    // Presenter only: call while holding scene.mutex().
+    std::vector<NodeId> frontier_walk_locked(uint32_t lane) const;
+    void clear_frontier_walk_locked(uint32_t lane);
+
+    // Next height candidate (cyan). Self-locking.
+    void set_pending_tip(uint32_t lane, const NodeId& hash);
+    void clear_pending_tip(uint32_t lane);
+    NodeId pending_tip_hash(uint32_t lane) const;
+
+    int    confirmed_height(uint32_t lane) const;
+    NodeId confirmed_tip_hash(uint32_t lane) const;
+    bool   frontier_valid(uint32_t lane) const;
 
     std::mutex& mutex() { return mu_; }
     const std::mutex& mutex() const { return mu_; }
 
-    // Caller must hold mutex() for feed consistency with graph writes
     AlphDetailStore& detail_store() { return detail_store_; }
     const AlphDetailStore& detail_store() const { return detail_store_; }
     BlockGraph& graph() { return graph_; }
@@ -42,20 +68,62 @@ public:
     const std::deque<RecentFeedItem>& feed() const { return feed_; }
     int total_blocks() const { return total_blocks_; }
 
-    // Live node snapshot (locks graph internally). Prefer under scene mutex for frame coherence.
     std::vector<GraphNode> nodes_snapshot() const { return graph_.nodes_snapshot(); }
-
-    // Tip node ids per lane (max height); empty lanes omitted from result vector.
-    // Caller may hold mutex(); uses graph snapshot.
     std::vector<NodeId> tip_ids() const;
+    size_t unconfirmed_live_count() const;
 
-    // Thread-safe detail resolve (AlphDetailStore only).
+    void  set_camera_scroll_z(float z) { camera_scroll_z_.store(z, std::memory_order_relaxed); }
+    float camera_scroll_z() const { return camera_scroll_z_.load(std::memory_order_relaxed); }
+
+    // Genesis / chain-start timestamp (ms); adapter resolves, camera uses for Z limits.
+    void    set_genesis_ms(int64_t ms) { genesis_ms_.store(ms, std::memory_order_relaxed); }
+    int64_t genesis_ms() const { return genesis_ms_.load(std::memory_order_relaxed); }
+
+    // Layout timeline origin (ms); presenter/render may publish for camera follow.
+    void    set_timeline_origin_ms(int64_t ms)
+    {
+        timeline_origin_ms_.store(ms, std::memory_order_relaxed);
+    }
+    int64_t timeline_origin_ms() const
+    {
+        return timeline_origin_ms_.load(std::memory_order_relaxed);
+    }
+
+    bool is_confirmed_locked(const NodeId& hash) const;
+    std::vector<NodeId> confirmed_frontier_ids_locked() const;
+    std::vector<NodeId> pending_tip_ids_locked() const;
+    int confirmed_height_locked(uint32_t lane) const;
+    void copy_confirmed_heights_locked(int out[kLaneCount]) const;
+
+    void set_trace_status(int phase, int offset);
+    void get_trace_status_locked(int* phase_out, int* offset_out) const;
+
     AlphBlock resolve_detail(const std::string& hash) const;
 
 private:
+    void mark_confirmed_unlocked_(const NodeId& hash);
+    void mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int height,
+                                  bool chain_walk = false);
+    void erase_confirmed_unlocked_(const NodeId& hash);
+    bool is_confirmed_unlocked_(const NodeId& hash) const;
+    void refresh_frontier_lane_unlocked_(uint32_t lane);
+
     mutable std::mutex mu_;
     BlockGraph graph_;
     AlphDetailStore detail_store_;
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
+    std::unordered_set<NodeId> confirmed_;
+    std::atomic<float> camera_scroll_z_{ 0.f };
+    std::atomic<int64_t> genesis_ms_{ ALPH_GENESIS_TIMESTAMP_MS_FALLBACK };
+    std::atomic<int64_t> timeline_origin_ms_{ 0 };
+
+    int    confirmed_height_[kLaneCount]{};
+    NodeId confirmed_hash_[kLaneCount]{};
+    bool   frontier_valid_[kLaneCount]{};
+    NodeId pending_hash_[kLaneCount]{};
+    std::vector<NodeId> frontier_walk_[kLaneCount]{};
+
+    int trace_phase_  = 0;
+    int trace_offset_ = 0;
 };

@@ -2,9 +2,9 @@
 
 // App ImGui chrome: toolbar + block inspector (PR8 / Spike S4).
 // Explorer.alephium.org URLs live only in this TU.
-#include "app/camera_state.hpp"
+#include "app/camera_controller.hpp"
 #include "app/ui_snapshot.hpp"
-#include "engine/blockviz_engine_api.hpp"
+#include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
 
 #include <cstdint>
@@ -12,7 +12,7 @@
 class BlockflowOverlay : public IUiOverlay
 {
 public:
-    BlockflowOverlay(CameraState& camera, IBlockvizEngine& engine);
+    BlockflowOverlay(CameraController& camera, IEngine& engine);
 
     void draw() override; // render thread; ImGui only
 
@@ -22,7 +22,17 @@ private:
     void draw_toolbar(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h);
 
-    CameraState&     camera_;
-    IBlockvizEngine& engine_;
-    int64_t          session_start_ms_ = 0;
+    CameraController& camera_;
+    IEngine&  engine_;
+    int64_t           session_start_ms_ = 0;
+
+    // RMB pan: drag vs short-click reset (clear selection, home look + pan origin)
+    bool  rmb_down_over_scene_ = false;
+    bool  rmb_dragged_         = false;
+    float rmb_drag_dist_px_    = 0.f;
+
+    // LMB look: drag vs short-click pick (engine uses MouseDragMaxDistance)
+    bool  lmb_down_over_scene_ = false;
+    bool  lmb_dragged_         = false;
+    float lmb_drag_dist_px_    = 0.f;
 };

@@ -1,7 +1,6 @@
 #pragma once
 
-// Public graphics-engine surface (no Vulkan types).
-// Implemented by VulkanEngine via IBlockvizEngine (E6).
+// Public graphics types (no Vulkan). Used by IGraphicsSystem / IEngine.
 // See docs/graphics-modularization-design.md
 
 #include <cstddef>
@@ -38,14 +37,22 @@ struct CameraUBO
     float     pad1 = 0.0f;
     glm::vec3 view_pos{};
     float     pad2 = 0.0f;
-    float     meters = 0.0f; // matches vert.glsl ubo.meters
+    // Global tween multipliers (1 = identity). Instance scale/alpha multiply these.
+    float     anim_scale = 1.0f;
+    float     anim_alpha = 1.0f;
+    float     anim_time  = 0.0f; // seconds (host/engine may advance)
+    float     pad3       = 0.0f;
 };
 
-// v1 instance path: position + color only (no scale)
+// Instance: world pos + uniform scale + color + alpha (32 bytes).
+inline constexpr float kDefaultBlockScale = 1.0f;
+
 struct GpuInstance
 {
-    glm::vec3 pos{};
-    glm::vec3 color{};
+    glm::vec3 pos{ 0.f };
+    float     scale = kDefaultBlockScale; // uniform XYZ scale (mesh verts at ±1)
+    glm::vec3 color{ 1.f };
+    float     alpha = 1.0f;               // for fade tweens
 };
 
 struct FrameSubmit
@@ -77,29 +84,4 @@ public:
     virtual void draw() = 0; // ImGui::* calls only; no Vulkan
 };
 
-class IRenderEngine
-{
-public:
-    virtual ~IRenderEngine() = default;
-
-    virtual void initialize(const EngineCreateInfo& info) = 0;
-    virtual void resize(uint32_t width, uint32_t height) = 0;
-    virtual void shutdown() = 0;
-
-    virtual void start() = 0; // engine-owned render thread
-    virtual void stop() = 0;  // joins thread; safe after last submit
-
-    // Thread-safe from main: deep-copy into next publish slot (triple-buffer, latest-wins).
-    // Pointers in FrameSubmit need only live for the duration of this call.
-    // Engine applies the published slot on the render thread before GPU upload.
-    virtual void submit_frame(const FrameSubmit& frame) = 0;
-
-    virtual void set_ui_overlay(IUiOverlay* overlay) = 0; // not owned; nullptr = none
-
-    virtual void request_pick(const PickQuery& q) = 0;
-    virtual bool consume_pick(PickResult& out) = 0; // true if a new result is available
-};
-
-// Factory (declared only in PR1; implement when engine is peeled from VulkanEngine)
-IRenderEngine* create_vulkan_engine();
-void destroy_render_engine(IRenderEngine* engine);
+// Render lifecycle types used by IGraphicsSystem / IEngine (see engine/engine.hpp).

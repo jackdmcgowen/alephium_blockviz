@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source Files\network">
+      <UniqueIdentifier>{n1000001-0001-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\network\alephium">
+      <UniqueIdentifier>{n1000001-0001-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\network">
+      <UniqueIdentifier>{n1000001-0001-4000-8000-000000000011}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\network\alephium">
+      <UniqueIdentifier>{n1000001-0001-4000-8000-000000000012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\domain">
+      <UniqueIdentifier>{n1000001-0001-4000-8000-000000000021}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\network\commands.c"><Filter>Source Files\network</Filter></ClCompile>
+    <ClCompile Include="..\src\network\network_system.cpp"><Filter>Source Files\network</Filter></ClCompile>
+    <ClCompile Include="..\src\network\alephium\network_poller.cpp"><Filter>Source Files\network\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\network\alephium\block_fetch_pool.cpp"><Filter>Source Files\network\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\network\alephium\alephium_adapter.cpp"><Filter>Source Files\network\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\network\alephium\main_chain_cache.cpp"><Filter>Source Files\network\alephium</Filter></ClCompile>
+    <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp"><Filter>Source Files\network\alephium</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\network\commands.h"><Filter>Header Files\network</Filter></ClInclude>
+    <ClInclude Include="..\src\network\network_system.hpp"><Filter>Header Files\network</Filter></ClInclude>
+    <ClInclude Include="..\src\network\alephium\network_poller.hpp"><Filter>Header Files\network\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\network\alephium\block_fetch_pool.hpp"><Filter>Header Files\network\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\network\alephium\alephium_adapter.hpp"><Filter>Header Files\network\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\network\alephium\main_chain_cache.hpp"><Filter>Header Files\network\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\network\alephium\alph_detail_store.hpp"><Filter>Header Files\network\alephium</Filter></ClInclude>
+    <ClInclude Include="..\src\domain\alph_block.hpp"><Filter>Header Files\domain</Filter></ClInclude>
+  </ItemGroup>
+</Project>
