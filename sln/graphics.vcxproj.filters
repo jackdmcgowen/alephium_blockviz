@@ -9,64 +9,97 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    <Filter Include="Source Files\graphics">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000001}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\debug">
-      <UniqueIdentifier>{e59f14ee-1156-4a94-9314-60cd2a6d56a8}</UniqueIdentifier>
+    <Filter Include="Source Files\graphics\debug">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\frame">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\frame\frame_graph">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\pipelines">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\imgui">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000006}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000011}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\debug">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\frame">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000013}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\frame\frame_graph">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000014}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\pipelines">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000015}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\engine">
+      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000016}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\graphics\instance.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\device.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\engine_requirements.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\validation.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\surface.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\swapchain.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\image.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\shader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\buffer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp">
-      <Filter>Source Files\debug</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\graphics\mesh_arena.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
+    <ClCompile Include="..\src\graphics\buffer.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\buffer_manager.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\camera.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\compute.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp"><Filter>Source Files\graphics\debug</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\mesh_arena.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\device.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\engine_requirements.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\image.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\instance.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pipeline.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\shader.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\surface.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\swapchain.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\validation.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\graphics_system.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_sync.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_resources.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_descriptors.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp"><Filter>Source Files\graphics\frame\frame_graph</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\picker.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
+    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\graphics\gpu_prv_lib.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\gpu_pub_lib.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\engine_requirements.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\mesh_arena.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\graphics\debug\debug_drawer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ClInclude Include="..\src\graphics\camera.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\gpu_prv_lib.h"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\gpu_pub_lib.h"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\queue_types.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\buffer_manager.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\engine_requirements.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\mesh_arena.h"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\debug\debug_drawer.h"><Filter>Header Files\graphics\debug</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\graphics_system.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_sync.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_resources.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_descriptors.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_recorder.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_presenter.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\picker.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\sobel_compute.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\vertex_types.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\engine.hpp"><Filter>Header Files\engine</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\engine_identity.hpp"><Filter>Header Files\engine</Filter></ClInclude>
+    <ClInclude Include="..\src\engine\system.hpp"><Filter>Header Files\engine</Filter></ClInclude>
   </ItemGroup>
 </Project>

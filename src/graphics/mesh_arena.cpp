@@ -13,42 +13,43 @@ MeshArena::~MeshArena()
 
 bool MeshArena::create(VkDevice device,
                        VkPhysicalDeviceMemoryProperties* mem_props,
+                       BufferManager* buffer_manager,
                        VkFormat color_format,
                        VkFormat depth_format,
+                       VkSampleCountFlagBits samples,
                        uint32_t max_vertices,
                        uint32_t max_indices,
                        uint32_t max_line_verts)
 {
     destroy();
 
+    if (!buffer_manager)
+        return false;
+
     device_       = device;
     mem_props_    = mem_props;
+    buffers_      = buffer_manager;
     color_format_ = color_format;
     depth_format_ = depth_format;
+    samples_      = samples;
     max_vertices_ = max_vertices;
     max_indices_  = max_indices;
     max_line_verts_ = max_line_verts;
 
-    create_buffer(device_, mem_props_, max_vertices_ * sizeof(DebugVertex),
-                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  vertex_buffer_, vertex_memory_);
+    const VkMemoryPropertyFlags host =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    create_buffer(device_, mem_props_, max_indices_ * sizeof(uint32_t),
-                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  index_buffer_, index_memory_);
+    vertex_ = buffers_->create(BufferDesc{
+        max_vertices_ * sizeof(DebugVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "debug.vb"});
+    index_ = buffers_->create(BufferDesc{
+        max_indices_ * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, host, "debug.ib"});
+    line_ = buffers_->create(BufferDesc{
+        max_line_verts_ * sizeof(DebugVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "debug.lines"});
 
-    create_buffer(device_, mem_props_, max_line_verts_ * sizeof(DebugVertex),
-                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  line_buffer_, line_memory_);
-
-    if (vkMapMemory(device_, vertex_memory_, 0, VK_WHOLE_SIZE, 0, &vertex_mapped_) != VK_SUCCESS)
-        return false;
-    if (vkMapMemory(device_, index_memory_, 0, VK_WHOLE_SIZE, 0, &index_mapped_) != VK_SUCCESS)
-        return false;
-    if (vkMapMemory(device_, line_memory_, 0, VK_WHOLE_SIZE, 0, &line_mapped_) != VK_SUCCESS)
+    vertex_mapped_ = vertex_.map(device_);
+    index_mapped_ = index_.map(device_);
+    line_mapped_ = line_.map(device_);
+    if (!vertex_mapped_ || !index_mapped_ || !line_mapped_)
         return false;
 
     return create_pipelines();
@@ -75,30 +76,15 @@ void MeshArena::destroy()
         pipeline_layout_ = VK_NULL_HANDLE;
     }
 
-    auto unmap = [&](void*& p, VkDeviceMemory m) {
-        if (p) { vkUnmapMemory(device_, m); p = nullptr; }
-    };
-    unmap(vertex_mapped_, vertex_memory_);
-    unmap(index_mapped_, index_memory_);
-    unmap(line_mapped_, line_memory_);
-
-    if (vertex_buffer_ != VK_NULL_HANDLE)
+    if (buffers_)
     {
-        destroy_buffer(device_, vertex_buffer_, vertex_memory_);
-        vertex_buffer_ = VK_NULL_HANDLE;
-        vertex_memory_ = VK_NULL_HANDLE;
-    }
-    if (index_buffer_ != VK_NULL_HANDLE)
-    {
-        destroy_buffer(device_, index_buffer_, index_memory_);
-        index_buffer_ = VK_NULL_HANDLE;
-        index_memory_ = VK_NULL_HANDLE;
-    }
-    if (line_buffer_ != VK_NULL_HANDLE)
-    {
-        destroy_buffer(device_, line_buffer_, line_memory_);
-        line_buffer_ = VK_NULL_HANDLE;
-        line_memory_ = VK_NULL_HANDLE;
+        if (vertex_mapped_) { vertex_.unmap(device_); vertex_mapped_ = nullptr; }
+        if (index_mapped_) { index_.unmap(device_); index_mapped_ = nullptr; }
+        if (line_mapped_) { line_.unmap(device_); line_mapped_ = nullptr; }
+        buffers_->destroy(vertex_);
+        buffers_->destroy(index_);
+        buffers_->destroy(line_);
+        buffers_ = nullptr;
     }
 
     uploaded_index_count_ = uploaded_vertex_count_ = uploaded_line_count_ = 0;
@@ -193,7 +179,7 @@ bool MeshArena::create_pipelines()
     viewport_state.scissorCount = 1;
 
     VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = samples_;
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
     depth_stencil.depthTestEnable = VK_TRUE;
@@ -273,8 +259,9 @@ void MeshArena::draw(VkCommandBuffer cmd, const glm::mat4& view_proj)
         vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT,
                            0, sizeof(glm::mat4), &view_proj);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_, &offset);
-        vkCmdBindIndexBuffer(cmd, index_buffer_, 0, VK_INDEX_TYPE_UINT32);
+        VkBuffer vb = vertex_.handle();
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+        vkCmdBindIndexBuffer(cmd, index_.handle(), 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, uploaded_index_count_, 1, 0, 0, 0);
     }
 
@@ -284,7 +271,8 @@ void MeshArena::draw(VkCommandBuffer cmd, const glm::mat4& view_proj)
         vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT,
                            0, sizeof(glm::mat4), &view_proj);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &line_buffer_, &offset);
+        VkBuffer lb = line_.handle();
+        vkCmdBindVertexBuffers(cmd, 0, 1, &lb, &offset);
         vkCmdDraw(cmd, uploaded_line_count_, 1, 0, 0);
     }
 }

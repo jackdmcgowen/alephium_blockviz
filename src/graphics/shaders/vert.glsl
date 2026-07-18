@@ -2,35 +2,34 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    vec3 lightPos;    // Added light position
+    vec3 lightPos;
     float pad1;
-    vec3 viewPos;     // Added camera position
+    vec3 viewPos;
     float pad2;
-    float meters;
+    float anim_scale;
+    float anim_alpha;
+    float anim_time;
+    float pad3;
 } ubo;
-
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inInstancePos;
-layout(location = 3) in vec3 inInstanceColor;
+layout(location = 3) in float inInstanceScale;
+layout(location = 4) in vec3 inInstanceColor;
+layout(location = 5) in float inInstanceAlpha;
 
 layout(location = 0) out vec3 fragColor;
-layout(location = 1) out vec3 fragPos;    // Added for Phong
-layout(location = 2) out vec3 fragNormal; // Added for Phong
+layout(location = 1) out vec3 fragPos;
+layout(location = 2) out vec3 fragNormal;
+layout(location = 3) out float fragAlpha;
 
 void main() {
-
-    mat4 posMat = mat4(
-        vec4( 1.0, 0.0, 0.0, 0.0),
-        vec4( 0.0, 1.0, 0.0, 0.0),
-        vec4( 0.0, 0.0, 1.0, 0.0),
-        vec4( 0.0, 0.0, ubo.meters, 1.0) );
-    
-    vec4 worldPos = posMat * vec4(inPosition + inInstancePos, 1.0);
-    gl_Position = ubo.proj * ubo.view * worldPos;
-    
-    fragPos = worldPos.xyz;
-    fragNormal = normalize(inNormal);
+    float s = max(inInstanceScale * ubo.anim_scale, 1e-4);
+    vec3 world = inPosition * s + inInstancePos;
+    fragPos = world;
+    fragNormal = normalize(inNormal); // uniform scale — no inverse-transpose needed
     fragColor = inInstanceColor;
+    fragAlpha = clamp(inInstanceAlpha * ubo.anim_alpha, 0.0, 1.0);
+    gl_Position = ubo.proj * ubo.view * vec4(world, 1.0);
 }

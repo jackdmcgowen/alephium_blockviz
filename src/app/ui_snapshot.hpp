@@ -2,7 +2,7 @@
 
 // Published UI view for render-thread ImGui (PR7).
 // Overlay must not read live BlockScene / adapter state without going through this.
-#include "alph_block.hpp"
+#include "domain/alph_block.hpp"
 #include "domain/block_graph.hpp"
 
 #include <cstdint>
@@ -29,5 +29,38 @@ struct UiSnapshot
     NodeId                selected_hash;
     AlphBlock             selected_detail; // full block for inspector (txns)
     int                   total_blocks = 0;
-    uint64_t              seq          = 0;
+    // tip_count = live max-height tips; confirmed_tip_count = sequential confirmed frontier (H_c).
+    int                   tip_count            = 0;
+    int                   confirmed_tip_count  = 0;
+    // Highest sequential confirmed height per lane (chainFrom*4+chainTo). -1 = not initialized.
+    int                   confirmed_height_by_lane[16]{};
+    // Adapter confirm phase (0 Bootstrap, 1 Identify tips, 2 Confirm walk, 3 Steady).
+    int                   trace_phase  = 0;
+    int                   trace_offset = 0; // lanes still walking confirm path
+    uint64_t              seq                  = 0;
+
+    // --- Network left rail ---
+    int         net_domain = 0;          // NetworkDomain
+    int         net_status = 0;          // NetworkStatus
+    char        net_base_url[160]{};
+    int         lookback_windows_done = 0;
+    int         lookback_windows_need = 1;
+    int         lanes_with_frontier   = 0;
+    int         open_confirm_walks    = 0;
+    int         tip_height_by_lane[16]{};
+    int         stats_api_is_main     = 0;
+    int         stats_fetch_admitted  = 0;
+    int         stats_removed         = 0;
+    int         stats_seed_q          = 0;
+    int64_t     last_poll_ms          = 0;
+    float       poll_interval_sec     = 8.f;
+    int         net_switching         = 0;
+
+    UiSnapshot()
+    {
+        for (int& h : confirmed_height_by_lane)
+            h = -1;
+        for (int& h : tip_height_by_lane)
+            h = -1;
+    }
 };

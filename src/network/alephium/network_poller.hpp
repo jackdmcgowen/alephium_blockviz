@@ -1,0 +1,52 @@
+#pragma once
+
+// Thin network thread: owns curl + loop + block-fetch pool; policy in AlephiumAdapter.
+#include "network/alephium/alephium_adapter.hpp"
+#include "network/alephium/block_fetch_pool.hpp"
+#include "domain/block_scene.hpp"
+#include "engine/engine.hpp"
+
+#include <atomic>
+#include <cstdint>
+#include <string>
+#include <thread>
+
+class NetworkPoller
+{
+public:
+    struct Config
+    {
+        std::string base_url;
+        int64_t     lookback_ms      = 0;
+        int64_t     poll_interval_ms = 8000;
+    };
+
+    NetworkPoller(BlockScene& scene, IEngine& engine);
+    ~NetworkPoller();
+
+    NetworkPoller(const NetworkPoller&) = delete;
+    NetworkPoller& operator=(const NetworkPoller&) = delete;
+
+    void start(const Config& cfg);
+    void stop();
+
+    // Domain switch helpers (call from network system after stop / before start).
+    void prepare_domain_switch();
+    void set_domain_meta(int domain, const std::string& base_url);
+    AlephiumAdapter& adapter() { return adapter_; }
+    const AlephiumAdapter& adapter() const { return adapter_; }
+
+private:
+    void thread_main();
+
+    AlephiumAdapter   adapter_;
+    BlockFetchPool    fetch_pool_;
+    Config            cfg_{};
+    std::thread       thread_;
+    std::atomic<bool> running_{ false };
+    int               domain_ = 0;
+    std::string       base_url_copy_; // stable c_str for baseUrl
+
+    static constexpr int kVerifyJobsPerIdleSlice = 24;
+    static constexpr int kFetchWorkers = 3;
+};

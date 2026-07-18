@@ -57,6 +57,7 @@ public:
     std::vector<GraphEdge> edges_from(const NodeId& id) const;
 
     void prune(int64_t min_timestamp_ms, size_t max_nodes);
+    void clear();
 
     size_t node_count() const;
     std::vector<NodeId> live_ids_sorted() const;
