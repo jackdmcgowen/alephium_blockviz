@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -101,11 +102,25 @@ private:
     void refresh_lookback_floors_();
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
-    int  camera_extra_lookback_heights_() const;
+    // Extra older history unlocked by camera Z, in milliseconds (time, not heights).
+    int64_t camera_extra_lookback_ms_() const;
+    int64_t lookback_start_ms_() const;
+    bool timestamp_in_lookback_(int64_t ts_ms) const;
     // True when height is inside the base live window (not camera-only history).
     bool is_live_height_(uint32_t lane, int height) const;
     bool is_live_block_(const std::string& hash) const;
     bool tip_pending_confirmation_() const;
+
+    // Steady: request/confirm next height H_c+1 only (cyan pending → green frontier).
+    void advance_sequential_tips_();
+
+    // Genesis timestamp + discrete lookback windows (index 0 = live tip window).
+    void resolve_genesis_ms_();
+    void ensure_lookback_window_(int index);
+    void ensure_windows_for_camera_();
+    int  max_lookback_index_() const;
+    int  camera_lookback_index_() const;
+    int64_t window_ms_() const;
 
     void drain_fetch_results_(int max_admits);
     // Live-chain only: per-hash GET /blocks/{hash}.
@@ -116,7 +131,7 @@ private:
     void recheck_confirm_fill_parents_();
 
     // Historical / bulk discovery: GET /blocks-with-events?fromTs&toTs.
-    int  poll_time_slot_(int64_t from_ts, int64_t to_ts);
+    int  poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force = false);
     // One lookback window ending at the block's timestamp (covers older deps).
     int  request_history_slot_for_block_(const std::string& hash);
     int64_t block_timestamp_ms_(const std::string& hash) const;
@@ -135,6 +150,8 @@ private:
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
     // Mark in-pool deps of a confirmed block as main (no is_main API).
     void propagate_main_from_confirmed_deps_(const std::string& confirmed_hash);
+    // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
+    bool try_chain_walk_confirm_(const std::string& tip_hash, uint32_t lane, int height);
     void prune_detail_store();
 
     BlockScene& scene_;
@@ -161,12 +178,24 @@ private:
     bool   dfs_done_[BlockScene::kLaneCount]{};
     NodeId dfs_stop_hash_[BlockScene::kLaneCount]{};
     int    dfs_stop_height_[BlockScene::kLaneCount]{};
-    int    last_camera_extra_heights_ = 0;
+    int64_t last_camera_extra_ms_ = 0;
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
     int earliest_traced_height_[BlockScene::kLaneCount]{};
     bool lookback_floors_valid_ = false;
     float initial_camera_scroll_z_ = 0.f;
+    int64_t base_lookback_ms_ = 0;
+    // Lookback windows: index 0 = [now-W, now], higher = older toward genesis.
+    struct LookbackWindowSlot
+    {
+        int     index = 0;
+        int64_t from_ms = 0;
+        int64_t to_ms = 0;
+        bool    polled = false;
+    };
+    std::vector<LookbackWindowSlot> lookback_windows_;
+    int64_t genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    bool    genesis_resolved_ = false;
     // Quantized from_ts of history interval polls already issued (dedupe).
     std::unordered_set<int64_t> history_slots_fetched_;
 

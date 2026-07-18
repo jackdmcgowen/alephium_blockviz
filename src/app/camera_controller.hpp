@@ -1,7 +1,8 @@
 #pragma once
 
 // Render-thread camera: Z-track scroll + LMB look + RMB pan + selection look-aim.
-// Eye = pan + (0,0,scroll_z). Look uses smoothed yaw/pitch (exp tween).
+// Z is wall-clock seconds on the block timeline (matches layout meters_per_second=1).
+// Attached: auto-follows live tip at 1 s/s. User Z input detaches; short RMB recouples.
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
 
@@ -18,23 +19,28 @@
 class CameraController
 {
 public:
-    static constexpr float kEyeZMin   = -2000.f;
-    static constexpr float kEyeZMax   =  2000.f;
+    // Soft pan bounds only (Z uses timeline limits, not ±2000).
     static constexpr float kPanMin    = -800.f;
     static constexpr float kPanMax    =  800.f;
     static constexpr float kEyeZStep  = 40.f;    // world units / second while key held
     static constexpr float kWheelStep = 25.f;    // world units per mouse-wheel notch
-    static constexpr float kLookOmega   = 12.f;    // look angle tween rate
-    static constexpr float kPanOmega    = 14.f;    // pan position tween rate
-    static constexpr float kScrollOmega = 12.f;    // Z-scroll tween rate
-    static constexpr float kLookSens  = 0.0045f; // radians per mouse pixel
-    static constexpr float kPanSens   = 0.12f;   // world units per mouse pixel
+    static constexpr float kLookOmega   = 12.f;
+    static constexpr float kPanOmega    = 14.f;
+    static constexpr float kScrollOmega = 12.f;
+    static constexpr float kLookSens  = 0.0045f;
+    static constexpr float kPanSens   = 0.12f;
     static constexpr float kPitchMin  = -1.35f;
     static constexpr float kPitchMax  =  1.35f;
+    // Follow: 1 world unit per real second (matches layout time axis).
+    static constexpr float kTimelineMetersPerSecond = 1.f;
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
         , scroll_z_target_(scroll_z_)
+        , live_scroll_z_(scroll_z_)
+        , z_min_(-1.e9f)
+        , z_max_(1.e9f)
+        , timeline_attached_(true)
     {
         camera_.forward = kForward;
         camera_.up = kUp;
@@ -53,23 +59,42 @@ public:
         camera_.far_z = far_z;
     }
 
-    // Smoothed eye Z (use for display / HUD).
+    // Timeline Z limits (newer more negative with current layout convention).
+    void set_scroll_z_limits(float z_min, float z_max)
+    {
+        if (z_min > z_max)
+            std::swap(z_min, z_max);
+        z_min_ = z_min;
+        z_max_ = z_max;
+        scroll_z_target_ = std::clamp(scroll_z_target_, z_min_, z_max_);
+        scroll_z_ = std::clamp(scroll_z_, z_min_, z_max_);
+    }
+
+    // Live tip-window Z (attached follow target). Updated each frame by host/render.
+    void set_live_scroll_z(float z)
+    {
+        live_scroll_z_ = std::clamp(z, z_min_, z_max_);
+    }
+
     float scroll_z() const { return scroll_z_; }
+    float scroll_z_target() const { return scroll_z_target_; }
+    float live_scroll_z() const { return live_scroll_z_; }
+    bool  timeline_attached() const { return timeline_attached_; }
     glm::vec3 pan() const { return pan_; }
 
     void set_scroll_z(float z)
     {
-        scroll_z_target_ = std::clamp(z, kEyeZMin, kEyeZMax);
+        detach_timeline_();
+        scroll_z_target_ = std::clamp(z, z_min_, z_max_);
     }
 
-    // Accumulate wheel / key deltas into the scroll *target* (tweened in tick).
     void nudge_scroll(float world_delta)
     {
+        detach_timeline_();
         scroll_z_target_ =
-            std::clamp(scroll_z_target_ + world_delta, kEyeZMin, kEyeZMax);
+            std::clamp(scroll_z_target_ + world_delta, z_min_, z_max_);
     }
 
-    // RMB drag: pan in the camera right / camera-up plane.
     void add_pan_delta(float dx_px, float dy_px)
     {
         const glm::vec3 f = yaw_pitch_to_dir_(yaw_, pitch_);
@@ -81,7 +106,6 @@ public:
             right /= rlen;
         glm::vec3 cam_up = glm::normalize(glm::cross(f, right));
 
-        // Grab-pan: content follows cursor (camera moves opposite to drag).
         pan_target_ -= right * (dx_px * kPanSens);
         pan_target_ -= cam_up * (dy_px * kPanSens);
         pan_target_.x = std::clamp(pan_target_.x, kPanMin, kPanMax);
@@ -89,7 +113,6 @@ public:
         pan_target_.z = std::clamp(pan_target_.z, kPanMin, kPanMax);
     }
 
-    // LMB drag: free look (Z scroll + pan offsets preserved).
     void add_look_delta(float dx_px, float dy_px)
     {
         look_engaged_ = false;
@@ -124,7 +147,7 @@ public:
         pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
     }
 
-    // Short RMB reset: home look (+Z) and pan back to XY origin (smooth via tick).
+    // Short RMB: home look + pan origin + reattach to live timeline Z.
     void clear_look_target()
     {
         look_engaged_ = false;
@@ -133,6 +156,13 @@ public:
         yaw_target_ = 0.f;
         pitch_target_ = 0.f;
         pan_target_ = glm::vec3(0.f);
+        reattach_timeline();
+    }
+
+    void reattach_timeline()
+    {
+        timeline_attached_ = true;
+        scroll_z_target_ = std::clamp(live_scroll_z_, z_min_, z_max_);
     }
 
     const std::string& look_aim_hash() const { return look_aim_hash_; }
@@ -140,6 +170,12 @@ public:
 
     const Camera& tick(float dt_sec)
     {
+        if (timeline_attached_)
+        {
+            // Stay on live tip window; spring toward live Z (live Z advances with time).
+            scroll_z_target_ = std::clamp(live_scroll_z_, z_min_, z_max_);
+        }
+
         update_look_(dt_sec);
         update_pan_(dt_sec);
         update_scroll_(dt_sec);
@@ -148,18 +184,17 @@ public:
     }
 
     const Camera& camera() const { return camera_; }
-
     CameraUBO ubo() const { return camera_.to_ubo(); }
-
     Frustum frustum() const { return camera_.frustum(); }
 
 private:
     static inline const glm::vec3 kUp{ 0.f, -1.f, 0.f };
     static inline const glm::vec3 kForward{ 0.f, 0.f, 1.f };
 
+    void detach_timeline_() { timeline_attached_ = false; }
+
     glm::vec3 eye_position_() const
     {
-        // Z-track: scroll_z on Z; RMB pan offsets in XYZ (mostly lateral).
         return glm::vec3(pan_.x, pan_.y, scroll_z_ + pan_.z);
     }
 
@@ -214,7 +249,7 @@ private:
     void update_scroll_(float dt)
     {
         scroll_z_ = exp_smooth_(scroll_z_, scroll_z_target_, dt, kScrollOmega);
-        scroll_z_ = std::clamp(scroll_z_, kEyeZMin, kEyeZMax);
+        scroll_z_ = std::clamp(scroll_z_, z_min_, z_max_);
     }
 
     void rebuild_camera_()
@@ -232,6 +267,11 @@ private:
 
     float scroll_z_ = 0.f;
     float scroll_z_target_ = 0.f;
+    float live_scroll_z_ = 0.f;
+    float z_min_ = -1.e9f;
+    float z_max_ = 1.e9f;
+    bool  timeline_attached_ = true;
+
     glm::vec3 pan_{ 0.f };
     glm::vec3 pan_target_{ 0.f };
 

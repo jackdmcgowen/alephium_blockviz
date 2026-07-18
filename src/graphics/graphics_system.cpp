@@ -3,10 +3,12 @@
 #include <stdexcept>
 #include <cstring>
 #include <cmath>
+#include <ctime>
 #include <algorithm>
 #include <unordered_map>
 #include <string>
 #include "graphics/graphics_system.hpp"
+#include "domain/alph_block.hpp"
 #include "engine/engine_identity.hpp"
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
 #include "app/ui_chrome.hpp"
@@ -155,7 +157,7 @@ GraphicsSystem::~GraphicsSystem()
 
 void GraphicsSystem::init_platform(void* hInst, void* hwnd_)
 {
-    // Prefer host configure() + engine init_system().
+    // Prefer host configure() + engine->init_systems().
     EngineCreateInfo info{};
     info.platform_instance = hInst;
     info.window = hwnd_;
@@ -204,7 +206,10 @@ void GraphicsSystem::init()
 
     swapchainExtent = { width, height };
     s_resized = true;
-    create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
+    create_swapchain(device, physicalDevice, surface, &swapchain, swapchainImages,
+                     swapchainImageFormat, &swapchainExtent);
+    width = swapchainExtent.width;
+    height = swapchainExtent.height;
     create_swapchain_targets();
     create_frame_resources();
     create_frame_descriptors();
@@ -446,6 +451,15 @@ void GraphicsSystem::refresh_selection_if_needed(BlockScene& scene)
 
 void GraphicsSystem::start()
 {
+    // Idempotent: main calls engine->start() again after adding NetworkSystem.
+    // Assigning a new std::thread while renderThread is still joinable throws.
+    if (running || renderThread.joinable())
+        return;
+    if (!inited_)
+    {
+        std::printf("[gfx] GraphicsSystem::start: call init() first\n");
+        return;
+    }
     running = true;
     renderThread = std::thread(&GraphicsSystem::render_loop, this);
 }
@@ -455,6 +469,13 @@ void GraphicsSystem::stop()
     running = false;
     if (renderThread.joinable())
         renderThread.join();
+    // Drain in-flight multi-layer Sobel before free() tears down CBs/semaphores.
+    if (sobel_fence_in_flight_ && sobel_done_fence_ != VK_NULL_HANDLE && device != VK_NULL_HANDLE)
+    {
+        vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &sobel_done_fence_);
+        sobel_fence_in_flight_ = false;
+    }
 }
 
 
@@ -529,6 +550,23 @@ void GraphicsSystem::render_loop()
             Frustum frame_frustum{};
             if (camera_)
             {
+                // Timeline Z: live tip at "now", past bound at genesis (no ±2000 clamp).
+                const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+                int64_t origin_ms = scene_ ? scene_->timeline_origin_ms() : 0;
+                if (origin_ms <= 0)
+                    origin_ms = now_ms - static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+                const int64_t genesis_ms =
+                    scene_ ? scene_->genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+                constexpr float mps = 1.f;
+                const float live_z =
+                    -static_cast<float>(now_ms - origin_ms) * 0.001f * mps;
+                const float past_z =
+                    -static_cast<float>(genesis_ms - origin_ms) * 0.001f * mps;
+                const float z_lo = std::min(live_z, past_z) - 120.f;
+                const float z_hi = std::max(live_z, past_z) + 120.f;
+                camera_->set_scroll_z_limits(z_lo, z_hi);
+                camera_->set_live_scroll_z(live_z);
+
                 camera_->tick(last_frame_dt_sec_);
                 frame_frustum = camera_->frustum();
                 fin.frustum = &frame_frustum;
@@ -554,7 +592,7 @@ void GraphicsSystem::render_loop()
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes,
-                          fout.incomplete_hashes);
+                          fout.pending_tip_hashes, fout.incomplete_hashes);
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -569,7 +607,7 @@ void GraphicsSystem::render_loop()
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
             // Empty frame-source: clear tips for this frame (paired with empty pick_map).
-            publish_frame(submit, frame_pick_map, {}, {});
+            publish_frame(submit, frame_pick_map, {}, {}, {});
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
@@ -684,25 +722,33 @@ void GraphicsSystem::render()
             return idxs;
         };
 
-        // Cubes only (not arrows). Gold > green frontier tips > orange incomplete.
-        // Green must not be starved by a sea of missing-dep cubes.
+        // Cubes only. Multi-layer: gold exclusive; else orange then cyan then green (all co-visible).
+        // Cyan = frontier children; green = confirmed frontier tips (H_c).
         if (selected_instance != ~0u)
         {
-            sobel_req.mode = SobelFrameRequest::Mode::SelectionGold;
-            sobel_req.instance_indices = { selected_instance };
+            SobelFrameRequest::Layer layer;
+            layer.mode = SobelFrameRequest::Mode::SelectionGold;
+            layer.instance_indices = { selected_instance };
+            sobel_req.layers.push_back(std::move(layer));
             want_sobel = true;
         }
-        else if (visualize_confirmed_tips_ && !sobel_tip_hashes_.empty())
+        else if (visualize_confirmed_tips_)
         {
-            sobel_req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
-            sobel_req.instance_indices = resolve_hashes(sobel_tip_hashes_);
-            want_sobel = !sobel_req.instance_indices.empty();
-        }
-        else if (visualize_confirmed_tips_ && !sobel_incomplete_hashes_.empty())
-        {
-            sobel_req.mode = SobelFrameRequest::Mode::IncompleteTraceOrange;
-            sobel_req.instance_indices = resolve_hashes(sobel_incomplete_hashes_);
-            want_sobel = !sobel_req.instance_indices.empty();
+            auto push_layer = [&](SobelFrameRequest::Mode mode,
+                                  const std::vector<std::string>& hashes) {
+                auto idxs = resolve_hashes(hashes);
+                if (idxs.empty())
+                    return;
+                SobelFrameRequest::Layer layer;
+                layer.mode = mode;
+                layer.instance_indices = std::move(idxs);
+                sobel_req.layers.push_back(std::move(layer));
+            };
+            // Paint order low → high: orange under cyan under green.
+            push_layer(SobelFrameRequest::Mode::IncompleteTraceOrange, sobel_incomplete_hashes_);
+            push_layer(SobelFrameRequest::Mode::PendingTipCyan, sobel_pending_hashes_);
+            push_layer(SobelFrameRequest::Mode::ConfirmedTipsGreen, sobel_tip_hashes_);
+            want_sobel = !sobel_req.layers.empty();
         }
     }
 
@@ -737,6 +783,9 @@ void GraphicsSystem::submit_frame_with_async_sobel(uint32_t frame_index, uint32_
                                                  VkSemaphore render_finished,
                                                  const SobelFrameRequest& req)
 {
+    if (req.layers.empty())
+        throw std::runtime_error("async sobel: empty layers");
+
     // Wait for prior Sobel chain: shared sel_depth/edge must not be rewritten while sampled.
     if (sobel_fence_in_flight_ && sobel_done_fence_ != VK_NULL_HANDLE)
     {
@@ -745,156 +794,217 @@ void GraphicsSystem::submit_frame_with_async_sobel(uint32_t frame_index, uint32_
         sobel_fence_in_flight_ = false;
     }
 
-    // Slot is idle: FramePresenter::begin already wait_frame(frame_index) for this timeline slot.
     FramesInFlight& slot = inFlightFrames[frame_index % MAX_FRAMES_IN_FLIGHT];
     VkCommandBuffer compute_cb = slot.computeCommandBuffer;
     VkCommandBuffer overlay_cb = slot.overlayCommandBuffer;
+    VkCommandBuffer layer_depth_cb = slot.layerDepthCommandBuffer;
     const VkSemaphore g2c = sobel_.graphics_to_compute(frame_index);
     const VkSemaphore cfin = sobel_.compute_finished(frame_index);
 
-    // After main+pick: depth-only redraw of requested instances into sel_depth_,
-    // then release that depth for async CMP Sobel (scene depth is not used).
-    {
+    static const float kGoldHighlight[4]   = { 1.0f, 0.85f, 0.15f, 1.35f };
+    static const float kGreenHighlight[4]  = { 0.25f, 0.95f, 0.40f, 1.35f };
+    static const float kCyanHighlight[4]   = { 0.15f, 0.95f, 1.0f, 1.35f };
+    static const float kOrangeHighlight[4] = { 1.0f, 0.45f, 0.08f, 1.35f };
+
+    auto highlight_for = [&](SobelFrameRequest::Mode mode) -> const float* {
+        if (mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)
+            return kGreenHighlight;
+        if (mode == SobelFrameRequest::Mode::PendingTipCyan)
+            return kCyanHighlight;
+        if (mode == SobelFrameRequest::Mode::IncompleteTraceOrange)
+            return kOrangeHighlight;
+        return kGoldHighlight;
+    };
+
+    auto record_depth = [&](VkCommandBuffer cmd, const SobelFrameRequest::Layer& layer) {
         SelectionDepthDrawParams sp{};
-        sp.cmd = graphics_cb;
+        sp.cmd = cmd;
         sp.ubo_set = frame_descriptors_.set();
         sp.vertex_buffer = frame_resources_.vertex_buffer();
         sp.instance_buffer = frame_resources_.instance_buffer();
         sp.index_buffer = frame_resources_.index_buffer();
-        sp.instance_indices = req.instance_indices.data();
-        sp.instance_index_count = static_cast<uint32_t>(req.instance_indices.size());
+        sp.instance_indices = layer.instance_indices.data();
+        sp.instance_index_count = static_cast<uint32_t>(layer.instance_indices.size());
         sp.width = width;
         sp.height = height;
         sobel_.record_selection_depth(sp);
-        sobel_.record_sel_depth_release_for_compute(graphics_cb);
-    }
+        sobel_.record_sel_depth_release_for_compute(cmd);
+    };
+
+    // Layer 0 depth on main graphics CB (already has scene + pick).
+    record_depth(graphics_cb, req.layers[0]);
     frame_recorder_.end(graphics_cb);
 
-    // Submit graphics (_3D): wait image-available, signal g→c
+    for (size_t li = 0; li < req.layers.size(); ++li)
     {
-        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-        cb.commandBuffer = graphics_cb;
-        VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        wait.semaphore = image_available;
-        wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        sig.semaphore = g2c;
-        sig.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
-        submit.commandBufferInfoCount = 1;
-        submit.pCommandBufferInfos = &cb;
-        submit.waitSemaphoreInfoCount = 1;
-        submit.pWaitSemaphoreInfos = &wait;
-        submit.signalSemaphoreInfoCount = 1;
-        submit.pSignalSemaphoreInfos = &sig;
-        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
-            throw std::runtime_error("async sobel: graphics submit failed");
-    }
+        const SobelFrameRequest::Layer& layer = req.layers[li];
+        const bool first = (li == 0);
+        const bool last = (li + 1 == req.layers.size());
 
-    // Compute (CMP): wait g→c, Sobel on selection depth only, signal compute_finished
-    {
-        vkResetCommandBuffer(compute_cb, 0);
-        VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(compute_cb, &bi);
+        // Depth submit: layer 0 uses scene graphics_cb; later layers use layerDepth CB.
+        if (first)
+        {
+            VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+            cb.commandBuffer = graphics_cb;
+            VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            wait.semaphore = image_available;
+            wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            sig.semaphore = g2c;
+            sig.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+            submit.commandBufferInfoCount = 1;
+            submit.pCommandBufferInfos = &cb;
+            submit.waitSemaphoreInfoCount = 1;
+            submit.pWaitSemaphoreInfos = &wait;
+            submit.signalSemaphoreInfoCount = 1;
+            submit.pSignalSemaphoreInfos = &sig;
+            if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+                throw std::runtime_error("async sobel: graphics submit failed");
+        }
+        else
+        {
+            // Previous overlay signaled cfin wait completed via fence; binary g2c/cfin free.
+            vkResetCommandBuffer(layer_depth_cb, 0);
+            VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(layer_depth_cb, &bi);
+            record_depth(layer_depth_cb, layer);
+            vkEndCommandBuffer(layer_depth_cb);
 
-        sobel_.record_dispatch(compute_cb, /*strength=*/14.0f, /*threshold=*/0.001f);
-        vkEndCommandBuffer(compute_cb);
+            VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+            cb.commandBuffer = layer_depth_cb;
+            VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            sig.semaphore = g2c;
+            sig.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+            submit.commandBufferInfoCount = 1;
+            submit.pCommandBufferInfos = &cb;
+            submit.signalSemaphoreInfoCount = 1;
+            submit.pSignalSemaphoreInfos = &sig;
+            if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+                throw std::runtime_error("async sobel: layer depth submit failed");
+        }
 
-        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-        cb.commandBuffer = compute_cb;
-        VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        wait.semaphore = g2c;
-        wait.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-        sig.semaphore = cfin;
-        sig.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
-        submit.commandBufferInfoCount = 1;
-        submit.pCommandBufferInfos = &cb;
-        submit.waitSemaphoreInfoCount = 1;
-        submit.pWaitSemaphoreInfos = &wait;
-        submit.signalSemaphoreInfoCount = 1;
-        submit.pSignalSemaphoreInfos = &sig;
-        if (vkQueueSubmit2(queues_.get(QueueType::CMP), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
-            throw std::runtime_error("async sobel: compute submit failed");
-    }
+        // Compute: wait g→c, Sobel, signal cfin.
+        {
+            vkResetCommandBuffer(compute_cb, 0);
+            VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(compute_cb, &bi);
+            sobel_.record_dispatch(compute_cb, /*strength=*/14.0f, /*threshold=*/0.001f);
+            vkEndCommandBuffer(compute_cb);
 
-    // Graphics overlay + present: wait compute, composite edges, present
-    {
-        vkResetCommandBuffer(overlay_cb, 0);
-        VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(overlay_cb, &bi);
+            VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+            cb.commandBuffer = compute_cb;
+            VkSemaphoreSubmitInfo wait{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            wait.semaphore = g2c;
+            wait.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            VkSemaphoreSubmitInfo sig{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            sig.semaphore = cfin;
+            sig.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+            submit.commandBufferInfoCount = 1;
+            submit.pCommandBufferInfos = &cb;
+            submit.waitSemaphoreInfoCount = 1;
+            submit.pWaitSemaphoreInfos = &wait;
+            submit.signalSemaphoreInfoCount = 1;
+            submit.pSignalSemaphoreInfos = &sig;
+            if (vkQueueSubmit2(queues_.get(QueueType::CMP), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+                throw std::runtime_error("async sobel: compute submit failed");
+        }
 
-        sobel_.record_edge_acquire_for_graphics(overlay_cb);
+        // Overlay: LOAD color, paint this layer's highlight. Present only on last layer.
+        {
+            vkResetCommandBuffer(overlay_cb, 0);
+            VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+            bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(overlay_cb, &bi);
 
-        // Color still COLOR_ATTACHMENT — load and draw edges (1× resolved swapchain)
-        VkRenderingAttachmentInfo color{};
-        color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        color.imageView = swapchain_targets_.color_view(image_index);
-        color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            sobel_.record_edge_acquire_for_graphics(overlay_cb);
 
-        VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea = { { 0, 0 }, { width, height } };
-        ri.layerCount = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments = &color;
-        vkCmdBeginRendering(overlay_cb, &ri);
+            VkRenderingAttachmentInfo color{};
+            color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            color.imageView = swapchain_targets_.color_view(image_index);
+            color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-        static const float kGoldHighlight[4]   = { 1.0f, 0.85f, 0.15f, 1.35f };
-        static const float kGreenHighlight[4]  = { 0.25f, 0.95f, 0.40f, 1.35f };
-        static const float kOrangeHighlight[4] = { 1.0f, 0.45f, 0.08f, 1.35f };
-        const float* highlight = kGoldHighlight;
-        if (req.mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)
-            highlight = kGreenHighlight;
-        else if (req.mode == SobelFrameRequest::Mode::IncompleteTraceOrange)
-            highlight = kOrangeHighlight;
-        sobel_.record_overlay(overlay_cb, width, height, highlight);
-        vkCmdEndRendering(overlay_cb);
+            VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea = { { 0, 0 }, { width, height } };
+            ri.layerCount = 1;
+            ri.colorAttachmentCount = 1;
+            ri.pColorAttachments = &color;
+            vkCmdBeginRendering(overlay_cb, &ri);
+            sobel_.record_overlay(overlay_cb, width, height, highlight_for(layer.mode));
+            vkCmdEndRendering(overlay_cb);
 
-        frame_recorder_.transition_color_to_present(overlay_cb, swapchainImages[image_index]);
-        vkEndCommandBuffer(overlay_cb);
+            if (last)
+                frame_recorder_.transition_color_to_present(overlay_cb, swapchainImages[image_index]);
+            vkEndCommandBuffer(overlay_cb);
 
-        const uint64_t signal_value = frame_presenter_.frame_counter() + 1;
-        VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-        cb.commandBuffer = overlay_cb;
-        VkSemaphoreSubmitInfo waits[1]{};
-        waits[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        waits[0].semaphore = cfin;
-        waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
-                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        VkSemaphoreSubmitInfo sigs[2]{};
-        sigs[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        sigs[0].semaphore = frame_sync_.timeline();
-        sigs[0].value = signal_value;
-        sigs[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        sigs[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        sigs[1].semaphore = render_finished;
-        sigs[1].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
-        submit.commandBufferInfoCount = 1;
-        submit.pCommandBufferInfos = &cb;
-        submit.waitSemaphoreInfoCount = 1;
-        submit.pWaitSemaphoreInfos = waits;
-        submit.signalSemaphoreInfoCount = 2;
-        submit.pSignalSemaphoreInfos = sigs;
-        if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, sobel_done_fence_) != VK_SUCCESS)
-            throw std::runtime_error("async sobel: overlay submit failed");
-        sobel_fence_in_flight_ = true;
+            VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+            cb.commandBuffer = overlay_cb;
+            VkSemaphoreSubmitInfo waits[1]{};
+            waits[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            waits[0].semaphore = cfin;
+            waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
 
-        VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-        present.waitSemaphoreCount = 1;
-        present.pWaitSemaphores = &render_finished;
-        present.swapchainCount = 1;
-        present.pSwapchains = &swapchain;
-        present.pImageIndices = &image_index;
-        vkQueuePresentKHR(queues_.get(QueueType::_3D), &present);
+            if (last)
+            {
+                const uint64_t signal_value = frame_presenter_.frame_counter() + 1;
+                VkSemaphoreSubmitInfo sigs[2]{};
+                sigs[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                sigs[0].semaphore = frame_sync_.timeline();
+                sigs[0].value = signal_value;
+                sigs[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+                sigs[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                sigs[1].semaphore = render_finished;
+                sigs[1].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+                VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &cb;
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = waits;
+                submit.signalSemaphoreInfoCount = 2;
+                submit.pSignalSemaphoreInfos = sigs;
+                if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, sobel_done_fence_) !=
+                    VK_SUCCESS)
+                    throw std::runtime_error("async sobel: overlay submit failed");
+                sobel_fence_in_flight_ = true;
 
-        frame_sync_.set_frame_timeline_value(frame_index, signal_value);
-        frame_presenter_.notify_submitted_and_presented();
+                VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+                present.waitSemaphoreCount = 1;
+                present.pWaitSemaphores = &render_finished;
+                present.swapchainCount = 1;
+                present.pSwapchains = &swapchain;
+                present.pImageIndices = &image_index;
+                vkQueuePresentKHR(queues_.get(QueueType::_3D), &present);
+
+                frame_sync_.set_frame_timeline_value(frame_index, signal_value);
+                frame_presenter_.notify_submitted_and_presented();
+            }
+            else
+            {
+                // Intermediate layer: fully retire g2c/cfin before next layer re-signals them
+                // (VUID-vkQueueSubmit2-semaphore-03868).
+                VkSubmitInfo2 submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &cb;
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = waits;
+                if (vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, sobel_done_fence_) !=
+                    VK_SUCCESS)
+                    throw std::runtime_error("async sobel: intermediate overlay submit failed");
+                vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
+                vkResetFences(device, 1, &sobel_done_fence_);
+                sobel_fence_in_flight_ = false;
+                // Ensure CMP queue finished waiting g2c / signaling cfin before reuse.
+                vkQueueWaitIdle(queues_.get(QueueType::CMP));
+                vkQueueWaitIdle(queues_.get(QueueType::_3D));
+            }
+        }
     }
 }
 
@@ -940,7 +1050,10 @@ void GraphicsSystem::resize_internal()
     vkDeviceWaitIdle(device);
 
     swapchainExtent = { width, height };
-    create_swapchain(device, surface, &swapchain, swapchainImages, swapchainImageFormat, swapchainExtent);
+    create_swapchain(device, physicalDevice, surface, &swapchain, swapchainImages,
+                     swapchainImageFormat, &swapchainExtent);
+    width = swapchainExtent.width;
+    height = swapchainExtent.height;
     create_swapchain_targets();
     {
         PickerResourcesCreateInfo pr{};
@@ -1044,6 +1157,9 @@ void GraphicsSystem::create_command_pool()
             throw std::runtime_error("Failed to allocate _3D main command buffers");
         if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].overlayCommandBuffer) != VK_SUCCESS)
             throw std::runtime_error("Failed to allocate _3D overlay command buffers");
+        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].layerDepthCommandBuffer) !=
+            VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate _3D layer-depth command buffers");
     }
 
     allocInfo.commandPool = computeCommandPool;
@@ -1084,12 +1200,13 @@ int GraphicsSystem::find_free_gpu_slot_unlocked() const
 
 void GraphicsSystem::submit_frame(const FrameSubmit& frame)
 {
-    publish_frame(frame, {}, {}, {});
+    publish_frame(frame, {}, {}, {}, {});
 }
 
 void GraphicsSystem::publish_frame(const FrameSubmit& frame,
                                  const std::vector<std::string>& pick_map,
                                  const std::vector<std::string>& confirmed_tip_hashes,
+                                 const std::vector<std::string>& pending_tip_hashes,
                                  const std::vector<std::string>& incomplete_hashes)
 {
     // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
@@ -1105,6 +1222,7 @@ void GraphicsSystem::publish_frame(const FrameSubmit& frame,
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
     slot.confirmed_tip_hashes = confirmed_tip_hashes;
+    slot.pending_tip_hashes = pending_tip_hashes;
     slot.incomplete_hashes = incomplete_hashes;
 
     pending_slot_ = write;
@@ -1130,6 +1248,7 @@ bool GraphicsSystem::apply_published_frame()
 
     pick_id_to_hash_ = slot.pick_map;
     sobel_tip_hashes_ = slot.confirmed_tip_hashes;
+    sobel_pending_hashes_ = slot.pending_tip_hashes;
     sobel_incomplete_hashes_ = slot.incomplete_hashes;
     gpu_frame_seq_ = slot.client_seq;
     return true;
@@ -1292,6 +1411,7 @@ void GraphicsSystem::cleanup()
         inFlightFrames[i].commandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].computeCommandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].overlayCommandBuffer = VK_NULL_HANDLE;
+        inFlightFrames[i].layerDepthCommandBuffer = VK_NULL_HANDLE;
     }
 
     picker_.destroy(device);

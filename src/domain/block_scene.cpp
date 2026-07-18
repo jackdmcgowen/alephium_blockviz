@@ -9,6 +9,7 @@ BlockScene::BlockScene()
         confirmed_height_[i] = -1;
         confirmed_hash_[i].clear();
         frontier_valid_[i] = false;
+        pending_hash_[i].clear();
     }
 }
 
@@ -88,12 +89,59 @@ void BlockScene::mark_confirmed(const NodeId& hash)
     mark_confirmed_unlocked_(hash);
 }
 
-void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height)
+void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height, bool chain_walk)
 {
     if (hash.empty())
         return;
     std::lock_guard<std::mutex> lock(mu_);
-    mark_confirmed_unlocked_(hash, lane, height);
+    mark_confirmed_unlocked_(hash, lane, height, chain_walk);
+}
+
+void BlockScene::set_frontier_walk(uint32_t lane, std::vector<NodeId> path_old_to_new)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    frontier_walk_[lane] = std::move(path_old_to_new);
+}
+
+std::vector<NodeId> BlockScene::frontier_walk_locked(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return {};
+    return frontier_walk_[lane];
+}
+
+void BlockScene::clear_frontier_walk_locked(uint32_t lane)
+{
+    // Caller holds mu_.
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
+    frontier_walk_[lane].clear();
+}
+
+void BlockScene::set_pending_tip(uint32_t lane, const NodeId& hash)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    pending_hash_[lane] = hash;
+}
+
+void BlockScene::clear_pending_tip(uint32_t lane)
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    pending_hash_[lane].clear();
+}
+
+NodeId BlockScene::pending_tip_hash(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return {};
+    std::lock_guard<std::mutex> lock(mu_);
+    return pending_hash_[lane];
 }
 
 int BlockScene::confirmed_height(uint32_t lane) const
@@ -112,6 +160,14 @@ NodeId BlockScene::confirmed_tip_hash(uint32_t lane) const
     return confirmed_hash_[lane];
 }
 
+bool BlockScene::frontier_valid(uint32_t lane) const
+{
+    if (lane >= static_cast<uint32_t>(kLaneCount))
+        return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    return frontier_valid_[lane];
+}
+
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
 {
     return is_confirmed_unlocked_(hash);
@@ -125,6 +181,18 @@ std::vector<NodeId> BlockScene::confirmed_frontier_ids_locked() const
     {
         if (!confirmed_hash_[i].empty())
             out.push_back(confirmed_hash_[i]);
+    }
+    return out;
+}
+
+std::vector<NodeId> BlockScene::pending_tip_ids_locked() const
+{
+    std::vector<NodeId> out;
+    out.reserve(kLaneCount);
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (!pending_hash_[i].empty())
+            out.push_back(pending_hash_[i]);
     }
     return out;
 }
@@ -155,21 +223,46 @@ void BlockScene::mark_confirmed_unlocked_(const NodeId& hash)
     }
 }
 
-void BlockScene::mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int height)
+void BlockScene::mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int height,
+                                          bool chain_walk)
 {
     if (hash.empty())
         return;
+    // Always record bag membership (solid cubes / free-main labels).
     confirmed_.insert(hash);
-    if (lane >= static_cast<uint32_t>(kLaneCount))
+    if (lane >= static_cast<uint32_t>(kLaneCount) || height < 0)
         return;
 
-    frontier_valid_[lane] = true;
-    // Highest confirmed live block on this lane is the tip frontier for Sobel/HUD.
-    if (height > confirmed_height_[lane] || confirmed_hash_[lane].empty())
+    // Sequential frontier: first confirm sets H_c; later H_c+1 (or chain_walk jump).
+    if (!frontier_valid_[lane])
+    {
+        frontier_valid_[lane] = true;
+        confirmed_height_[lane] = height;
+        confirmed_hash_[lane] = hash;
+        if (pending_hash_[lane] == hash)
+            pending_hash_[lane].clear();
+        return;
+    }
+
+    if (height == confirmed_height_[lane])
+    {
+        confirmed_hash_[lane] = hash;
+        if (pending_hash_[lane] == hash)
+            pending_hash_[lane].clear();
+        return;
+    }
+
+    if (height == confirmed_height_[lane] + 1 ||
+        (chain_walk && height > confirmed_height_[lane]))
     {
         confirmed_height_[lane] = height;
         confirmed_hash_[lane] = hash;
+        if (pending_hash_[lane] == hash)
+            pending_hash_[lane].clear();
+        return;
     }
+
+    // height < H_c or height > H_c+1 without chain_walk: bag only.
 }
 
 void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
@@ -180,6 +273,8 @@ void BlockScene::erase_confirmed_unlocked_(const NodeId& hash)
 
     for (int i = 0; i < kLaneCount; ++i)
     {
+        if (pending_hash_[i] == hash)
+            pending_hash_[i].clear();
         if (confirmed_hash_[i] == hash)
             refresh_frontier_lane_unlocked_(static_cast<uint32_t>(i));
     }

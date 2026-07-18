@@ -45,13 +45,15 @@ uint32_t find_device_memory_type(
     VkMemoryPropertyFlags properties);
 
   //swapchain.cpp
+// extent is in/out: clamped to surface capabilities on return.
 void create_swapchain(
     VkDevice device,
+    VkPhysicalDevice physical_device,
     VkSurfaceKHR surface,
     VkSwapchainKHR* swapchain,
     std::vector<VkImage>& swapchainImages,
     VkFormat format,
-    VkExtent2D extent);
+    VkExtent2D* extent);
 void destroy_swapchain(VkDevice device, VkSwapchainKHR swapchain);
 
   //buffer.cpp

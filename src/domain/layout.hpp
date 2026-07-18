@@ -1,7 +1,8 @@
 #pragma once
 
 // Polar layout for multi-lane block cubes. No Vulkan / cJSON.
-// Source of truth: GraphNode list from BlockGraph (PR9).
+// Z axis is a shared wall-clock timeline (block timestamps), not height index.
+// Heights may diverge across shards — that is expected for a DAG.
 #include "domain/block_graph.hpp"
 
 #include <cstdint>
@@ -13,14 +14,16 @@
 
 struct LayoutParams
 {
-    float meters_per_height = 8.0f;
-    float base_radius       = 20.0f;
-    uint32_t lane_count     = 16;
+    // World units per second of block timestamp (≈1 keeps ~8 m per 8 s block period).
+    float    meters_per_second  = 1.0f;
+    float    base_radius        = 20.0f;
+    uint32_t lane_count         = 16;
+    // Shared timeline origin (ms). Presenter sets once per session / frame anchor.
+    int64_t  timeline_origin_ms = 0;
 };
 
 struct LanePalette
 {
-    // 16 shard colors (matches historical SHARD_COLORS)
     glm::vec3 colors[16]{};
 
     static LanePalette default_alephium();
@@ -32,6 +35,7 @@ struct PlacedBlock
     std::string hash;
     uint8_t     lane = 0;
     int         height = 0;
+    int64_t     timestamp_ms = 0;
     glm::vec3   pos{ 0.0f };
     glm::vec3   color{ 1.0f };
 };
@@ -43,19 +47,14 @@ struct LayoutResult
     std::unordered_map<std::string, uint8_t>   lanes;
 };
 
-// Session-local polar layout (origin height per lane like previous start_height[]).
+// Polar XY by lane; Z from timestamp relative to timeline_origin_ms.
 class PolarShardLayout
 {
 public:
     explicit PolarShardLayout(LanePalette palette = LanePalette::default_alephium());
 
-    // nodes: live GraphNode snapshot (any order; grouped by lane/height inside).
     LayoutResult build(const std::vector<GraphNode>& nodes, const LayoutParams& params);
-
-    void reset_origins();
 
 private:
     LanePalette palette_;
-    int origin_height_by_lane_[16]{};
-    bool origin_set_[16]{};
 };

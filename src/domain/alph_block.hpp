@@ -12,6 +12,12 @@
 // Initial poll / camera Z lookback (seconds).
 #define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * 60 )
 
+// Fallback genesis / chain-start if height-0 block fetch fails.
+// Docs: genesis block ts themed 2009-01-03; mainnet launch 2021-11-08.
+// Prefer API-resolved timestamp from height 0 when available.
+#define ALPH_GENESIS_TIMESTAMP_MS_FALLBACK  ( 1230940800000LL ) /* 2009-01-03 UTC */
+#define ALPH_MAINNET_LAUNCH_MS_FALLBACK     ( 1636329600000LL ) /* 2021-11-08 UTC */
+
 #define ALPH_NUM_GROUPS ( 4 )
 
 struct UTXO {

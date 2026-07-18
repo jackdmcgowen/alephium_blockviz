@@ -112,7 +112,11 @@ void BlockflowOverlay::draw()
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         if (rmb_down_over_scene_ && !rmb_dragged_)
-            engine_.clear_selection(); // clear_look_target: home look + pan origin
+        {
+            // Clear selection + home look/pan + reattach camera to live timeline Z.
+            engine_.clear_selection();
+            camera_.reattach_timeline();
+        }
         rmb_down_over_scene_ = false;
         rmb_dragged_ = false;
         rmb_drag_dist_px_ = 0.f;
@@ -400,9 +404,9 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled(
-            "Camera: wheel/arrows Z · LMB-drag look · short LMB pick · RMB-drag pan · short RMB reset");
+            "Camera: wheel/arrows Z (detaches timeline) · LMB look · short LMB pick · RMB pan · short RMB reattach live tip");
         ImGui::TextDisabled(
-            "Solid=main+deps · green=frontier tip · orange=missing dep · cyan=live tip · gold=select");
+            "Solid=main+deps · green=frontier tip + blockDeps · cyan=unconfirmed children of frontier · orange=missing deps · gold=select");
         {
             const char* pname = "Bootstrap";
             if (ui.trace_phase == 1) pname = "IdentifyTips";

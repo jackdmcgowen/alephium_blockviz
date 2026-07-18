@@ -1,6 +1,5 @@
 #include "engine/engine.hpp"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -50,33 +49,13 @@ public:
         return nullptr;
     }
 
-    void init_system(ISystem* system) override
-    {
-        if (!system || !owns_(system))
-        {
-            std::printf("[engine] init_system: unknown system\n");
-            return;
-        }
-        std::printf("[engine] init_system %s\n", system->name());
-        system->init();
-    }
-
-    void free_system(ISystem* system) override
-    {
-        if (!system || !owns_(system))
-            return;
-        std::printf("[engine] free_system %s\n", system->name());
-        system->stop();
-        system->free();
-    }
-
     void init_systems() override
     {
         for (ISystem* s : systems_)
         {
             if (s)
             {
-                std::printf("[engine] init_systems %s\n", s->name());
+                std::printf("[engine] init %s\n", s->name());
                 s->init();
             }
         }
@@ -201,11 +180,12 @@ public:
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
                        const std::vector<std::string>& confirmed_tip_hashes,
+                       const std::vector<std::string>& pending_tip_hashes,
                        const std::vector<std::string>& incomplete_hashes) override
     {
         if (graphics_)
             graphics_->publish_frame(frame, pick_map, confirmed_tip_hashes,
-                                     incomplete_hashes);
+                                     pending_tip_hashes, incomplete_hashes);
     }
 
     void init_platform(void* hInstance, void* hwnd) override
@@ -221,11 +201,6 @@ public:
     }
 
 private:
-    bool owns_(ISystem* system) const
-    {
-        return std::find(systems_.begin(), systems_.end(), system) != systems_.end();
-    }
-
     std::vector<ISystem*> systems_;
     IGraphicsSystem* graphics_ = nullptr;
     BlockScene* scene_ = nullptr;

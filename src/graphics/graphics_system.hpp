@@ -74,6 +74,7 @@ public:
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
                        const std::vector<std::string>& confirmed_tip_hashes,
+                       const std::vector<std::string>& pending_tip_hashes,
                        const std::vector<std::string>& incomplete_hashes) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
@@ -126,9 +127,10 @@ private:
 
     struct FramesInFlight
     {
-        VkCommandBuffer commandBuffer = VK_NULL_HANDLE; // main scene + pick + sel depth
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE; // main scene + pick + first sel depth
         VkCommandBuffer computeCommandBuffer = VK_NULL_HANDLE; // async Sobel CMP
-        VkCommandBuffer overlayCommandBuffer = VK_NULL_HANDLE; // edge overlay + present
+        VkCommandBuffer overlayCommandBuffer = VK_NULL_HANDLE; // edge overlay (+ present last)
+        VkCommandBuffer layerDepthCommandBuffer = VK_NULL_HANDLE; // extra Sobel layers depth
         bool            pendingPick = false;
         PickKind        pickKind = PickKind::None;
         std::vector<std::string> pick_map;
@@ -178,12 +180,22 @@ private:
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
 
-    // Mode + instance indices for async Sobel.
+    // Multi-layer async Sobel: each layer = depth redraw + compute + colored overlay.
+    // Layers paint additively (LOAD); gold is exclusive when selection is active.
     struct SobelFrameRequest
     {
-        enum class Mode { SelectionGold, ConfirmedTipsGreen, IncompleteTraceOrange } mode =
-            Mode::SelectionGold;
-        std::vector<uint32_t> instance_indices;
+        enum class Mode {
+            SelectionGold,
+            ConfirmedTipsGreen,
+            PendingTipCyan,
+            IncompleteTraceOrange
+        };
+        struct Layer
+        {
+            Mode mode = Mode::SelectionGold;
+            std::vector<uint32_t> instance_indices;
+        };
+        std::vector<Layer> layers;
     };
 
     void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
@@ -200,6 +212,7 @@ private:
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
         std::vector<std::string> confirmed_tip_hashes;
+        std::vector<std::string> pending_tip_hashes;
         std::vector<std::string> incomplete_hashes;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
@@ -214,6 +227,7 @@ private:
 
     // Loaded from GpuFrameSlot in apply_published_frame (paired with pick_id_to_hash_).
     std::vector<std::string> sobel_tip_hashes_;
+    std::vector<std::string> sobel_pending_hashes_;
     std::vector<std::string> sobel_incomplete_hashes_;
     // Kill-switch: gates tip/incomplete Sobel; selection gold always works. Default on.
     bool visualize_confirmed_tips_ = true;

@@ -21,11 +21,20 @@
 #endif
 
 static volatile bool keepRunning = true;
+static bool engine_stopped = false;
 static BlockScene scene;
 static CameraController camera;
 static IEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
 static ScenePresenter* scene_presenter = nullptr;
+
+static void stop_engine_once()
+{
+    if (engine_stopped || !engine)
+        return;
+    engine->stop();
+    engine_stopped = true;
+}
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -39,7 +48,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             engine->on_resize();
         break;
 
+    case WM_CLOSE:
+        // Stop render/network while HWND + surface are still valid, then destroy.
+        keepRunning = false;
+        stop_engine_once();
+        DestroyWindow(hwnd);
+        return 0;
+
     case WM_DESTROY:
+        keepRunning = false;
         PostQuitMessage(0);
         return 0;
     }
@@ -73,7 +90,15 @@ int main()
         return -1;
     }
 
-    // Product engine: register systems, configure, init/free polymorphically.
+    ConfigArray config_array = load_configs("config.json");
+    if (config_array.count == 0 || !config_array.configs[0].url)
+    {
+        printf("Failed to load config\n");
+        return -1;
+    }
+    printf("Using config url: %s\n", config_array.configs[0].url);
+
+    // One init path: configure + register all systems, then init_systems / start once.
     engine = create_engine();
 
     EngineCreateInfo create_info{};
@@ -84,32 +109,6 @@ int main()
     IGraphicsSystem* graphics = create_graphics_system();
     graphics->configure(create_info);
     engine->add_system(graphics);
-    engine->init_system(graphics);
-
-    overlay = new BlockflowOverlay(camera, *engine);
-    scene_presenter = new ScenePresenter(scene);
-
-    engine->set_scene(&scene);
-    engine->set_camera(&camera);
-    engine->set_frame_source(scene_presenter);
-    engine->set_ui_overlay(overlay);
-    engine->start();
-
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
-
-    ConfigArray config_array = load_configs("config.json");
-    if (config_array.count == 0 || !config_array.configs[0].url)
-    {
-        printf("Failed to load config\n");
-        engine->stop();
-        engine->free_systems();
-        destroy_engine(engine);
-        delete overlay;
-        return -1;
-    }
-
-    printf("Using config url: %s\n", config_array.configs[0].url);
 
     NetworkSystemConfig net_cfg;
     net_cfg.base_url = config_array.configs[0].url;
@@ -119,8 +118,20 @@ int main()
     INetworkSystem* network = create_network_system(scene, *engine);
     network->configure(net_cfg);
     engine->add_system(network);
-    engine->init_system(network);
-    engine->start(); // starts any systems not yet running (network)
+
+    engine->init_systems();
+
+    overlay = new BlockflowOverlay(camera, *engine);
+    scene_presenter = new ScenePresenter(scene);
+    engine->set_scene(&scene);
+    engine->set_camera(&camera);
+    engine->set_frame_source(scene_presenter);
+    engine->set_ui_overlay(overlay);
+
+    engine->start();
+
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
 
     MSG msg = { 0 };
     while (keepRunning)
@@ -134,12 +145,15 @@ int main()
         }
 
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+        {
             keepRunning = false;
+            stop_engine_once();
+        }
 
         Sleep(10);
     }
 
-    engine->stop();
+    stop_engine_once();
     engine->free_systems();
     destroy_engine(engine);
     engine = nullptr;

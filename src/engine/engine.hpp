@@ -40,7 +40,12 @@ struct FrameSourceOutput
     glm::vec3 look_target_pos{ 0.f };
     UiSnapshot ui{};
 
+    // Green Sobel: confirmed frontier tip H_c per lane (walk-anim display may lag).
     std::vector<std::string> confirmed_tip_hashes;
+    // Cyan Sobel: frontier children — unconfirmed height>H_c that deps a frontier tip.
+    // (API name historical; not limited to one pending hash per lane.)
+    std::vector<std::string> pending_tip_hashes;
+    // Orange Sobel: missing-dep incompletes (excluding green/cyan).
     std::vector<std::string> incomplete_hashes;
 };
 
@@ -105,6 +110,7 @@ public:
     virtual void publish_frame(const FrameSubmit& frame,
                                const std::vector<std::string>& pick_map,
                                const std::vector<std::string>& confirmed_tip_hashes,
+                               const std::vector<std::string>& pending_tip_hashes,
                                const std::vector<std::string>& incomplete_hashes) = 0;
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
@@ -124,12 +130,9 @@ public:
     virtual void add_system(ISystem* system) = 0;
     virtual ISystem* find_system(const char* name) const = 0;
 
-    // Polymorphic lifecycle — identical for every derived ISystem.
-    virtual void init_system(ISystem* system) = 0;
-    virtual void free_system(ISystem* system) = 0;
+    // Polymorphic lifecycle for all registered systems (registration order / reverse).
     virtual void init_systems() = 0;
     virtual void free_systems() = 0;
-
     virtual void start() = 0;
     virtual void stop() = 0;
 
@@ -156,6 +159,7 @@ public:
     virtual void publish_frame(const FrameSubmit& frame,
                                const std::vector<std::string>& pick_map,
                                const std::vector<std::string>& confirmed_tip_hashes,
+                               const std::vector<std::string>& pending_tip_hashes,
                                const std::vector<std::string>& incomplete_hashes) = 0;
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
