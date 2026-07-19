@@ -55,6 +55,10 @@ struct UiSnapshot
     int64_t     last_poll_ms          = 0;
     float       poll_interval_sec     = 8.f;
     int         net_switching         = 0;
+    // Timeline graph cache: 0 ok, 1 soft warn, 2 hard (may drop oldest blocks).
+    int         cache_pressure_level  = 0;
+    // 0 = Live mode, 1 = History mode (live tip build halted).
+    int         browse_mode           = 0;
 
     // Timeline segments (mirror BlockScene::TimeSegment).
     static constexpr int kMaxTimeSegments = 32;

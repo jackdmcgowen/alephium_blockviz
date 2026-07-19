@@ -643,102 +643,203 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const float scale = kDefaultBlockScale;
 
     // ------------------------------------------------------------------
-    // Hierarchical cull: at most the newest 4 segments, then frustum slabs
-    // → blocks. Hard bound keeps instance work in a fixed lookback range.
+    // Client-side sliding triple-buffer (immediate on camera Z). Does not wait
+    // for network HUD poll cadence. Network still only *fetches* the ring.
     // ------------------------------------------------------------------
-    // Draw only HUD segments (adapter publishes active triple-buffer ring ≤3).
-    constexpr int kMaxVisibleTimeSegments = 3;
-    const int nseg = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
-    const int n_eligible = std::min(nseg, kMaxVisibleTimeSegments);
+    constexpr int kRingSize = 3;
     const float eye_z = scene_.camera_scroll_z();
     const float R_cull = kLayoutBaseRadius * 1.35f;
+    const int64_t window_ms =
+        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     float seg_width_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * meters_per_second;
-    if (nseg > 0)
+
+    const int64_t now_ms =
+        static_cast<int64_t>(std::time(nullptr)) * 1000;
+    const int64_t genesis_ms = scene_.genesis_ms() > 0
+                                   ? scene_.genesis_ms()
+                                   : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const int G_live =
+        window_ms > 0 && now_ms > genesis_ms
+            ? static_cast<int>((now_ms - genesis_ms) / window_ms)
+            : 0;
+    const float live_z =
+        -static_cast<float>(now_ms - timeline_origin_ms) * 0.001f * meters_per_second;
+    const float older_sec = eye_z - live_z;
+    int cam_k = 0;
+    if (older_sec >= 1.f && window_ms > 0)
+        cam_k = static_cast<int>(older_sec / (static_cast<float>(window_ms) * 0.001f));
+    cam_k = std::clamp(cam_k, 0, std::max(0, G_live));
+
+    struct ClientSeg
     {
-        const int64_t span_ms =
-            std::max<int64_t>(1, hud.segments[0].to_ms - hud.segments[0].from_ms);
-        seg_width_z = static_cast<float>(span_ms) * 0.001f * meters_per_second;
+        int     k = 0;
+        int64_t from_ms = 0;
+        int64_t to_ms = 0;
+        float   z_new = 0.f;
+        float   z_old = 0.f;
+    };
+    ClientSeg client_ring[kRingSize]{};
+    int n_client = 0;
+    for (int d = 0; d < kRingSize; ++d)
+    {
+        const int k = cam_k + d;
+        if (k > G_live)
+            break;
+        const int G = std::max(0, G_live - k);
+        int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
+        int64_t to_ms = from_ms + window_ms;
+        if (k == 0 && now_ms < to_ms)
+            to_ms = std::max(from_ms + 1, now_ms);
+        if (to_ms <= from_ms)
+            to_ms = from_ms + 1;
+        ClientSeg& cs = client_ring[n_client];
+        cs.k = k;
+        cs.from_ms = from_ms;
+        cs.to_ms = to_ms;
+        const float z0 = ts_to_z(from_ms, timeline_origin_ms, meters_per_second);
+        const float z1 = ts_to_z(to_ms, timeline_origin_ms, meters_per_second);
+        cs.z_new = std::min(z0, z1);
+        cs.z_old = std::max(z0, z1);
+        ++n_client;
+    }
+    if (n_client > 0)
+        seg_width_z = std::max(1.f, client_ring[0].z_old - client_ring[0].z_new);
+
+    // Alpha fade: enter/leave sliding window.
+    const float now_fade = now_sec_();
+    float dt_fade = 1.f / 60.f;
+    if (last_seg_fade_sec_ >= 0.f)
+        dt_fade = std::clamp(now_fade - last_seg_fade_sec_, 0.f, 0.1f);
+    last_seg_fade_sec_ = now_fade;
+    std::unordered_set<int> want_k;
+    for (int i = 0; i < n_client; ++i)
+        want_k.insert(client_ring[i].k);
+    for (int k : want_k)
+    {
+        // Start partially visible so first frames show cubes (not blank until fade ends).
+        if (seg_fade_alpha_.find(k) == seg_fade_alpha_.end())
+            seg_fade_alpha_[k] = 0.45f;
+    }
+    for (auto it = seg_fade_alpha_.begin(); it != seg_fade_alpha_.end();)
+    {
+        const bool want = want_k.count(it->first) != 0;
+        const float target = want ? 1.f : 0.f;
+        const float rate = want ? (1.f / kSegFadeInSec) : (1.f / kSegFadeOutSec);
+        if (it->second < target)
+            it->second = std::min(target, it->second + dt_fade * rate);
+        else if (it->second > target)
+            it->second = std::max(target, it->second - dt_fade * rate);
+        if (!want && it->second <= 0.01f)
+            it = seg_fade_alpha_.erase(it);
+        else
+            ++it;
     }
 
-    bool seg_visible[BlockScene::kMaxTimeSegments]{};
+    auto fade_for_k = [&](int k) -> float {
+        auto it = seg_fade_alpha_.find(k);
+        return it != seg_fade_alpha_.end() ? it->second : 0.f;
+    };
+    // Merge HUD ring windows (authoritative after load) with client tip-relative ring.
+    struct TimeWin
+    {
+        int64_t from_ms = 0;
+        int64_t to_ms = 0;
+        int     k = -1;
+    };
+    TimeWin merged[8]{};
+    int n_merged = 0;
+    auto add_win = [&](int64_t from_ms, int64_t to_ms, int k) {
+        if (from_ms <= 0 && to_ms <= 0)
+            return;
+        if (to_ms <= from_ms)
+            return;
+        if (n_merged >= 8)
+            return;
+        merged[n_merged].from_ms = from_ms;
+        merged[n_merged].to_ms = to_ms;
+        merged[n_merged].k = k;
+        ++n_merged;
+    };
+    for (int i = 0; i < n_client; ++i)
+        add_win(client_ring[i].from_ms, client_ring[i].to_ms, client_ring[i].k);
+    const int n_hud = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
+    for (int i = 0; i < n_hud; ++i)
+    {
+        const auto& s = hud.segments[i];
+        add_win(s.from_ms, s.to_ms, s.index);
+    }
+
+    auto fade_for_ts = [&](int64_t ts_ms) -> float {
+        if (ts_ms <= 0)
+            return 1.f;
+        if (n_merged <= 0 && n_client <= 0)
+            return 1.f;
+        float best = 0.f;
+        for (int i = 0; i < n_merged; ++i)
+        {
+            if (ts_ms >= merged[i].from_ms && ts_ms < merged[i].to_ms)
+            {
+                const int k = merged[i].k;
+                const float f = (k >= 0) ? fade_for_k(k) : 1.f;
+                best = std::max(best, f > 0.01f ? f : 0.45f);
+            }
+        }
+        // Leaving segments still fading out.
+        for (const auto& kv : seg_fade_alpha_)
+        {
+            if (kv.second <= 0.01f)
+                continue;
+            const int k = kv.first;
+            if (k > G_live)
+                continue;
+            // Tip-relative window: k steps older than live tip segment.
+            const int64_t live_from =
+                genesis_ms + static_cast<int64_t>(std::max(0, G_live - k)) * window_ms;
+            // Bounds by lookback from tip, not group count.
+            int64_t from_ms = live_from;
+            int64_t to_ms = from_ms + window_ms;
+            if (k == 0)
+                to_ms = std::max(from_ms + 1, now_ms);
+            if (ts_ms >= from_ms && ts_ms < to_ms)
+                best = std::max(best, kv.second);
+        }
+        return best;
+    };
+
     float vis_z_lo = 0.f;
     float vis_z_hi = 0.f;
     bool  have_vis_z = false;
-    int   visible_seg_count = 0;
-
-    auto mark_vis_z = [&](float z0, float z1) {
-        const float lo = std::min(z0, z1);
-        const float hi = std::max(z0, z1);
+    for (int i = 0; i < n_client; ++i)
+    {
+        if (fade_for_k(client_ring[i].k) < 0.02f)
+            continue;
         if (!have_vis_z)
         {
-            vis_z_lo = lo;
-            vis_z_hi = hi;
+            vis_z_lo = client_ring[i].z_new;
+            vis_z_hi = client_ring[i].z_old;
             have_vis_z = true;
         }
         else
         {
-            vis_z_lo = std::min(vis_z_lo, lo);
-            vis_z_hi = std::max(vis_z_hi, hi);
-        }
-    };
-
-    if (n_eligible > 0)
-    {
-        // Index 0 = live (newest). Only i in [0, n_eligible) may draw.
-        for (int i = 0; i < n_eligible; ++i)
-        {
-            const auto& s = hud.segments[i];
-            if (s.from_ms <= 0 && s.to_ms <= 0)
-                continue;
-            const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
-            const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
-            const float z_lo   = std::min(z_from, z_to);
-            const float z_hi   = std::max(z_from, z_to);
-            const glm::vec3 center(0.f, 0.f, 0.5f * (z_lo + z_hi));
-            const glm::vec3 half(R_cull, R_cull, 0.5f * (z_hi - z_lo) + 2.f);
-            if (in.frustum && !in.frustum->intersects_aabb(center, half))
-                continue;
-            seg_visible[i] = true;
-            ++visible_seg_count;
-            mark_vis_z(z_lo, z_hi);
-        }
-        // Safety: if frustum culled all eligible, keep nearest among last 4.
-        if (visible_seg_count == 0)
-        {
-            int best = 0;
-            float best_d = 1e30f;
-            for (int i = 0; i < n_eligible; ++i)
-            {
-                const auto& s = hud.segments[i];
-                const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
-                const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
-                const float mid    = 0.5f * (z_from + z_to);
-                const float d      = std::abs(mid - eye_z);
-                if (d < best_d)
-                {
-                    best_d = d;
-                    best = i;
-                }
-            }
-            seg_visible[best] = true;
-            visible_seg_count = 1;
-            const auto& s = hud.segments[best];
-            mark_vis_z(ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second),
-                       ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second));
+            vis_z_lo = std::min(vis_z_lo, client_ring[i].z_new);
+            vis_z_hi = std::max(vis_z_hi, client_ring[i].z_old);
         }
     }
+    const float ring_z_pad = std::max(seg_width_z * 0.35f, 40.f);
+    (void)R_cull;
 
     auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
-        if (n_eligible <= 0)
-            return true; // no segment model yet → draw all (legacy path)
+        if (n_merged <= 0 && n_client <= 0)
+            return true;
         if (ts_ms <= 0)
             return true;
-        for (int i = 0; i < n_eligible; ++i)
+        if (fade_for_ts(ts_ms) > 0.02f)
+            return true;
+        // Z-span safety: placement time maps near eye ring even if ms bounds miss.
+        if (have_vis_z && ts_ms > 0)
         {
-            if (!seg_visible[i])
-                continue;
-            const auto& s = hud.segments[i];
-            if (ts_ms >= s.from_ms && ts_ms < s.to_ms)
+            const float z = ts_to_z(ts_ms, timeline_origin_ms, meters_per_second);
+            if (z >= vis_z_lo - ring_z_pad && z <= vis_z_hi + ring_z_pad)
                 return true;
         }
         return false;
@@ -776,6 +877,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
         if (placed.is_uncle || scene_.is_uncle_locked(placed.hash))
             alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
+        float seg_a = fade_for_ts(placed.timestamp_ms);
+        // If accepted by visibility (incl. Z-span safety) but fade map missed, still draw.
+        if (seg_a < 0.02f)
+            seg_a = 0.5f;
+        alpha *= seg_a;
+        if (alpha < 0.02f)
+            return false;
         out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
@@ -1075,54 +1183,41 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
         }
 
-        // Barrier planes at ring segment boundaries (same Z as minimap edges).
-        // Lighter dividers for all past edges in the ring; bold progressive plane =
-        // past edge of the segment containing the camera.
-        if (n_eligible > 0)
+        // Barrier planes from client ring (immediate on cam_k change) + fade alpha.
+        if (n_client > 0)
         {
             const float plane_half = kLayoutBaseRadius * 8.f;
             const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
-            const glm::vec4 kDivider(0.35f, 0.75f, 0.95f, 0.06f);
-            float past_zs[8]{};
-            int n_past = 0;
             float bold_z = 0.f;
             bool have_bold = false;
-            for (int i = 0; i < n_eligible; ++i)
+            for (int i = 0; i < n_client; ++i)
             {
-                const auto& s = hud.segments[i];
-                if (s.from_ms <= 0 && s.to_ms <= 0)
-                    continue;
-                const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
-                const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
-                const float past_z = std::max(z_from, z_to);
-                const float new_z  = std::min(z_from, z_to);
-                if (n_past < 8)
-                    past_zs[n_past++] = past_z;
-                // Camera inside this slab (newer ≤ eye ≤ older).
-                if (!have_bold && eye_z >= new_z - cross_eps && eye_z <= past_z + cross_eps)
+                if (eye_z >= client_ring[i].z_new - cross_eps &&
+                    eye_z <= client_ring[i].z_old + cross_eps)
                 {
-                    bold_z = past_z;
+                    bold_z = client_ring[i].z_old;
                     have_bold = true;
+                    break;
                 }
             }
-            if (!have_bold)
+            // Fading-out segments still draw planes until alpha ~0.
+            for (const auto& kv : seg_fade_alpha_)
             {
-                // Fallback: progressive oldest uncrossed past edge.
-                for (int i = 0; i < n_past; ++i)
-                {
-                    if (eye_z <= past_zs[i] + cross_eps)
-                    {
-                        bold_z = past_zs[i];
-                        have_bold = true;
-                        break;
-                    }
-                }
-            }
-            for (int i = 0; i < n_past; ++i)
-            {
-                const bool bold = have_bold && std::abs(past_zs[i] - bold_z) < 0.25f;
-                debug->add_z_plane_quad(past_zs[i], plane_half,
-                                       bold ? kBarrierPlaneColor : kDivider);
+                if (kv.second < 0.02f)
+                    continue;
+                const int k = kv.first;
+                if (k > G_live)
+                    continue;
+                const int G = std::max(0, G_live - k);
+                const int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
+                const float past_z =
+                    ts_to_z(from_ms, timeline_origin_ms, meters_per_second);
+                // from is older edge for window (higher Z when genesis < now).
+                const float z_edge = past_z; // past edge of segment k
+                const bool bold = have_bold && std::abs(z_edge - bold_z) < 0.25f;
+                glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
+                col.a *= kv.second;
+                debug->add_z_plane_quad(z_edge, plane_half, col);
             }
         }
     }
@@ -1239,6 +1334,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.last_poll_ms = hud.last_poll_ms;
         out.ui.poll_interval_sec = hud.poll_interval_sec;
         out.ui.net_switching = hud.switching;
+        out.ui.cache_pressure_level = hud.cache_pressure_level;
+        out.ui.browse_mode = hud.browse_mode;
         out.ui.timeline_origin_ms = timeline_origin_ms;
         out.ui.meters_per_second = meters_per_second;
         out.ui.segment_count =

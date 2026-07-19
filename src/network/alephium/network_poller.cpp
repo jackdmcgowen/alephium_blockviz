@@ -100,8 +100,9 @@ void NetworkPoller::thread_main()
         // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
-        // Retention: keep all history until process private memory ~2 GB (or soft node cap).
-        // No routine time-based wipe — segments stay cached for re-visit.
+        // Retention: keep all loaded segment blocks until hard memory pressure.
+        // Sliding ring only controls view/fetch; adapter may also prune at hard cap.
+        // Last-resort drop oldest nodes (~2 GB / node soft max) with a clear warning.
         {
             static constexpr size_t kMemCapBytes = 2ull * 1024 * 1024 * 1024;
             static constexpr size_t kSoftMaxNodes = 250000;
@@ -118,7 +119,6 @@ void NetworkPoller::thread_main()
             const bool over_nodes = nodes >= kSoftMaxNodes;
             if (over_mem || over_nodes)
             {
-                // Drop oldest non-frontier first; no min_ts (retain until mem pressure).
                 size_t cap = kSoftMaxNodes * 9 / 10;
                 if (over_mem && nodes > 1000)
                     cap = (std::min)(cap, nodes * 85 / 100);
@@ -126,7 +126,9 @@ void NetworkPoller::thread_main()
                     cap = (std::min)(cap, kSoftMaxNodes * 9 / 10);
                 const size_t removed = scene_.prune(/*min_timestamp_ms=*/0, cap);
                 if (removed > 0)
-                    std::printf("[net] prune removed=%zu (mem=%zu MB nodes=%zu -> cap %zu)\n",
+                    std::printf("[net] WARNING timeline cache full — pruned oldest %zu blocks "
+                                "(mem=%zu MB nodes=%zu -> cap %zu). "
+                                "Future: disk cache to keep history across runs.\n",
                                 removed, private_bytes / (1024 * 1024), nodes, cap);
             }
         }

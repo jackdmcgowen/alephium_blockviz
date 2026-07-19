@@ -72,6 +72,8 @@ public:
 
     void reset_stats();
     void clear_completed_intervals(); // domain switch / full reset
+    // Allow re-enqueue after HTTP ok but policy-side parse/admit failure.
+    void forget_completed_interval(int64_t from_ms);
 
     static constexpr size_t kMaxJobQueue = 256;
     static constexpr size_t kMaxResults = 512;

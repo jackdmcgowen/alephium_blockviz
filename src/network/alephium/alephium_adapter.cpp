@@ -15,6 +15,14 @@
 #include "domain/alph_block.hpp"
 #include "network/commands.h"
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 namespace
 {
 // Production: lifecycle/phase logs only. Set true for per-block / per-lane spam.
@@ -112,6 +120,7 @@ void AlephiumAdapter::reset_stats()
     live_poll_deferred_ = false;
     last_chunk_pump_ms_ = 0;
     last_segment_full_mask_ = 0;
+    cache_pressure_level_ = 0;
     publish_trace_status_();
     if (fetch_pool_)
     {
@@ -184,6 +193,9 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.stats_seed_q = static_cast<int>(seed_q_.size());
     hud.last_poll_ms = last_poll_wall_ms_;
     hud.poll_interval_sec = static_cast<float>(cfg_.poll_interval_ms) * 0.001f;
+    hud.cache_pressure_level = cache_pressure_level_;
+    // History when camera lookback k>=1 (live tip window outside sliding 3-slot view).
+    hud.browse_mode = (camera_lookback_index_() >= 1) ? 1 : 0;
 
     // Timeline segments: only the active triple-buffer ring (scrolling minimap).
     {
@@ -478,6 +490,7 @@ void AlephiumAdapter::on_start()
     genesis_resolved_ = false;
     genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     last_segment_full_mask_ = 0;
+    cache_pressure_level_ = 0;
     publish_trace_status_();
     std::printf("[adapter] on_start phase=BootstrapPoll (lookback window poll + time index)\n");
 }
@@ -524,18 +537,32 @@ int64_t AlephiumAdapter::camera_extra_lookback_ms_() const
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
     int64_t origin = scene_.timeline_origin_ms();
     const int64_t w = window_ms_();
+    if (w <= 0)
+        return 0;
     if (origin <= 0)
         origin = now_ms - w;
     const float live_z = -static_cast<float>(now_ms - origin) * 0.001f;
     const float older_delta_sec = z - live_z;
-    if (older_delta_sec < 1.f)
-        return 0;
-    int64_t extra = static_cast<int64_t>(older_delta_sec * 1000.f);
-    // Cap to triple-buffer runway: current lookback k + ring size windows.
+    int64_t eye_extra = 0;
+    if (older_delta_sec >= 1.f)
+        eye_extra = static_cast<int64_t>(older_delta_sec * 1000.f);
+    // Floor covers the full view/fetch ring older edge (cam_k + 2), not just the
+    // eye — otherwise height floors / time gates undershoot k+1/k+2.
     const int k = camera_lookback_index_();
-    const int64_t cap = static_cast<int64_t>(k + kSegmentRingSize) * w;
+    const int64_t ring_floor =
+        static_cast<int64_t>(k + kSegmentRingSize) * w;
+    int64_t extra = std::max(eye_extra, ring_floor);
+    // Soft cap: ring floor already includes pad; allow mid-segment eye beyond it.
+    const int64_t cap = static_cast<int64_t>(k + kSegmentRingSize + 1) * w;
     if (cap > 0 && extra > cap)
         extra = cap;
+    // Never unlock past genesis wall-clock span.
+    if (genesis_ms_ > 0 && now_ms > genesis_ms_)
+    {
+        const int64_t to_genesis = now_ms - genesis_ms_;
+        if (extra > to_genesis)
+            extra = to_genesis;
+    }
     return extra;
 }
 
@@ -1994,7 +2021,15 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
     if (window_index < 0 ||
         window_index >= static_cast<int>(lookback_windows_.size()))
         return false;
-    if (!is_active_segment_(window_index) && !(window_index == 0 && force_newest))
+    // Active ring, live tip force, or one-slot hysteresis prefetch beyond ring.
+    const int cam_k = camera_lookback_index_();
+    const int k_pref = effective_lookback_index_();
+    const bool prefetch_beyond =
+        !force_newest && k_pref > cam_k &&
+        window_index == cam_k + kSegmentRingSize &&
+        window_index <= max_lookback_index_();
+    if (!is_active_segment_(window_index) && !(window_index == 0 && force_newest) &&
+        !prefetch_beyond)
         return false;
     LookbackWindowSlot& slot = lookback_windows_[static_cast<size_t>(window_index)];
     if (slot.to_ms <= slot.from_ms)
@@ -2124,26 +2159,23 @@ int AlephiumAdapter::effective_lookback_index_() const
 
 void AlephiumAdapter::update_segment_ring_()
 {
-    // Current segment + 2 ahead (older): {k_eff, k_eff+1, k_eff+2}.
+    // View/fetch ring always follows camera: {cam_k, cam_k+1, cam_k+2}.
+    // Do NOT freeze to {0,1,2} until Steady/tip-ready — that blocked history
+    // past k2 during IdentifyTips/BfsTrace and left paging at k3+ empty.
+    // live_tip_pipeline_ready_ still gates tip seeds / live poll / BFS only.
+    // Do NOT base the ring on hysteresis-bumped k_eff — that drops live (k=0)
+    // while the eye is still in N. Prefetch uses effective_lookback_index_ in pump.
     // Sorted older → newer for HUD/minimap (descending k).
     const int max_k = max_lookback_index_();
-    int k = effective_lookback_index_();
-    k = std::clamp(k, 0, max_k);
+    int cam_k = camera_lookback_index_();
+    cam_k = std::clamp(cam_k, 0, max_k);
     active_ring_n_ = 0;
-
-    if (!live_tip_pipeline_ready_())
-    {
-        // Bootstrap: load 0,1,2 ASAP (two buffers ahead of live).
-        for (int idx = std::min(2, max_k); idx >= 0; --idx)
-            active_ring_[active_ring_n_++] = idx;
-        return;
-    }
 
     int tmp[3]{};
     int n = 0;
     for (int d = 0; d < kSegmentRingSize; ++d)
     {
-        const int idx = k + d;
+        const int idx = cam_k + d;
         if (idx > max_k)
             break;
         tmp[n++] = idx;
@@ -2213,7 +2245,8 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     resolve_genesis_ms_();
     update_segment_ring_();
     const int cam_k = camera_lookback_index_();
-    const int k_eff = effective_lookback_index_();
+    // Hysteresis only for fill priority / optional +1 beyond ring — not ring membership.
+    const int k_pref = effective_lookback_index_();
     const bool live_cam = (cam_k == 0);
     const bool tip_ready = live_tip_pipeline_ready_();
     int fetched = 0;
@@ -2221,8 +2254,12 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     auto try_win = [&](int wi, bool force_newest) -> bool {
         if (fetched >= max_chunks)
             return false;
+        // Allow force or active ring; also allow cam_k+3 when hysteresis wants early fill.
         if (!force_newest && !is_active_segment_(wi))
-            return false;
+        {
+            if (!(k_pref > cam_k && wi == cam_k + kSegmentRingSize && wi <= max_lookback_index_()))
+                return false;
+        }
         if (fetch_window_chunk_(wi, force_newest))
         {
             ++fetched;
@@ -2232,9 +2269,14 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     };
 
     auto fill_win = [&](int wi) {
-        if (!is_active_segment_(wi))
+        if (wi < 0)
             return;
         if (wi >= static_cast<int>(lookback_windows_.size()))
+            return;
+        const bool in_ring = is_active_segment_(wi);
+        const bool prefetch_beyond =
+            k_pref > cam_k && wi == cam_k + kSegmentRingSize && wi <= max_lookback_index_();
+        if (!in_ring && !prefetch_beyond)
             return;
         // Multiple enqueues per pump for ahead windows (pending blocks per-window).
         while (fetched < max_chunks && try_win(wi, false))
@@ -2242,19 +2284,28 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
         }
     };
 
-    // 1) Live newest refresh (tip only).
+    // Tip-backward load only (lookback k from live tip — never genesis-forward).
+    // Live mode: k=0 first, then k=1, k=2.
+    // History mode: camera window first, then older pad.
     if (live_cam && tip_ready && !lookback_windows_.empty() &&
         lookback_windows_[0].want_newest_refresh)
         try_win(0, /*force_newest=*/true);
 
-    // 2) Prefer 2 segments ahead (k_eff+1, k_eff+2) so user cannot outrun the buffer.
-    fill_win(k_eff + 1);
-    fill_win(k_eff + 2);
-    // 3) Current segment (and effective current if hysteresis bumped).
-    fill_win(k_eff);
-    if (cam_k != k_eff)
+    if (live_cam)
+    {
+        fill_win(0);
+        fill_win(1);
+        fill_win(2);
+    }
+    else
+    {
         fill_win(cam_k);
-    // 4) Any remaining ring members.
+        fill_win(cam_k + 1);
+        fill_win(cam_k + 2);
+    }
+    // Optional early fill of one older beyond ring when deep in current segment.
+    if (k_pref > cam_k)
+        fill_win(cam_k + kSegmentRingSize);
     for (int i = 0; i < active_ring_n_ && fetched < max_chunks; ++i)
         fill_win(active_ring_[i]);
 
@@ -2270,13 +2321,21 @@ void AlephiumAdapter::ensure_windows_for_camera_()
     const int k = camera_lookback_index_();
     if (k > 0)
         live_poll_deferred_ = true;
-    // Only ensure windows in the active triple-buffer ring.
+    // Active triple-buffer ring: camera segment + 2 older.
     for (int i = 0; i < active_ring_n_; ++i)
     {
         const int wi = active_ring_[i];
         if (wi == 0 && k > 0)
             continue; // no live rebuild while browsing history
         ensure_lookback_window_(wi, /*allow_live_poll=*/(k == 0));
+    }
+    // Hysteresis may pump cam_k+3 early — ensure bounds exist without adding to ring.
+    const int k_pref = effective_lookback_index_();
+    if (k_pref > k)
+    {
+        const int beyond = k + kSegmentRingSize;
+        if (beyond <= max_lookback_index_())
+            ensure_lookback_window_(beyond, /*allow_live_poll=*/false);
     }
 }
 
@@ -2422,12 +2481,15 @@ void AlephiumAdapter::drain_fetch_results_(int max_admits)
         {
             if (!r.ok || r.body.empty())
             {
+                // HTTP fail: pool did not mark completed — retry allowed.
                 on_interval_chunk_failed_(r.from_ms);
                 continue;
             }
             cJSON* obj = cJSON_ParseWithLength(r.body.c_str(), r.body.size());
             if (!obj)
             {
+                // HTTP ok but body unusable — forget completion so pump can retry.
+                fetch_pool_->io().forget_completed_interval(r.from_ms);
                 on_interval_chunk_failed_(r.from_ms);
                 continue;
             }
@@ -2733,55 +2795,62 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     replace_non_main_(seed);
 }
 
-void AlephiumAdapter::maybe_ring_retain_prune_()
+void AlephiumAdapter::maybe_memory_pressure_prune_()
 {
-    // Keep graph roughly sized to the triple-buffer ring so paging history does not
-    // accumulate until the 2 GB hard cap. Re-visit re-GETs cleared chunk keys.
-    if (phase_ != Phase::Steady || !live_tip_pipeline_ready_())
-        return;
-    update_segment_ring_();
-    if (active_ring_n_ <= 0)
+    // Sliding ring is view/fetch only — do NOT drop graph nodes when the camera
+    // leaves a segment. Blocks stay so revisiting redraws without re-GET.
+    // Last-resort prune only under hard memory pressure (poller also enforces ~2 GB).
+    // Soft pressure: set HUD warning only.
+    if (phase_ != Phase::Steady)
         return;
 
-    int64_t ring_oldest_from = 0;
-    bool have = false;
-    for (int i = 0; i < active_ring_n_; ++i)
+    static constexpr size_t kSoftMemBytes = 1536ull * 1024 * 1024; // 1.5 GB
+    static constexpr size_t kHardMemBytes = 2ull * 1024 * 1024 * 1024;
+    static constexpr size_t kSoftMaxNodes = 200000;
+    static constexpr size_t kHardMaxNodes = 250000;
+
+    size_t private_bytes = 0;
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
+                             sizeof(pmc)))
+        private_bytes = static_cast<size_t>(pmc.PrivateUsage);
+#endif
+    const size_t nodes = scene_.total_blocks();
+    const bool soft =
+        (private_bytes > 0 && private_bytes >= kSoftMemBytes) || nodes >= kSoftMaxNodes;
+    const bool hard =
+        (private_bytes > 0 && private_bytes >= kHardMemBytes) || nodes >= kHardMaxNodes;
+
+    cache_pressure_level_ = hard ? 2 : (soft ? 1 : 0);
+    if (cache_pressure_level_ == 0)
+        return;
+
+    static int64_t last_warn_ms = 0;
+    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    if (now - last_warn_ms > 30000)
     {
-        const int wi = active_ring_[i];
-        if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
-            continue;
-        const LookbackWindowSlot& w = lookback_windows_[static_cast<size_t>(wi)];
-        if (w.from_ms <= 0)
-            continue;
-        if (!have || w.from_ms < ring_oldest_from)
-        {
-            ring_oldest_from = w.from_ms;
-            have = true;
-        }
+        last_warn_ms = now;
+        std::printf("[adapter] timeline cache pressure level=%d mem=%zu MB nodes=%zu "
+                    "(retain all loaded segs until hard cap; future: disk cache)\n",
+                    cache_pressure_level_, private_bytes / (1024 * 1024), nodes);
     }
-    if (!have || ring_oldest_from <= 0)
+
+    if (!hard)
         return;
 
-    // Keep one segment older than the ring as a soft pad for hysteresis re-entry.
-    const int64_t min_ts = ring_oldest_from - window_ms_();
-    if (min_ts <= 0)
-        return;
-
-    const size_t removed = scene_.prune(min_ts, /*max_nodes=*/0);
+    // Last resort: drop oldest nodes only (not ring-based discard).
+    size_t cap = kHardMaxNodes * 9 / 10;
+    if (private_bytes >= kHardMemBytes && nodes > 1000)
+        cap = (std::min)(cap, nodes * 85 / 100);
+    const size_t removed = scene_.prune(/*min_timestamp_ms=*/0, cap);
     if (removed > 0)
     {
         stats_removed_ += static_cast<int>(removed);
-        // Allow re-fetch of dropped time range when user pages back.
-        for (auto it = history_slots_fetched_.begin(); it != history_slots_fetched_.end();)
-        {
-            if (*it > 0 && *it < min_ts)
-                it = history_slots_fetched_.erase(it);
-            else
-                ++it;
-        }
-        adapter_vlog("[adapter] ring retain prune removed=%zu min_ts=%lld ring_from=%lld\n",
-                     removed, static_cast<long long>(min_ts),
-                     static_cast<long long>(ring_oldest_from));
+        std::printf("[adapter] memory pressure prune removed=%zu (cap=%zu) — "
+                    "some history dropped; re-visit may re-fetch\n",
+                    removed, cap);
     }
 }
 
@@ -2831,16 +2900,21 @@ void AlephiumAdapter::maybe_refill_selection_detail()
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
     maybe_refill_selection_detail();
-    // Prefer confirm-dep fills so the gate can clear and progress resumes.
-    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+    // History / deep ring: prefer applying interval chunks so pending_from_ms clears.
+    // Hash admits stay on the smaller budget so confirm work does not starve timeline.
+    const int cam_k_early = camera_lookback_index_();
+    const int interval_budget =
+        (cam_k_early >= 1) ? kIntervalAdmitsPerDrain : kMaxFetchAdmitsPerDrain;
+    drain_fetch_results_(std::max(interval_budget, kMaxFetchAdmitsPerDrain));
     recheck_confirm_fill_parents_();
 
-    // Track camera lookback continuously so return-to-live can resync without
-    // waiting for the next poll_once tick.
+    // History mode: cam_k >= 1 (live tip window k0 outside sliding view).
+    // Live mode: cam_k == 0. Track continuously for resync + pump boost.
     const int cam_k = camera_lookback_index_();
     const int prev_k = last_cam_lookback_k_;
     last_cam_lookback_k_ = cam_k;
-    const bool live_cam = (cam_k == 0);
+    const bool live_cam = (cam_k == 0); // Live in sliding window
+    const bool history_mode = !live_cam;
     if (live_cam && prev_k > 0 && phase_ == Phase::Steady)
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
@@ -2850,25 +2924,33 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         else
             adapter_vlog("[adapter] return to live (drain): skip force poll (interval)\n");
     }
-    else if (!live_cam)
+    else if (history_mode)
     {
         live_poll_deferred_ = true;
     }
 
-    // Progressive timeline fill (rate-limited). Higher budget during dual bootstrap
-    // and pre-tip finish of windows 0–1; never opens history ≥2 until tip ready.
+    // Progressive timeline fill (rate-limited). Tip-backward: never genesis-first.
+    // View/fetch ring follows cam_k even before tip pipeline is ready.
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-        if (last_chunk_pump_ms_ == 0 ||
+        const bool cam_stepped = (cam_k != prev_k);
+        if (last_chunk_pump_ms_ == 0 || cam_stepped ||
             (now - last_chunk_pump_ms_) >= kChunkPumpIntervalMs)
         {
             ensure_windows_for_camera_();
             int budget = kAheadChunksPerDrain;
             if (phase_ == Phase::BootstrapPoll)
                 budget = kBootstrapChunksPerDrain;
+            else if (history_mode || cam_k >= 1)
+                budget = std::max(kAheadChunksPerDrain, kMaxChunksPerPoll * 2);
             else if (!live_tip_pipeline_ready_())
                 budget = std::max(kPreTipChunksPerDrain, kAheadChunksPerDrain);
+            if (cam_stepped)
+                budget = std::max(budget, kMaxChunksPerPoll * 2);
             pump_timeline_chunks_(budget);
+            // Apply interval results immediately so next pump can advance cursors.
+            if (history_mode || cam_stepped)
+                drain_fetch_results_(kIntervalAdmitsPerDrain);
         }
     }
 
@@ -2888,11 +2970,11 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     // but Steady should not expand tip seeds until fills clear (no new discovery).
     const bool fills_block_steady_seeds =
         phase_ == Phase::Steady && confirm_fills_pending_();
-    // Beyond live segment: drain existing seeds/uncles only — no new live discovery.
+    // History mode (live k0 outside sliding window): no new live tip discovery.
 
     if (phase_ == Phase::IdentifyTips || phase_ == Phase::BootstrapPoll ||
-        (phase_ == Phase::Steady && !fills_block_steady_seeds) ||
-        phase_ == Phase::BfsTrace)
+        (phase_ == Phase::Steady && !fills_block_steady_seeds && live_cam) ||
+        (phase_ == Phase::BfsTrace && live_cam))
     {
         if (live_cam && seed_q_.empty() && tip_pending_confirmation_() &&
             !fills_block_steady_seeds)
@@ -2926,6 +3008,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
         {
             // IdentifyTips must finish is_main even if fills start mid-phase.
             if (fills_block_steady_seeds)
+                break;
+            // History mode: do not confirm new live tip seeds (drain only if any left).
+            if (history_mode && phase_ == Phase::Steady)
                 break;
             SeedJob job;
             if (!pop_seed_round_robin_(job))
@@ -3019,26 +3104,29 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         return;
     }
 
-    std::printf("\n[adapter] Polling lookback windows (phase=%d now=%lld cam_k=%d)\n",
-                static_cast<int>(phase_), static_cast<long long>(now), cam_k);
+    std::printf("\n[adapter] Polling lookback windows (phase=%d now=%lld cam_k=%d mode=%s)\n",
+                static_cast<int>(phase_), static_cast<long long>(now), cam_k,
+                live_cam ? "Live" : "History");
 
-    // Beyond live segment: history windows only — no live chain rebuild / tip seed.
+    // History mode: live tip outside sliding window — halt live tip/API; only ring history.
     if (!live_cam)
     {
         live_poll_deferred_ = true;
         ensure_windows_for_camera_();
-        pump_timeline_chunks_(kMaxChunksPerPoll);
-        drain_fetch_results_(kMaxFetchAdmitsPerDrain);
+        // Tip-backward fill around camera only (cam_k..cam_k+2).
+        pump_timeline_chunks_(std::max(kMaxChunksPerPoll, kMaxChunksPerPoll * 2));
+        // High interval admit budget so multi-window history applies promptly.
+        drain_fetch_results_(kHistoryIntervalAdmitsPerPoll);
 
         const size_t fetch_pend = fetch_pool_ ? fetch_pool_->pending_jobs() : 0;
         const size_t fetch_inflight = fetch_pool_ ? fetch_pool_->in_flight() : 0;
-        adapter_vlog("[adapter] history-only poll cam_k=%d windows=%zu fetch_q=%zu "
-                    "inflight=%zu (live deferred)\n",
+        adapter_vlog("[adapter] History mode cam_k=%d windows=%zu fetch_q=%zu "
+                    "inflight=%zu (live tip halted)\n",
                     cam_k, lookback_windows_.size(), fetch_pend, fetch_inflight);
 
         last_poll_ts = now;
         prune_detail_store();
-        maybe_ring_retain_prune_();
+        maybe_memory_pressure_prune_();
         maybe_refill_selection_detail();
         return;
     }
@@ -3115,6 +3203,6 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         advance_sequential_tips_();
 
     prune_detail_store();
-    maybe_ring_retain_prune_();
+    maybe_memory_pressure_prune_();
     maybe_refill_selection_detail();
 }

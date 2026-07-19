@@ -27,7 +27,7 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
-| Timeline minimap (overlay) | **3-bin histogram** of the triple-buffer ring (older→newer); bar height ∝ load/density; `#G` labels wrap as the ring slides; Live / scrub / page; edge hold auto-pages (no 3-segment history cap — lookback continues to genesis) |
+| Timeline minimap (overlay) | **Full-width sliding 3-window histogram** (newer flush right); Z from genesis-aligned segment bounds; labels = **segment number** (`#G_seg`); Live prefix on tip segment when on-track; page steps one window; draw ring from camera Z with **alpha fade** |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |

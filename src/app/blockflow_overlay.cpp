@@ -336,12 +336,13 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
                                      static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     const float mps = ui.meters_per_second > 1e-6f ? ui.meters_per_second : 1.f;
 
-    // Triple-buffer ring as 3 histogram bins (older → newer, left → right).
-    // Segment #G labels wrap as the ring slides — always at most 3 bins.
+    // Sliding triple-buffer: always 3 bins for cam_k..cam_k+2.
+    // Labels use genesis-aligned segment number (G_seg), not lookback k / group G.
+    // World Z matches presenter/adapter genesis-aligned windows so bars align cubes/planes.
     struct Slot
     {
         int     lookback_k = -1;
-        int     global_g = -1;
+        int     segment_id = -1; // G_seg = G_live - k (genesis-aligned)
         float   z_new = 0.f;
         float   z_old = 0.f;
         float   load = 0.f;
@@ -350,75 +351,171 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         bool    full = false;
         bool    valid = false;
     };
-    Slot slots[3]{};
-    int nslot = 0;
-    for (int i = 0; i < ui.segment_count && nslot < 3; ++i)
+
+    const float seg_step_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
+    const float live_tip_z = camera_.live_scroll_z();
+    const float caret_z = camera_.scroll_z();
+    const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    const int64_t window_ms =
+        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const int64_t genesis_ms = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const int G_live =
+        window_ms > 0 && now_ms > genesis_ms
+            ? static_cast<int>((now_ms - genesis_ms) / window_ms)
+            : 0;
+    auto ts_to_z = [&](int64_t ts_ms) -> float {
+        return -static_cast<float>(ts_ms - origin) * 0.001f * mps;
+    };
+    // cam_k from camera vs live tip (same idea as adapter lookback index).
+    const float older_sec = caret_z - live_tip_z;
+    int cam_k = 0;
+    if (older_sec >= 1.f && window_ms > 0)
+        cam_k = static_cast<int>(older_sec / (static_cast<float>(window_ms) * 0.001f));
+    if (cam_k < 0)
+        cam_k = 0;
+
+    // Map HUD load + optional authoritative ms bounds / segment ids by lookback k.
+    float hud_load[64]{};
+    int hud_blocks[64]{};
+    int hud_exp[64]{};
+    int hud_full[64]{};
+    int hud_gseg[64]{};
+    int64_t hud_from[64]{};
+    int64_t hud_to[64]{};
+    for (int i = 0; i < 64; ++i)
+    {
+        hud_load[i] = -1.f;
+        hud_from[i] = 0;
+        hud_to[i] = 0;
+        hud_gseg[i] = -1;
+    }
+    for (int i = 0; i < ui.segment_count && i < UiSnapshot::kMaxTimeSegments; ++i)
     {
         const auto& s = ui.segments[i];
-        if (s.from_ms <= 0 && s.to_ms <= 0)
+        if (s.index < 0 || s.index >= 64)
             continue;
-        const float z_from = ts_to_z_(s.from_ms, origin, mps);
-        const float z_to = ts_to_z_(s.to_ms, origin, mps);
+        hud_load[s.index] = s.load_ratio;
+        hud_blocks[s.index] = s.block_count;
+        hud_exp[s.index] = s.expected_blocks;
+        hud_full[s.index] = s.confirmed_full;
+        hud_gseg[s.index] = s.global_index;
+        if (s.to_ms > s.from_ms)
+        {
+            hud_from[s.index] = s.from_ms;
+            hud_to[s.index] = s.to_ms;
+        }
+    }
+
+    Slot slots[3]{};
+    int nslot = 0;
+    // Build older → newer for left→right: k+2, k+1, k (descending lookback).
+    for (int d = 2; d >= 0 && nslot < 3; --d)
+    {
+        const int k = cam_k + d;
         Slot sl;
-        sl.lookback_k = s.index;
-        sl.global_g = s.global_index;
-        sl.z_new = std::min(z_from, z_to);
-        sl.z_old = std::max(z_from, z_to);
-        sl.load = s.load_ratio;
-        sl.block_count = s.block_count;
-        sl.expected = s.expected_blocks;
-        sl.full = s.confirmed_full != 0;
+        sl.lookback_k = k;
+        // Genesis-aligned bounds (same as scene_presenter client_ring / adapter).
+        int64_t from_ms = 0;
+        int64_t to_ms = 0;
+        const int G_seg = std::max(0, G_live - k);
+        sl.segment_id = (k < 64 && hud_gseg[k] >= 0) ? hud_gseg[k] : G_seg;
+        if (k < 64 && hud_to[k] > hud_from[k])
+        {
+            from_ms = hud_from[k];
+            to_ms = hud_to[k];
+        }
+        else
+        {
+            from_ms = genesis_ms + static_cast<int64_t>(G_seg) * window_ms;
+            to_ms = from_ms + window_ms;
+            if (k == 0 && now_ms < to_ms)
+                to_ms = std::max(from_ms + 1, now_ms);
+            if (to_ms <= from_ms)
+                to_ms = from_ms + 1;
+        }
+        const float z0 = ts_to_z(from_ms);
+        const float z1 = ts_to_z(to_ms);
+        sl.z_new = std::min(z0, z1);
+        sl.z_old = std::max(z0, z1);
+        // Live tip edge may be slightly ahead of open segment to_ms; keep k0 touching tip.
+        if (k == 0)
+            sl.z_new = std::min(sl.z_new, live_tip_z);
+        if (k < 64 && hud_load[k] >= 0.f)
+        {
+            sl.load = hud_load[k];
+            sl.block_count = hud_blocks[k];
+            sl.expected = hud_exp[k];
+            sl.full = hud_full[k] != 0;
+        }
+        else
+        {
+            sl.load = 0.05f;
+            sl.block_count = 0;
+            sl.expected = 0;
+            sl.full = false;
+        }
         sl.valid = true;
         slots[nslot++] = sl;
     }
+    // Ensure older-left order.
     std::sort(slots, slots + nslot, [](const Slot& a, const Slot& b) {
-        return a.z_old > b.z_old; // older left
+        return a.z_old > b.z_old;
     });
 
-    float z_hi = camera_.scroll_z() + 50.f;
-    float z_lo = camera_.scroll_z() - 50.f;
+    // Full-width triple strip: three ring windows span the entire track
+    // (older left → newer flush right). Strip slides as cam_k / tip move.
+    float z_lo = 0.f;
+    float z_hi = 0.f;
     if (nslot > 0)
     {
+        z_lo = slots[0].z_new;
         z_hi = slots[0].z_old;
-        z_lo = slots[nslot - 1].z_new;
-        for (int i = 0; i < nslot; ++i)
+        for (int i = 1; i < nslot; ++i)
         {
-            z_hi = std::max(z_hi, slots[i].z_old);
             z_lo = std::min(z_lo, slots[i].z_new);
+            z_hi = std::max(z_hi, slots[i].z_old);
         }
     }
-    if (z_hi - z_lo < 1.f)
+    else
     {
-        z_hi = camera_.scroll_z() + 100.f;
-        z_lo = camera_.scroll_z() - 20.f;
+        z_lo = caret_z - seg_step_z;
+        z_hi = caret_z + 2.f * seg_step_z;
+    }
+    // Tiny pad so edge strokes are not clipped (bins still fill the bar).
+    {
+        const float pad = std::max(1.f, (z_hi - z_lo) * 0.01f);
+        z_lo -= pad;
+        z_hi += pad;
     }
     const float z_span = std::max(1.f, z_hi - z_lo);
-    // Prefer actual segment width when available (genesis-aligned may differ slightly).
-    float seg_step_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
-    if (nslot > 0)
-    {
-        float wsum = 0.f;
-        int nw = 0;
-        for (int i = 0; i < nslot; ++i)
-        {
-            const float w = slots[i].z_old - slots[i].z_new;
-            if (w > 1.f)
-            {
-                wsum += w;
-                ++nw;
-            }
-        }
-        if (nw > 0)
-            seg_step_z = wsum / static_cast<float>(nw);
-    }
 
-    // True chain end = oldest ring lookback near genesis (no further page older).
-    // lookback k grows with age; if oldest bin has huge k and low load we still allow page
-    // until camera Z hits limits (frame_loop genesis). Soft signal: no newer empty slots.
-    const bool at_live =
-        nslot > 0 && slots[nslot - 1].lookback_k == 0;
+    // Live bin is "in sight" only when k==0 intersects the sliding track.
+    auto live_slot_index = [&]() -> int {
+        for (int i = 0; i < nslot; ++i)
+            if (slots[i].valid && slots[i].lookback_k == 0)
+                return i;
+        return -1;
+    };
+    const int live_slot_i = live_slot_index();
+    const bool live_in_histogram = (live_slot_i >= 0);
+
+    auto camera_in_live_band = [&]() -> bool {
+        if (live_slot_i < 0)
+            return false;
+        const float z = camera_.scroll_z();
+        const Slot& L = slots[live_slot_i];
+        return z >= L.z_new - 0.5f && z <= L.z_old + 0.5f;
+    };
+    auto camera_near_live_tip = [&]() -> bool {
+        if (live_slot_i < 0)
+            return false;
+        const Slot& L = slots[live_slot_i];
+        const float span = std::max(1.f, L.z_old - L.z_new);
+        return camera_.scroll_z() <= L.z_new + 0.25f * span;
+    };
 
     auto z_to_x = [&](float z) -> float {
+        // older (high Z) → left; newer (low Z) → right
         return (z_hi - z) / z_span;
     };
     auto x_to_z = [&](float t) -> float {
@@ -442,27 +539,18 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         }
         return best;
     };
-    // Page one segment with immediate Z snap so ring k advances without lerp lag.
-    // Caret lands near right (begin) of the predicted new 3-bin window.
+    // Page one segment: step eye Z so cam_k advances; strip reflows full-width.
     auto page_older_one = [&]() {
-        const float z0 = camera_.scroll_z();
-        const float stepped = z0 + seg_step_z;
-        const float slo = z_lo + seg_step_z;
-        const float shi = z_hi + seg_step_z;
-        const float span = std::max(1.f, shi - slo);
-        constexpr float kBeginFromNewer = 0.12f;
-        const float begin = slo + kBeginFromNewer * span;
-        camera_.set_scroll_z_immediate(std::max(stepped, begin));
+        camera_.set_scroll_z_immediate(camera_.scroll_z() + seg_step_z);
     };
     auto page_newer_one = [&]() {
-        const float z0 = camera_.scroll_z();
-        const float stepped = z0 - seg_step_z;
-        const float slo = z_lo - seg_step_z;
-        const float shi = z_hi - seg_step_z;
-        const float span = std::max(1.f, shi - slo);
-        constexpr float kBeginFromNewer = 0.12f;
-        const float begin = slo + kBeginFromNewer * span;
-        camera_.set_scroll_z_immediate(std::min(stepped, begin));
+        // Only reattach when already in live band and stepping past tip.
+        if (camera_in_live_band() && camera_near_live_tip())
+        {
+            camera_.reattach_timeline();
+            return;
+        }
+        camera_.set_scroll_z_immediate(camera_.scroll_z() - seg_step_z);
     };
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -478,11 +566,12 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
                 ImVec2(wp.x + track_w, track_y + track_h - 1.f), IM_COL32(60, 60, 70, 200),
                 1.f);
 
-    // Histogram bins: width = Z span of segment; height ∝ load (density/chunk fill).
+    // Histogram bins: width = Z span; height ∝ load. Colors round-robin by slot
+    // position (left/mid/right), not by live/history role.
     const ImU32 kHistCol[3] = {
         IM_COL32(70, 110, 180, 255),
         IM_COL32(40, 180, 190, 255),
-        IM_COL32(255, 92, 0, 255),
+        IM_COL32(255, 140, 60, 255), // warm third (not reserved for Live)
     };
     for (int i = 0; i < nslot; ++i)
     {
@@ -492,9 +581,12 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         float t1 = z_to_x(slots[i].z_new);
         if (t1 < t0)
             std::swap(t0, t1);
+        // Skip zero-width / off-track bins (not in sight).
+        if (t1 - t0 < 1e-4f)
+            continue;
         const float x0 = wp.x + t0 * track_w;
         const float x1 = wp.x + t1 * track_w;
-        // Prefer density if counts exist; else load_ratio.
+
         float hist = slots[i].load;
         if (slots[i].expected > 0 && slots[i].block_count > 0)
         {
@@ -505,36 +597,43 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         hist = std::clamp(hist, 0.05f, 1.f);
         const float h = track_h * hist;
         const float y0 = track_y + track_h - h;
-        const bool is_live = (slots[i].lookback_k == 0);
-        ImU32 col = is_live ? IM_COL32(255, 92, 0, 210)
-                            : ((kHistCol[std::min(i, 2)] & 0x00FFFFFFu) |
-                               (static_cast<ImU32>(200) << 24));
-        // Dim empty / loading bins so ring still "wraps" visually.
-        if (hist < 0.12f)
-            col = (col & 0x00FFFFFFu) | (static_cast<ImU32>(90) << 24);
-        dl->AddRectFilled(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f), col,
+        // Clip to track; partial bins still draw (sliding strip).
+        const float x0c = std::max(x0, wp.x);
+        const float x1c = std::min(x1, wp.x + track_w);
+        if (x1c - x0c < 2.f)
+            continue;
+        // Round-robin by slot index among the 3 bins.
+        // Fade alpha when partially off-track (slide feel).
+        const float visible_frac =
+            std::clamp((x1c - x0c) / std::max(2.f, x1 - x0), 0.15f, 1.f);
+        const int base_a = hist < 0.12f ? 90 : 200;
+        const int a = static_cast<int>(static_cast<float>(base_a) * visible_frac);
+        ImU32 col = (kHistCol[i % 3] & 0x00FFFFFFu) | (static_cast<ImU32>(a) << 24);
+        dl->AddRectFilled(ImVec2(x0c + 1.f, y0), ImVec2(x1c - 1.f, track_y + track_h - 1.f), col,
                           2.f);
-        // Divider at past edge (left of bin).
-        dl->AddLine(ImVec2(x0, track_y - 2.f), ImVec2(x0, track_y + track_h + 2.f),
-                    IM_COL32(180, 220, 255, 140), 1.2f);
+        if (x0 >= wp.x - 1.f && x0 <= wp.x + track_w + 1.f)
+            dl->AddLine(ImVec2(x0, track_y - 2.f), ImVec2(x0, track_y + track_h + 2.f),
+                        IM_COL32(180, 220, 255, 140), 1.2f);
         if (slots[i].full)
-            dl->AddRect(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f),
+            dl->AddRect(ImVec2(x0c + 1.f, y0), ImVec2(x1c - 1.f, track_y + track_h - 1.f),
                         IM_COL32(255, 255, 255, 150), 2.f, 0, 1.1f);
+
+        // Genesis-aligned segment number (G_seg); optional Live prefix on k0.
         char lab[28];
-        if (is_live)
-            std::snprintf(lab, sizeof(lab), "Live #%d", slots[i].global_g);
-        else if (slots[i].global_g >= 0)
-            std::snprintf(lab, sizeof(lab), "#%d", slots[i].global_g);
+        const bool on_track = (x1c > wp.x + 2.f && x0c < wp.x + track_w - 2.f);
+        const bool label_live =
+            (slots[i].lookback_k == 0 && live_in_histogram && on_track);
+        if (label_live)
+            std::snprintf(lab, sizeof(lab), "Live #%d", slots[i].segment_id);
         else
-            std::snprintf(lab, sizeof(lab), "k%d", slots[i].lookback_k);
+            std::snprintf(lab, sizeof(lab), "#%d", slots[i].segment_id);
         const ImVec2 ts = ImGui::CalcTextSize(lab);
-        if (ts.x < (x1 - x0) - 4.f)
-            dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts.x, track_y + 2.f),
+        if (on_track && ts.x < (x1c - x0c) - 4.f)
+            dl->AddText(ImVec2(0.5f * (x0c + x1c) - 0.5f * ts.x, track_y + 2.f),
                         IM_COL32(255, 255, 255, 230), lab);
     }
 
-    // Caret: use scroll target if detached page just snapped; else current Z.
-    const float caret_z = camera_.scroll_z();
+    // Caret = camera scroll_z on the full-width strip (near right when on live tip).
     const float cam_t = std::clamp(z_to_x(caret_z), 0.f, 1.f);
     const float cx = wp.x + cam_t * track_w;
     dl->AddLine(ImVec2(cx, track_y - 3.f), ImVec2(cx, track_y + track_h + 3.f),
@@ -568,10 +667,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
             {
                 if (now_sec >= minimap_edge_page_next_sec_)
                 {
-                    if (at_live)
-                        camera_.reattach_timeline();
-                    else
-                        page_newer_one();
+                    page_newer_one(); // reattach only if already in live tip band
                     minimap_edge_page_next_sec_ = now_sec + kEdgePageCooldown;
                 }
             }
@@ -602,10 +698,10 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
             }
             if (slots[best].valid)
                 ImGui::SetTooltip(
-                    "Ring bin  G=%d  k=%d  load=%.0f%%  blocks=%d\n"
-                    "3-slot histogram | page edge to wrap indices",
-                    slots[best].global_g, slots[best].lookback_k, slots[best].load * 100.f,
-                    slots[best].block_count);
+                    "Segment #%d  (lookback k=%d)  load=%.0f%%  blocks=%d\n"
+                    "Sliding 3-window strip | Live mode when tip segment on-track",
+                    slots[best].segment_id, slots[best].lookback_k,
+                    slots[best].load * 100.f, slots[best].block_count);
         }
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -619,21 +715,17 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         page_older_one();
     ImGui::SameLine();
     if (ImGui::SmallButton("Seg >"))
-    {
-        if (at_live)
-            camera_.reattach_timeline();
-        else
-            page_newer_one();
-    }
+        page_newer_one();
     ImGui::SameLine();
     if (nslot > 0)
     {
-        const int g_lo = slots[0].global_g;
-        const int g_hi = slots[nslot - 1].global_g;
-        ImGui::TextDisabled("hist 3-bin | G %d..%d | wrap", g_lo, g_hi);
+        // slots sorted older-left → newer-right: [0]=oldest, [n-1]=newest.
+        ImGui::TextDisabled(live_in_histogram ? "#%d..#%d | Live"
+                                              : "#%d..#%d | History",
+                            slots[0].segment_id, slots[nslot - 1].segment_id);
     }
     else
-        ImGui::TextDisabled("hist 3-bin | wrap ring");
+        ImGui::TextDisabled("slide 3-bin | History");
 
     ImGui::End();
 }
@@ -707,6 +799,17 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::Text("Status");
     ImGui::SameLine();
     ImGui::TextColored(status_col, "%s", network_status_label(st));
+    if (ui.browse_mode != 0)
+    {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.f, 1.f), "History");
+        ImGui::TextDisabled("Live tip halted until camera returns to k0");
+    }
+    else
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Live");
+    }
 
     ImGui::Separator();
     ImGui::Text("Loading");
@@ -729,8 +832,14 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::ProgressBar(pool_frac, ImVec2(-1.f, 0.f));
     ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
     ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
+    if (ui.cache_pressure_level >= 2)
+        ImGui::TextColored(ImVec4(1.f, 0.45f, 0.2f, 1.f),
+                           "Timeline cache HARD — oldest blocks may drop (future: disk cache)");
+    else if (ui.cache_pressure_level >= 1)
+        ImGui::TextColored(ImVec4(1.f, 0.85f, 0.3f, 1.f),
+                           "Timeline cache large — loaded history kept in RAM until hard cap");
 
-    // Timeline segments (lookback windows) with per-segment load %.
+    // Sliding triple-buffer ring (older→newer); load % per active window.
     if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
     {
         const int nshow =
@@ -741,13 +850,14 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
             const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
             const float span_s = static_cast<float>(span_ms) * 0.001f;
             const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
-            const char* tag = (i == 0) ? "Live" : (s.confirmed_full ? "full" : "loading");
+            const bool is_live = (s.index == 0);
+            const char* tag =
+                is_live ? "Live" : (s.confirmed_full ? "full" : "loading");
             ImGui::PushID(i);
-            if (i == 0)
-                ImGui::Text("[%d] Live  %.0fs", s.index, span_s);
+            if (is_live)
+                ImGui::Text("Live k%d  %.0fs", s.index, span_s);
             else
-                ImGui::Text("[%d] -%.0fm  %.0fs", s.index, span_s * static_cast<float>(i) / 60.f,
-                            span_s);
+                ImGui::Text("k%d  %.0fs", s.index, span_s);
             ImGui::ProgressBar(ratio, ImVec2(-1.f, 0.f),
                                s.confirmed_full ? "100%" : nullptr);
             ImGui::TextDisabled("  %d blks · %d%% · %s", s.block_count,
