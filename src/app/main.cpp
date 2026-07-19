@@ -195,6 +195,8 @@ int main()
     overlay->set_initial_domain(boot_domain);
     if (prefs.filter_multi_tx)
         overlay->set_filter_multi_tx(true);
+    if (prefs.filter_min_alph > 0.0)
+        overlay->set_filter_min_alph(prefs.filter_min_alph);
     scene_presenter = new ScenePresenter(scene);
     engine->set_scene(&scene);
     engine->set_camera(&camera);

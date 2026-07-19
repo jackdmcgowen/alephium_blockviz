@@ -10,6 +10,7 @@ void test_detail_slim_pin(VnvStats& s);
 void test_detail_via_scene(VnvStats& s);
 void test_graph_lane(VnvStats& s);
 void test_prune_protects_frontier(VnvStats& s);
+void test_alph_out_sum_slim(VnvStats& s);
 
 int main()
 {
@@ -22,6 +23,7 @@ int main()
     test_detail_via_scene(s);
     test_graph_lane(s);
     test_prune_protects_frontier(s);
+    test_alph_out_sum_slim(s);
     std::printf("\nmod_domain: %d passed, %d failed\n", s.passes, s.fails);
     return s.fails == 0 ? 0 : 1;
 }

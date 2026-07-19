@@ -28,6 +28,8 @@ struct FrameSourceInput
     bool      has_camera_eye = false;
     // When true, only draw placements with txn_count > 1 (selection/hover always drawn).
     bool      filter_txn_gt_1 = false;
+    // Min block output ALPH (atto digit string); empty or "0" = off.
+    std::string filter_min_alph_atto;
 };
 
 struct FrameSourceOutput

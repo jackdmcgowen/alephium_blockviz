@@ -3,8 +3,8 @@
 
 void AlphDetailStore::slim_inplace(AlphBlock& block)
 {
-    // Keep hash/height/deps/uncles/txn_count for layout + billboard; drop bulk UTXO trees.
-    // txn_count is set at parse time and must survive slim (txns vector becomes empty).
+    // Keep hash/height/deps/uncles/txn_count/alph_out_atto for layout + billboard;
+    // drop bulk UTXO trees. Aggregates set at parse time must survive slim.
     block.txns.clear();
     block.txns.shrink_to_fit();
 }
@@ -26,6 +26,9 @@ void AlphDetailStore::upsert(const AlphBlock& block)
         merged.txn_count = it->second.txn_count;
     else if (it->second.txn_count >= 0 && merged.txn_count >= 0)
         merged.txn_count = (std::max)(merged.txn_count, it->second.txn_count);
+    // Preserve ALPH out total across slim / empty re-upserts.
+    if (merged.alph_out_atto.empty() && !it->second.alph_out_atto.empty())
+        merged.alph_out_atto = it->second.alph_out_atto;
     // Prefer non-empty txn payload if incoming is empty (e.g. race with slim).
     if (merged.txns.empty() && !it->second.txns.empty())
         merged.txns = it->second.txns;

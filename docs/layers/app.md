@@ -27,6 +27,7 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, highlight hash lists, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
+| Timeline minimap (overlay) | Ringbuffer of active segments (≤3); viewport caret; Live / scrub / prev-next |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |
@@ -76,9 +77,14 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 |----------|------|--------|
 | **P0** | Keep this visual model + color legend aligned with code | Update when `ScenePresenter` semantics change |
 | **Done** | Enable Debug domain in overlay | FakeChain selectable in Network panel |
-| **P1** | Config persistence | Last domain, multi-tx filter, optional layout meters (modularization PR12 remainder) |
+| **Done** | Config persistence | Last domain, multi-tx + min ALPH filters (`user_prefs.json`) |
+| **Done** | Timeline minimap + segment jump | Bottom strip; Live / scrub / prev-next |
+| **Done** | ALPH out totals + amount filter | Sum txn outputs; billboard + inspector; min ALPH filter |
+| **Done** | Layout/camera orientation | Lane 0→0 screen-right; LMB/RMB signs fixed |
 | **P2** | Confirm polish | Feed-row confirmed badge; eye-check green vs shard palette; dual outline only if product asks |
 | **P2** | History / LOD presentation | Modes on top of segment cull / barrier planes |
+
+**Layout convention:** camera `up=(0,-1,0)` makes world **+X** screen-left; polar placement uses **−r·cos(θ)** so chain **0→0** sits on the viewer’s **right**. |
 
 ## Interfaces
 

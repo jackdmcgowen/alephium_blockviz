@@ -116,10 +116,13 @@ LayoutResult PolarShardLayout::build(const std::vector<GraphNode>& nodes, const 
                 placed.height = static_cast<int>(node.height);
                 placed.timestamp_ms = ts;
                 placed.txn_count = node.txn_count;
+                placed.alph_out_atto = node.alph_out_atto;
                 placed.is_uncle = (node.role == BlockRole::Uncle);
                 // Slight extra radial ring for uncles so they sit outside main cubes.
                 const float r = placed.is_uncle ? (radius + 3.0f) : radius;
-                placed.pos = glm::vec3(r * std::cos(angle), r * std::sin(angle), z);
+                // Camera up=(0,-1,0) + forward +Z ⇒ world right ≈ −X, so +cos places
+                // lane 0 (θ=0) on screen-left. Negate X so 0→0 sits on the viewer's right.
+                placed.pos = glm::vec3(-r * std::cos(angle), r * std::sin(angle), z);
                 placed.color = palette_.color_for(static_cast<uint32_t>(shardId));
                 if (placed.is_uncle)
                 {

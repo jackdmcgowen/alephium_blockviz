@@ -49,5 +49,6 @@ private:
     std::string       base_url_copy_; // stable c_str for baseUrl
 
     static constexpr int kVerifyJobsPerIdleSlice = 24;
-    static constexpr int kFetchWorkers = 3;
+    // Overlap interval + hash GETs (was 3 hash-only).
+    static constexpr int kFetchWorkers = 6;
 };

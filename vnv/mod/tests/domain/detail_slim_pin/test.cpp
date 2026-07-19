@@ -24,6 +24,7 @@ void test_detail_slim_pin(VnvStats& s)
     auto got = store.get("ddd");
     VNV_EXPECT_MSG(s, got.has_value() && got->txn_count == 3, "txn_count survives slim");
     VNV_EXPECT_MSG(s, got->txns.empty(), "txns cleared");
+    // alph_out may be empty if make_block has no atto amounts — still must not crash.
 
     store.upsert(full);
     VNV_EXPECT_MSG(s, !store.is_slim("ddd"), "full after re-upsert");

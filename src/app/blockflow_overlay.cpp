@@ -56,13 +56,25 @@ void BlockflowOverlay::set_filter_multi_tx(bool enabled)
     engine_.set_scene_filter_multi_tx(filter_multi_tx_);
 }
 
+void BlockflowOverlay::set_filter_min_alph(double min_alph)
+{
+    filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
+    engine_.set_scene_filter_min_alph(filter_min_alph_);
+}
+
 void BlockflowOverlay::save_prefs() const
 {
     UserPrefs p;
     p.domain = domain_;
     p.filter_multi_tx = filter_multi_tx_;
+    p.filter_min_alph = filter_min_alph_;
     if (!save_user_prefs(p))
         std::printf("[app] warning: failed to save %s\n", kUserPrefsPath);
+}
+
+float BlockflowOverlay::ts_to_z_(int64_t ts_ms, int64_t origin_ms, float mps) const
+{
+    return -static_cast<float>(ts_ms - origin_ms) * 0.001f * mps;
 }
 
 std::string BlockflowOverlay::resolve_url_(NetworkDomain d) const
@@ -175,6 +187,7 @@ void BlockflowOverlay::draw()
 
     draw_network(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
+    draw_timeline_minimap_(ui, ui_w, ui_h);
     draw_block_billboard_(ui, ui_w, ui_h, dt_sec);
 }
 
@@ -196,6 +209,10 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
         billboard_chain_to_ = src.chain_to;
         billboard_txn_count_ = src.txn_count;
         billboard_is_uncle_ = src.is_uncle != 0;
+        if (src.alph_out[0] != '\0')
+            std::snprintf(billboard_alph_, sizeof(billboard_alph_), "%s", src.alph_out);
+        else
+            billboard_alph_[0] = '\0';
     }
 
     const float target = want ? 1.f : 0.f;
@@ -281,9 +298,188 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
                         billboard_txn_count_ == 1 ? "" : "s");
         else
             ImGui::TextDisabled("-- txns");
+        if (billboard_alph_[0] != '\0')
+            ImGui::Text("%s ALPH", billboard_alph_);
+        else
+            ImGui::TextDisabled("-- ALPH");
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
+}
+
+void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, float ui_h)
+{
+    const float rail_w = ui_chrome::rail_width(ui_w);
+    const float bar_h = 56.f;
+    const float pad = 10.f;
+    const float bar_w = std::max(120.f, ui_w - 2.f * rail_w - 2.f * pad);
+    const float bar_x = rail_w + pad;
+    const float bar_y = ui_h - bar_h - pad;
+
+    ImGui::SetNextWindowPos(ImVec2(bar_x, bar_y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(bar_w, bar_h), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.82f);
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("##timeline_minimap", nullptr, flags))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // Live tip on the right (newer = more negative Z → map high X).
+    const int64_t origin = ui.timeline_origin_ms > 0
+                               ? ui.timeline_origin_ms
+                               : static_cast<int64_t>(std::time(nullptr)) * 1000 -
+                                     static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const float mps = ui.meters_per_second > 1e-6f ? ui.meters_per_second : 1.f;
+    float z_lo = camera_.scroll_z() - 50.f;
+    float z_hi = camera_.scroll_z() + 50.f;
+    if (ui.segment_count > 0)
+    {
+        z_lo = 1e30f;
+        z_hi = -1e30f;
+        for (int i = 0; i < ui.segment_count; ++i)
+        {
+            const auto& s = ui.segments[i];
+            if (s.from_ms <= 0 && s.to_ms <= 0)
+                continue;
+            const float za = ts_to_z_(s.from_ms, origin, mps);
+            const float zb = ts_to_z_(s.to_ms, origin, mps);
+            z_lo = std::min(z_lo, std::min(za, zb));
+            z_hi = std::max(z_hi, std::max(za, zb));
+        }
+    }
+    if (z_hi - z_lo < 1.f)
+    {
+        z_lo = camera_.scroll_z() - 100.f;
+        z_hi = camera_.scroll_z() + 20.f;
+    }
+    // Expand slightly so viewport fits.
+    const float z_pad = 0.05f * (z_hi - z_lo);
+    z_lo -= z_pad;
+    z_hi += z_pad;
+
+    auto z_to_x = [&](float z) -> float {
+        // Newer (more negative Z) → right.
+        const float t = (z_hi - z) / std::max(1e-3f, z_hi - z_lo);
+        return t;
+    };
+    auto x_to_z = [&](float t) -> float {
+        t = std::clamp(t, 0.f, 1.f);
+        return z_hi - t * (z_hi - z_lo);
+    };
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetCursorScreenPos();
+    const float track_h = 22.f;
+    const float track_y = wp.y + 22.f;
+    const float track_w = ImGui::GetContentRegionAvail().x;
+    const ImVec2 t0(wp.x, track_y);
+    const ImVec2 t1(wp.x + track_w, track_y + track_h);
+
+    dl->AddRectFilled(t0, t1, IM_COL32(20, 20, 24, 220), 4.f);
+
+    // Segment bands.
+    for (int i = 0; i < ui.segment_count; ++i)
+    {
+        const auto& s = ui.segments[i];
+        if (s.from_ms <= 0 && s.to_ms <= 0)
+            continue;
+        const float za = ts_to_z_(s.from_ms, origin, mps);
+        const float zb = ts_to_z_(s.to_ms, origin, mps);
+        float u0 = z_to_x(std::max(za, zb));
+        float u1 = z_to_x(std::min(za, zb));
+        if (u1 < u0)
+            std::swap(u0, u1);
+        const float x0 = wp.x + u0 * track_w;
+        const float x1 = wp.x + u1 * track_w;
+        const float fill = std::clamp(s.load_ratio, 0.05f, 1.f);
+        const int a = static_cast<int>(40 + 160 * fill);
+        const ImU32 col = (i == 0) ? IM_COL32(255, 92, 0, a) : IM_COL32(80, 140, 200, a);
+        dl->AddRectFilled(ImVec2(x0, track_y), ImVec2(x1, track_y + track_h), col, 2.f);
+        dl->AddLine(ImVec2(x0, track_y), ImVec2(x0, track_y + track_h), IM_COL32(255, 255, 255, 60));
+    }
+
+    // Camera caret (viewport).
+    const float cam_t = z_to_x(camera_.scroll_z());
+    const float cx = wp.x + cam_t * track_w;
+    dl->AddLine(ImVec2(cx, track_y - 2.f), ImVec2(cx, track_y + track_h + 2.f),
+                IM_COL32(255, 220, 80, 255), 2.f);
+    dl->AddTriangleFilled(ImVec2(cx, track_y - 2.f), ImVec2(cx - 5.f, track_y - 10.f),
+                          ImVec2(cx + 5.f, track_y - 10.f), IM_COL32(255, 220, 80, 255));
+
+    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 4.f));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    if (hovered || active)
+    {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+            (active && ImGui::IsMouseDragging(ImGuiMouseButton_Left)))
+        {
+            minimap_dragging_ = true;
+            const float mx = ImGui::GetIO().MousePos.x;
+            const float t = (mx - wp.x) / std::max(1.f, track_w);
+            camera_.set_scroll_z(x_to_z(t));
+        }
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        minimap_dragging_ = false;
+
+    // Jump buttons.
+    ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y));
+    if (ImGui::SmallButton("Live"))
+        camera_.reattach_timeline();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("< Seg") && ui.segment_count > 0)
+    {
+        // Older = higher lookback index = larger Z.
+        float best_z = camera_.scroll_z() + 1e9f;
+        float pick = camera_.scroll_z();
+        bool found = false;
+        for (int i = 0; i < ui.segment_count; ++i)
+        {
+            const auto& s = ui.segments[i];
+            const float mid =
+                0.5f * (ts_to_z_(s.from_ms, origin, mps) + ts_to_z_(s.to_ms, origin, mps));
+            if (mid > camera_.scroll_z() + 1.f && mid < best_z)
+            {
+                best_z = mid;
+                pick = mid;
+                found = true;
+            }
+        }
+        if (found)
+            camera_.set_scroll_z(pick);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Seg >") && ui.segment_count > 0)
+    {
+        // Newer = smaller Z.
+        float best_z = camera_.scroll_z() - 1e9f;
+        float pick = camera_.scroll_z();
+        bool found = false;
+        for (int i = 0; i < ui.segment_count; ++i)
+        {
+            const auto& s = ui.segments[i];
+            const float mid =
+                0.5f * (ts_to_z_(s.from_ms, origin, mps) + ts_to_z_(s.to_ms, origin, mps));
+            if (mid < camera_.scroll_z() - 1.f && mid > best_z)
+            {
+                best_z = mid;
+                pick = mid;
+                found = true;
+            }
+        }
+        if (found)
+            camera_.set_scroll_z(pick);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("history <  timeline  > live");
+
+    ImGui::End();
 }
 
 void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h)
@@ -457,6 +653,19 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+        {
+            float min_alph_f = static_cast<float>(filter_min_alph_);
+            if (ImGui::DragFloat("Min ALPH out", &min_alph_f, 0.1f, 0.f, 1.0e9f, "%.3f",
+                                 ImGuiSliderFlags_AlwaysClamp))
+            {
+                set_filter_min_alph(static_cast<double>(min_alph_f));
+                save_prefs();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Hide blocks whose total output ALPH is below this value.\n"
+                    "0 = off. Unknown amounts are hidden when active.");
+        }
         if (ImGui::Button("Screenshot (F12)"))
             engine_.request_screenshot(nullptr);
         if (ImGui::IsItemHovered())
@@ -670,6 +879,14 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::Separator();
 
         // â”€â”€ Transactions: one-line headers, expand for detail â”€â”€
+        {
+            const std::string block_alph = alph_sum_block_outputs(inspector);
+            if (!block_alph.empty() && block_alph != "0")
+                ImGui::Text("Block out: %s ALPH", alph_atto_to_display(block_alph).c_str());
+            else if (!inspector.alph_out_atto.empty() && inspector.alph_out_atto != "0")
+                ImGui::Text("Block out: %s ALPH",
+                            alph_atto_to_display(inspector.alph_out_atto).c_str());
+        }
         ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
         if (inspector.txns.empty())
             ImGui::TextDisabled("No transactions loaded (detail may still be fetching).");
@@ -685,13 +902,20 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             short_id(tx.txid, id_buf, sizeof(id_buf));
             const int n_in = static_cast<int>(tx.inputs.size());
             const int n_out = static_cast<int>(tx.outputs.size());
+            const std::string tx_alph = alph_sum_txn_outputs(tx);
+            const std::string tx_alph_disp =
+                (!tx_alph.empty() && tx_alph != "0") ? alph_atto_to_display(tx_alph) : std::string{};
 
-            // Closed label: short id + io counts + gas (one line, no heavy widgets).
+            char tx_label[192];
+            if (tx_alph_disp.empty())
+                std::snprintf(tx_label, sizeof(tx_label), "%s  in %d · out %d · gas %d", id_buf,
+                              n_in, n_out, tx.gasAmount);
+            else
+                std::snprintf(tx_label, sizeof(tx_label), "%s  in %d · out %d · gas %d · %s ALPH",
+                              id_buf, n_in, n_out, tx.gasAmount, tx_alph_disp.c_str());
             const bool open = ImGui::TreeNodeEx(
-                "##tx",
-                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
-                "%s  in %d Â· out %d Â· gas %d",
-                id_buf, n_in, n_out, tx.gasAmount);
+                "##tx", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
+                "%s", tx_label);
 
             if (ImGui::IsItemHovered() && !tx.txid.empty())
                 ImGui::SetTooltip("%s", tx.txid.c_str());

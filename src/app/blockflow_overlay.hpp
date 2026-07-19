@@ -25,6 +25,8 @@ public:
     void set_initial_domain(NetworkDomain d);
     void set_filter_multi_tx(bool enabled);
     bool filter_multi_tx() const { return filter_multi_tx_; }
+    void set_filter_min_alph(double min_alph);
+    double filter_min_alph() const { return filter_min_alph_; }
 
     // Persist domain + filter to user_prefs.json (best-effort).
     void save_prefs() const;
@@ -33,8 +35,10 @@ private:
     void draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_network(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_block_billboard_(const UiSnapshot& ui, float ui_w, float ui_h, float dt_sec);
+    void draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, float ui_h);
     void apply_domain_if_changed_();
     std::string resolve_url_(NetworkDomain d) const;
+    float ts_to_z_(int64_t ts_ms, int64_t origin_ms, float mps) const;
 
     CameraController& camera_;
     IEngine&  engine_;
@@ -64,7 +68,12 @@ private:
     int         billboard_chain_to_   = -1;
     int         billboard_txn_count_  = -1;
     bool        billboard_is_uncle_   = false;
+    char        billboard_alph_[48]{};
 
     // Scene view: only draw blocks with txn_count > 1.
     bool        filter_multi_tx_ = false;
+    // Min block output ALPH (human); 0 = off.
+    double      filter_min_alph_ = 0.0;
+    // Minimap scrub state.
+    bool        minimap_dragging_ = false;
 };

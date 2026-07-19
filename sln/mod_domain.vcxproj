@@ -110,6 +110,9 @@
     <ClCompile Include="..\vnv\mod\tests\domain\prune_protects_frontier\test.cpp">
       <ObjectFileName>$(IntDir)domain_prune_protects_frontier.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="..\vnv\mod\tests\domain\alph_out_sum_slim\test.cpp">
+      <ObjectFileName>$(IntDir)domain_alph_out_sum_slim.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="..\src\domain\block_graph.cpp" />
     <ClCompile Include="..\src\domain\block_scene.cpp" />
     <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp" />

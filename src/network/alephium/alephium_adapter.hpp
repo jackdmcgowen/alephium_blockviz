@@ -142,6 +142,16 @@ private:
     void recompute_window_chunk_stats_(int window_index);
     // Force live newest chunk(s) + tip reseed after returning from history.
     void resync_live_chain_();
+    // Steady + live window fully chunk-filled (gate deep history ≥2).
+    bool live_tip_pipeline_ready_() const;
+    // Dual-segment initial: windows 0 and 1 both polled.
+    bool dual_initial_complete_() const;
+    // Triple-buffer ring of absolute lookback indices (≤ kSegmentRingSize).
+    void update_segment_ring_();
+    bool is_active_segment_(int index) const;
+    // On successful interval admit: advance fill cursor for owning window(s).
+    void on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms);
+    void on_interval_chunk_failed_(int64_t from_ms);
 
     void drain_fetch_results_(int max_admits);
     // Live-chain only: per-hash GET /blocks/{hash}.
@@ -217,12 +227,20 @@ private:
         int     chunks_done = 0;
         int     chunks_total = 0;
         // Newest-first fill cursor: exclusive end of next chunk to request.
-        // 0 = start at to_ms. Decreases toward from_ms as chunks complete.
+        // Advances only after successful admit (not enqueue).
         int64_t next_fill_to_ms = 0;
+        // In-flight chunk from_ms (0 = none); blocks cursor until admit/fail.
+        int64_t pending_from_ms = 0;
+        int     retry_count = 0;
+        // Frozen upper bound for this fill epoch (live window especially).
+        int64_t epoch_to_ms = 0;
         // Live Steady: re-request newest chunk only (not full window).
         bool    want_newest_refresh = false;
     };
     std::vector<LookbackWindowSlot> lookback_windows_;
+    // Active fetch ring (absolute indices); size ≤ kSegmentRingSize.
+    int active_ring_[3]{};
+    int active_ring_n_ = 0;
     int64_t genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     bool    genesis_resolved_ = false;
     // Live-chain poll gate: skip window-0 API while camera lookback k > 0; on return
@@ -261,4 +279,11 @@ private:
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     static constexpr int kMaxChunksPerPoll = 2;
     static constexpr int kMaxChunksPerDrain = 1;
+    // Triple-buffer ring: at most 3 active lookback windows for fetch/HUD/draw.
+    static constexpr int kSegmentRingSize = 3;
+    static constexpr int kInitialSegmentCount = 2; // bootstrap windows 0 and 1
+    static constexpr int kBootstrapChunksPerPoll = 16;
+    static constexpr int kBootstrapChunksPerDrain = 4;
+    static constexpr int kPreTipChunksPerDrain = 2;
+    static constexpr int kChunkMaxRetries = 3;
 };

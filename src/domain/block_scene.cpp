@@ -79,6 +79,7 @@ bool BlockScene::add_block(const AlphBlock& alph_block)
     node.chain_label =
         std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
     node.txn_count = alph_block.txn_count;
+    node.alph_out_atto = alph_block.alph_out_atto;
     if (uncle_set_.count(alph_block.hash))
         node.role = BlockRole::Uncle;
     delta.upsert_nodes.push_back(std::move(node));

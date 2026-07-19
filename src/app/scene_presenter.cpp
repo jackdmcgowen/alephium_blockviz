@@ -97,6 +97,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
     const std::unordered_set<std::string>& live_nodes,
+    const std::unordered_set<std::string>& drawn_set,
     const std::unordered_set<std::string>& green_display,
     const std::unordered_set<std::string>& cyan_owners,
     const std::unordered_set<std::string>& frontier_domain,
@@ -124,6 +125,9 @@ void ScenePresenter::tip_dep_tick_and_draw_(
                               bool only_to_frontier_deps, int stagger_base) {
         if (listing_hash.empty() || live_nodes.count(listing_hash) == 0)
             return;
+        // Both ends must be drawn this frame (filters / segment cull).
+        if (drawn_set.count(listing_hash) == 0)
+            return;
         auto d = scene_.detail_store().get(listing_hash);
         if (!d)
             return;
@@ -135,6 +139,8 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         for (const std::string& dep_hash : d->deps)
         {
             if (dep_hash.empty() || live_nodes.count(dep_hash) == 0)
+                continue;
+            if (drawn_set.count(dep_hash) == 0)
                 continue;
             if (only_to_frontier_deps && frontier_domain.count(dep_hash) == 0)
                 continue;
@@ -568,7 +574,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     // Hierarchical cull: at most the newest 4 segments, then frustum slabs
     // → blocks. Hard bound keeps instance work in a fixed lookback range.
     // ------------------------------------------------------------------
-    constexpr int kMaxVisibleTimeSegments = 4;
+    // Draw only HUD segments (adapter publishes active triple-buffer ring ≤3).
+    constexpr int kMaxVisibleTimeSegments = 3;
     const int nseg = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
     const int n_eligible = std::min(nseg, kMaxVisibleTimeSegments);
     const float eye_z = scene_.camera_scroll_z();
@@ -672,6 +679,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return placed.txn_count > 1;
     };
 
+    auto passes_amount_filter = [&](const PlacedBlock& placed) -> bool {
+        if (in.filter_min_alph_atto.empty() || in.filter_min_alph_atto == "0")
+            return true;
+        // Unknown amount (empty) hidden when filter active.
+        if (placed.alph_out_atto.empty())
+            return false;
+        return alph_cmp_atto(placed.alph_out_atto, in.filter_min_alph_atto) >= 0;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -699,6 +715,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!block_in_visible_segment(placed.timestamp_ms))
             continue;
         if (!passes_txn_filter(placed))
+            continue;
+        if (!passes_amount_filter(placed))
             continue;
         if (push_instance(placed, /*force=*/false))
             drawn.insert(placed.hash);
@@ -811,8 +829,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         constexpr uint32_t kDepRadial = 8;
         constexpr uint32_t kMaxDepArrows = 512;
 
-        tip_dep_tick_and_draw_(*debug, block_positions, live_nodes, green_display, cyan_owners,
-                               frontier_domain, tip_len, tip_rad, shaft_r, clearance);
+        tip_dep_tick_and_draw_(*debug, block_positions, live_nodes, drawn, green_display,
+                               cyan_owners, frontier_domain, tip_len, tip_rad, shaft_r,
+                               clearance);
 
         uint32_t arrow_count = 0;
         std::unordered_set<std::string> eph_seen;
@@ -825,6 +844,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                  const std::string& to_hash,
                                  const glm::vec3& from, const glm::vec3& to,
                                  const glm::vec4& color, float tip_scale, int stagger_i) {
+            // No arrows to/from filtered-out cubes (both ends must be drawn).
+            if (drawn.count(from_hash) == 0 || drawn.count(to_hash) == 0)
+                return;
             if (arrow_count >= kMaxDepArrows)
                 return;
             glm::vec3 from_inset, to_inset;
@@ -851,6 +873,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             placement_color[p.hash] = p.color;
 
         auto draw_selection_deps = [&](const AlphBlock& block) {
+            if (drawn.count(block.hash) == 0)
+                return;
             auto listing_it = block_positions.find(block.hash);
             if (listing_it == block_positions.end())
                 return;
@@ -863,7 +887,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             for (const std::string& dep_hash : block.deps)
             {
                 auto dep_it = block_positions.find(dep_hash);
-                if (dep_it != block_positions.end())
+                if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)
                 {
                     const bool focus =
                         any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
@@ -886,14 +910,19 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     continue;
                 }
 
+                // Missing-dep ghost only if parent is drawn (selection always force-drawn).
+                if (dep_it != block_positions.end() && drawn.count(dep_hash) == 0)
+                    continue; // dep filtered out — no arrow/ghost
+
                 const float angle =
                     ((static_cast<float>(parent_lane) + 0.35f +
                       0.08f * static_cast<float>(missing_i)) /
                      16.0f) *
                     2.0f * 3.14159265f;
                 const float radius = 20.0f * 0.9f;
+                // Match layout X flip (−cos) so ghost sits with lane ring.
                 glm::vec3 ghost(
-                    radius * std::cos(angle),
+                    -radius * std::cos(angle),
                     radius * std::sin(angle),
                     listing_pos.z + meters_per_second *
                                         static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
@@ -915,7 +944,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 draw_selection_deps(*d);
         }
 
-        if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash)
+        if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash &&
+            drawn.count(in.hovered_hash) != 0)
         {
             if (auto d = scene_.detail_store().get(in.hovered_hash))
             {
@@ -925,6 +955,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     int stagger_i = 0;
                     for (const std::string& dep_hash : d->deps)
                     {
+                        if (drawn.count(dep_hash) == 0)
+                            continue;
                         auto dep_it = block_positions.find(dep_hash);
                         if (dep_it == block_positions.end())
                             continue;
@@ -1011,11 +1043,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 bb.world_pos[1] = world.y;
                 bb.world_pos[2] = world.z;
 
-                // Prefer placement height/lane/txn_count; fall back to detail store.
+                // Prefer placement height/lane/txn_count/alph; fall back to detail store.
                 int height = -1;
                 int chain_from = -1;
                 int chain_to = -1;
                 int txn_count = -1;
+                std::string alph_atto;
                 bool is_uncle = scene_.is_uncle_locked(in.hovered_hash);
                 for (const PlacedBlock& p : layout.placements)
                 {
@@ -1025,6 +1058,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     chain_from = static_cast<int>(p.lane / ALPH_NUM_GROUPS);
                     chain_to = static_cast<int>(p.lane % ALPH_NUM_GROUPS);
                     txn_count = p.txn_count;
+                    alph_atto = p.alph_out_atto;
                     is_uncle = is_uncle || p.is_uncle;
                     break;
                 }
@@ -1042,12 +1076,21 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                         txn_count = d->txn_count;
                     else if (txn_count < 0 && !d->txns.empty())
                         txn_count = static_cast<int>(d->txns.size());
+                    if (alph_atto.empty() && !d->alph_out_atto.empty())
+                        alph_atto = d->alph_out_atto;
+                    else if (alph_atto.empty() && !d->txns.empty())
+                        alph_atto = alph_sum_block_outputs(*d);
                 }
                 bb.height = height;
                 bb.chain_from = chain_from;
                 bb.chain_to = chain_to;
                 bb.txn_count = txn_count;
                 bb.is_uncle = is_uncle ? 1 : 0;
+                if (!alph_atto.empty() && alph_atto != "0")
+                {
+                    const std::string disp = alph_atto_to_display(alph_atto);
+                    std::snprintf(bb.alph_out, sizeof(bb.alph_out), "%s", disp.c_str());
+                }
             }
         }
     }
@@ -1076,6 +1119,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.last_poll_ms = hud.last_poll_ms;
         out.ui.poll_interval_sec = hud.poll_interval_sec;
         out.ui.net_switching = hud.switching;
+        out.ui.timeline_origin_ms = timeline_origin_ms;
+        out.ui.meters_per_second = meters_per_second;
         out.ui.segment_count =
             std::clamp(hud.segment_count, 0, UiSnapshot::kMaxTimeSegments);
         for (int i = 0; i < out.ui.segment_count; ++i)

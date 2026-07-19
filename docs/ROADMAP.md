@@ -4,7 +4,7 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).
 
 **Last updated:** 2026-07-19  
-**Versions:** app **0.4.0** · engine **0.5.0** (see identity headers)
+**Versions:** app **0.5.0** · engine **0.6.0** (see identity headers)
 
 | Status | Meaning |
 |--------|---------|

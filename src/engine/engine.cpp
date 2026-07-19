@@ -176,6 +176,12 @@ public:
             graphics_->set_scene_filter_multi_tx(enabled);
     }
 
+    void set_scene_filter_min_alph(double min_alph) override
+    {
+        if (graphics_)
+            graphics_->set_scene_filter_min_alph(min_alph);
+    }
+
     void request_screenshot(const char* path_utf8) override
     {
         if (graphics_)

@@ -109,8 +109,9 @@ public:
             right /= rlen;
         glm::vec3 cam_up = glm::normalize(glm::cross(f, right));
 
-        pan_target_ -= right * (dx_px * kPanSens);
-        pan_target_ -= cam_up * (dy_px * kPanSens);
+        // Drag content with the pointer (not opposite): positive dx pans world right.
+        pan_target_ += right * (dx_px * kPanSens);
+        pan_target_ += cam_up * (dy_px * kPanSens);
         pan_target_.x = std::clamp(pan_target_.x, kPanMin, kPanMax);
         pan_target_.y = std::clamp(pan_target_.y, kPanMin, kPanMax);
         pan_target_.z = std::clamp(pan_target_.z, kPanMin, kPanMax);
@@ -121,8 +122,9 @@ public:
         look_engaged_ = false;
         free_look_ = true;
 
-        yaw_target_   += dx_px * kLookSens;
-        pitch_target_ += dy_px * kLookSens;
+        // Inverted-Y camera (up = -Y): drag right → look right; drag up → look up.
+        yaw_target_   -= dx_px * kLookSens;
+        pitch_target_ -= dy_px * kLookSens;
         pitch_target_  = std::clamp(pitch_target_, kPitchMin, kPitchMax);
 
         if (yaw_target_ >  glm::pi<float>())

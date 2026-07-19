@@ -52,6 +52,10 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
 
+**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. History **≥2** is gated until Steady and live window 0 is fully chunk-filled.
+
+**Triple-buffer segment ring:** at most **3** absolute lookback indices are active for fetch/HUD/draw: `{k, k+1, k+2}` (or `{0,1}` pre-tip). Chunk cursor advances only on **successful admit** (pending while in-flight). Failed chunks retry (max 3) then skip. Live window freezes an epoch upper bound so keys stay stable. Minimap and presenter cull use the published ring only.
+
 ### Domains
 
 | Domain | Selectable | Notes |
@@ -102,6 +106,9 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 | **Done** | Unit tests (no GPU) | `vnv/mod/tests/` / `mod_domain` via `run_vnv.ps1` |
 | **Done** | Live poll vs camera lookback `k` | Skip window 0 while `k>0`; resync on return |
 | **Done** | Chunked timeline interval polls | ~60s chunks, budgeted pump, newest-first |
+| **Done** | Dual-segment bootstrap + triple-buffer ring | ≤3 active segments; admit-driven progress |
+| **Done** | HttpIoPool + async interval GETs | Workers overlap timeline RTT; `mod_network` |
+| **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
 | **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |
 | **Standing** | Keep phases, dual-write, thread contract accurate | Hygiene when adapter policy shifts |
 | **P1** | Config / URL resolution notes | `config.json` array + `network_domain_resolve_url` |
@@ -129,8 +136,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 | Thread | Work |
 |--------|------|
-| Network / poller | Poll, verify drain, fetch pool, cache, scene writes |
+| Network / poller | Policy: poll schedule, drain results, admit, confirm, cache, scene writes |
+| **HttpIoPool workers** (default 6) | REST GETs only (interval chunks, block-by-hash, …); private curl / transport |
 | UI / render | Must not call into `MainChainCache`; domain switch may **block** until poller restarted |
+
+Timeline `blocks-with-events` chunks are **enqueued** to the pool (inflight cap ~4) so bootstrap/history RTT overlaps; poller **admits** on drain. VnV: `vnv/mod/tests/network/` (`mod_network`).
 
 ## Related
 

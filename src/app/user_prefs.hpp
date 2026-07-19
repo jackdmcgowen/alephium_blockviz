@@ -14,6 +14,8 @@ struct UserPrefs
 {
     NetworkDomain domain         = NetworkDomain::Mainnet;
     bool          filter_multi_tx = false;
+    // Min block output ALPH (human); 0 = filter off.
+    double        filter_min_alph = 0.0;
     // 0 = use code default lookback; >0 overrides seconds.
     int           lookback_seconds = 0;
 };
@@ -78,6 +80,11 @@ inline UserPrefs load_user_prefs(const char* path = kUserPrefsPath)
         if (cJSON_IsBool(m))
             p.filter_multi_tx = cJSON_IsTrue(m);
     }
+    if (const cJSON* a = cJSON_GetObjectItem(root, "filter_min_alph"))
+    {
+        if (cJSON_IsNumber(a) && a->valuedouble > 0.0)
+            p.filter_min_alph = a->valuedouble;
+    }
     if (const cJSON* lb = cJSON_GetObjectItem(root, "lookback_seconds"))
     {
         if (cJSON_IsNumber(lb) && lb->valueint > 0)
@@ -94,6 +101,8 @@ inline bool save_user_prefs(const UserPrefs& p, const char* path = kUserPrefsPat
         return false;
     cJSON_AddStringToObject(root, "domain", prefs_domain_to_string(p.domain));
     cJSON_AddBoolToObject(root, "filter_multi_tx", p.filter_multi_tx ? 1 : 0);
+    if (p.filter_min_alph > 0.0)
+        cJSON_AddNumberToObject(root, "filter_min_alph", p.filter_min_alph);
     if (p.lookback_seconds > 0)
         cJSON_AddNumberToObject(root, "lookback_seconds", p.lookback_seconds);
 

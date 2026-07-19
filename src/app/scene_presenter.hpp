@@ -78,6 +78,7 @@ private:
     void tip_dep_tick_and_draw_(DebugDrawer& debug,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
                                 const std::unordered_set<std::string>& live_nodes,
+                                const std::unordered_set<std::string>& drawn_set,
                                 const std::unordered_set<std::string>& green_display,
                                 const std::unordered_set<std::string>& cyan_owners,
                                 const std::unordered_set<std::string>& frontier_domain,

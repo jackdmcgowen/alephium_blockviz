@@ -42,6 +42,7 @@ void GraphicsSystem::render_loop()
         std::string hovered_hash_local;
         std::string ui_dep_hover_local;
         bool filter_multi_tx_local = false;
+        double filter_min_alph_local = 0.0;
         AlphBlock selected_detail_local;
 
         {
@@ -50,6 +51,7 @@ void GraphicsSystem::render_loop()
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
             filter_multi_tx_local = filter_multi_tx_;
+            filter_min_alph_local = filter_min_alph_;
             selected_detail_local = selected_block;
         }
 
@@ -63,6 +65,7 @@ void GraphicsSystem::render_loop()
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
             filter_multi_tx_local = filter_multi_tx_;
+            filter_min_alph_local = filter_min_alph_;
             selected_detail_local = selected_block;
         }
 
@@ -83,6 +86,8 @@ void GraphicsSystem::render_loop()
             fin.hovered_hash = hovered_hash_local;
             fin.ui_dep_hover_hash = ui_dep_hover_local;
             fin.filter_txn_gt_1 = filter_multi_tx_local;
+            if (filter_min_alph_local > 0.0)
+                fin.filter_min_alph_atto = alph_from_double_to_atto(filter_min_alph_local);
             fin.selected_detail = selected_detail_local;
             // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
             fin.instance_half_extents = glm::vec3(1.05f);
