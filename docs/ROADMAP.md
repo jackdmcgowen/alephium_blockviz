@@ -38,7 +38,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| — | *(empty — side cam / BFS fan / minimap released app 0.8.0 / engine 0.9.0)* | | Next: `feature/segment-disk-cache` |
+| 1 | **Segment disk cache** (verified BFS → disk; bootstrap on start) | [network](layers/network.md) · [design](segment-disk-cache.md) | Branch `feature/segment-disk-cache`; design landed; implement P1–P3 |
 
 ---
 
@@ -63,7 +63,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
 | 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
 | 10 | **History depth + LOD** presentation | app · network | Sliding 3-slot view + keep-all-loaded in RAM; presentation LOD still open |
-| 10b | **Disk / session block cache** | [network](layers/network.md) | Bound RAM, speed repeated runs, minimize API reloads after paging deep history |
+| 10b | **Disk / session block cache** | [network](layers/network.md) | **Promoted → P0** as segment disk cache — see [segment-disk-cache.md](segment-disk-cache.md) |
 | 11 | **Second real chain** adapter | [network](layers/network.md) | Only after FakeChain proves multi-adapter wiring |
 | 12 | Headless / client-driven **frame test seam** | [engine](layers/engine.md) · [graphics](layers/graphics.md) | Only if automated GPU / CI tests become a goal |
 

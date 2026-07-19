@@ -64,7 +64,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Return-to-live catch-up:** when camera returns to k=0 after History, fill missing ring sub-segments history-style (high budget, most-incomplete window first) with **Status = Catching up**, then tip refresh/seeds.
 
-**Cache / retention:** keep loaded blocks when the view slides away (draw cull only). Soft/hard RAM warnings; last-resort oldest-node prune near ~2 GB. Future: disk cache.
+**Cache / retention:** keep loaded blocks when the view slides away (draw cull only). Soft/hard RAM warnings; last-resort oldest-node prune near ~2 GB. **Segment disk cache (design):** verified BFS windows → `%LOCALAPPDATA%` per domain; bootstrap load before network — [segment-disk-cache.md](../segment-disk-cache.md).
 
 **Timeline origin:** sticky session origin (not min loaded block ts) so attached camera Z does not jump when history admits.
 
