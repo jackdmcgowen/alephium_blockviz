@@ -1,14 +1,14 @@
 # Segment disk cache (design)
 
-**Status:** **Segment-unit cache** on `feature/segment-disk-cache` — index by `G_seg`, load whole segment, skip interval HTTP.  
-**Goal:** Bootstrap recent sessions; complete G-segments replace network body loads.
+**Status:** **Segment pack cache (v2)** — one `G_<id>.json.gz` per genesis segment.  
+**Goal:** Bootstrap recent sessions; complete G packs replace network body loads.
 
 ### Unit of work
 
 | Key | `G_seg` genesis index |
 |-----|------------------------|
-| Save | Entire window blocks when **all 60s chunks** fetched (`complete=1`) |
-| Load | `load_segment(G)` → all blocks + mark window `polled` |
+| Save | Build JSON `{meta, blocks:[…]}` → **one gzip write** per G |
+| Load | **One gzip read** → parse all blocks; mark window `polled` if complete |
 | Network | `try_fill_window_from_disk_(k)` before interval GET; live tip still `force_newest` |
 
 ### Debug checklist
@@ -40,22 +40,24 @@ This is a **bootstrap** layer, not a full archive and not a substitute for main-
 | **Verified** | Parallel BFS confirm (`N=2G−1`) has completed for that window’s frontier/bag such that blocks in the window are admitted and confirmation marks are stable enough to skip re-poll of the interval body |
 | **Cacheable** | Historical (closed) window preferred; live open edge stays network-first until the window freezes (`k≥1`) |
 
-## Disk layout
+## Disk layout (schema **v2** — one gzip pack per G)
 
 ```text
 %LOCALAPPDATA%/AlephiumBlockViz/cache/<domain_id>/
-  manifest.json                 # schema_version, segments[], caps, domain
-  segments/G_<id>.json          # meta + ordered hash list
-  blocks/<hh>/<hash>.json.gz    # AlphBlock detail JSON gzip
+  manifest.json                 # small index only (g_seg, bounds, complete, count)
+  cache.log                     # save/load/fill/flush events
+  segments/G_<id>.json.gz       # ONE gzip: { meta + blocks: [ … ] }
 ```
+
+**Removed (v1):** per-block `blocks/<hh>/<hash>.json.gz` (wiped on domain open).
 
 | Field (manifest segment) | Role |
 |--------------------------|------|
 | `g_seg` | Genesis segment id |
 | `from_ms` / `to_ms` | Window bounds |
-| `verified_at_unix` | When BFS/window policy accepted |
-| `hashes[]` | Block hashes in segment (or file of hashes) |
-| `schema_version` | Mismatch → ignore cache, re-fetch |
+| `complete` | Safe to skip network body for this G |
+| `block_count` | Blocks inside the pack |
+| `schema_version` | **2** required |
 
 **Domain ids:** `mainnet` / `testnet` / `debug` (match `NetworkDomain`).
 
