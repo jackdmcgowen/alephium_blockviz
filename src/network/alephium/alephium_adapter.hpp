@@ -5,10 +5,10 @@
 //
 // Production keep list:
 //   sequential H_c frontier, free-main dep propagation, chain-walk multi-step confirm,
-//   pool-only confirm walk (DfsTrace), time-slot history, lookback windows.
+//   pool-only parallel BFS confirm (BfsTrace), time-slot history, lookback windows.
 // set_pending_tip = next-seed bookkeeping only (cyan Sobel is ScenePresenter-side).
 //
-// Phases: BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady.
+// Phases: BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady.
 // Live chain (base lookback window): per-hash fetches allowed to fill confirmed deps.
 // Historical (below base floor / camera unlock): chunked time-slot interval polls only —
 // no hash fetches from confirm walk. Free main for in-pool deps of confirmed blocks.
@@ -30,14 +30,16 @@
 class AlephiumAdapter
 {
 public:
-    // Bootstrap → identify tips → per-lane confirm walk → free polling.
+    // Bootstrap → identify tips → parallel BFS confirm → free polling.
     enum class Phase : int
     {
         BootstrapPoll = 0, // allow first lookback poll only
         IdentifyTips  = 1, // is_main all live tips; poll gated
-        DfsTrace      = 2, // per-lane confirm walk (pool-only); poll gated
+        BfsTrace      = 2, // parallel BFS confirm (N=2G-1); poll gated
         Steady        = 3, // normal interval polls
     };
+    // Alias for any external code still using the old name.
+    static constexpr Phase DfsTrace = Phase::BfsTrace;
 
     struct Config
     {
@@ -60,7 +62,7 @@ public:
 
     void poll_once(int64_t& last_poll_ts);
 
-    // False during IdentifyTips / DfsTrace (and before first poll done).
+    // False during IdentifyTips / BfsTrace (and before first poll done).
     bool ready_for_poll() const;
 
     void drain_verify(int max_jobs, const std::atomic<bool>& running);
@@ -175,12 +177,20 @@ private:
     int  request_history_slot_for_block_(const std::string& hash);
     int64_t block_timestamp_ms_(const std::string& hash) const;
 
-    // Phase / per-chain confirm walk (pool-only; live holes hash-fill, history uses time slots)
+    // Phase / parallel BFS confirm (pool-only; live holes hash-fill, history uses time slots)
     void set_phase_(Phase p);
-    void maybe_enter_dfs_();
-    void advance_dfs_traces_();
-    void run_dfs_lane_(uint32_t lane, bool from_stop);
-    bool all_dfs_done_() const;
+    void maybe_enter_bfs_();
+    void advance_bfs_traces_();
+    void clear_bfs_state_();
+    void seed_bfs_phase_a_();
+    void seed_bfs_phase_b_();
+    bool bfs_threads_settled_() const;
+    bool all_bfs_done_() const;
+    bool claim_bfs_visit_(const std::string& hash, int thread_id);
+    void push_bfs_edge_(int thread_id, const std::string& from, const std::string& to);
+    int  expand_bfs_thread_(int thread_id, int node_budget);
+    void publish_bfs_traces_();
+    void maybe_restart_bfs_on_segment_();
     void maybe_camera_history_extend_();
     int  admit_blocks_with_events_(cJSON* obj, int* seen_out, int* added_out);
     void publish_trace_status_();
@@ -192,6 +202,9 @@ private:
     // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
     bool try_chain_walk_confirm_(const std::string& tip_hash, uint32_t lane, int height);
     void prune_detail_store();
+    // Soft-evict graph nodes older than active ring − 1 window (Steady only).
+    // Clears matching history_slots_fetched_ keys so re-visit re-fetches chunks.
+    void maybe_ring_retain_prune_();
 
     BlockScene& scene_;
     IEngine& engine_;
@@ -212,11 +225,29 @@ private:
 
     Phase phase_ = Phase::BootstrapPoll;
     bool bootstrap_poll_done_ = false;
-    // Per-lane confirm walk: inactive or finished for current unlocked floor.
-    bool   dfs_active_[BlockScene::kLaneCount]{};
-    bool   dfs_done_[BlockScene::kLaneCount]{};
-    NodeId dfs_stop_hash_[BlockScene::kLaneCount]{};
-    int    dfs_stop_height_[BlockScene::kLaneCount]{};
+
+    // Parallel BFS confirm: N = 2G-1 cooperative workers (not 16 DFS lanes).
+    static constexpr int kBfsThreadCount = BlockScene::kBfsThreadCount;
+    static constexpr int kBfsPathMaxEdges = BlockScene::kBfsTraceMaxEdges;
+    static constexpr int kMaxBfsNodesPerAdvance = 256;
+    enum class BfsSeedPhase : int { None = 0, PhaseA = 1, PhaseB = 2 };
+    struct BfsThreadState
+    {
+        std::deque<std::string> queue;
+        std::vector<std::string> edge_from;
+        std::vector<std::string> edge_to;
+        std::string pause_hash;
+        std::string head;
+        bool active = false;
+        bool done = true;
+        bool paused = false;
+    };
+    BfsThreadState bfs_thr_[kBfsThreadCount]{};
+    std::unordered_map<std::string, int> bfs_visited_; // hash → owner thread
+    BfsSeedPhase bfs_seed_phase_ = BfsSeedPhase::None;
+    int bfs_generation_ = 0;
+    // Track segment confirmed_full fingerprint for restart.
+    int last_segment_full_mask_ = 0;
     int64_t last_camera_extra_ms_ = 0;
 
     int min_lookback_height_[BlockScene::kLaneCount]{};
@@ -281,7 +312,7 @@ private:
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxFloodPerSeed = 256;
     static constexpr int kMaxFetchAdmitsPerDrain = 4; // selection path only
-    static constexpr int kMaxDfsNodes = 256;
+    static constexpr int kMaxBfsNodesPerThreadSlice = 64;
     // Sub-interval for blocks-with-events GETs (~10 chunks per 10 min segment).
     static constexpr int64_t kTimelineChunkMs = 60'000;
     // drain_verify: at most one chunk every this many ms.

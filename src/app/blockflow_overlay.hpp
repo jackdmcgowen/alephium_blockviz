@@ -76,4 +76,6 @@ private:
     double      filter_min_alph_ = 0.0;
     // Minimap scrub state.
     bool        minimap_dragging_ = false;
+    // Edge page rate-limit (ImGui time seconds); allows hold-to-page, not one-shot lock.
+    double      minimap_edge_page_next_sec_ = 0.0;
 };

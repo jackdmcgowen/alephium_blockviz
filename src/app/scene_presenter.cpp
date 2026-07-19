@@ -35,6 +35,33 @@ const glm::vec4 kSobelTipGreen(0.24f, 0.86f, 0.52f, 1.35f);
 const glm::vec4 kSobelFrontierCyan(0.18f, 0.90f, 0.94f, 1.35f);
 const glm::vec4 kSobelIncompleteOrange(1.00f, 0.54f, 0.12f, 1.35f);
 
+// Parallel BFS thread palette (N = 2G-1 = 7). High-chroma, distinct on dark canvas.
+glm::vec4 bfs_thread_color(int thread_id)
+{
+    const int n = BlockScene::kBfsThreadCount;
+    const float t = (thread_id % std::max(1, n) + 0.5f) / static_cast<float>(std::max(1, n));
+    // HSV -> RGB (sat 0.85, val 1)
+    const float h = t;
+    const float s = 0.85f;
+    const float v = 1.0f;
+    const float i = std::floor(h * 6.f);
+    const float f = h * 6.f - i;
+    const float p = v * (1.f - s);
+    const float q = v * (1.f - f * s);
+    const float u = v * (1.f - (1.f - f) * s);
+    float r = 0.f, g = 0.f, b = 0.f;
+    switch (static_cast<int>(i) % 6)
+    {
+    case 0: r = v; g = u; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = u; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = u; g = p; b = v; break;
+    default: r = v; g = p; b = q; break;
+    }
+    return glm::vec4(r, g, b, 0.88f);
+}
+
 // Shared helper: layout, planes, and segment cull all use this Z mapping.
 inline float ts_to_z(int64_t ts_ms, int64_t origin_ms, float mps)
 {
@@ -337,6 +364,53 @@ void ScenePresenter::tip_dep_tick_and_draw_(
                         shaft_r * anim.tip_scale, kDepRadial, grow_u);
         ++drawn;
         ++it;
+    }
+}
+
+void ScenePresenter::draw_bfs_traces_(
+    DebugDrawer& debug,
+    const std::unordered_map<std::string, glm::vec3>& positions,
+    const std::unordered_set<std::string>& drawn_set)
+{
+    // Thin line layer only — claim-once edges from adapter; cap N*K segments.
+    BlockScene::BfsTraceSnap snaps[BlockScene::kBfsThreadCount]{};
+    int n = 0;
+    scene_.copy_bfs_traces_locked(snaps, &n);
+    constexpr int kMaxSeg = BlockScene::kBfsThreadCount * BlockScene::kBfsTraceMaxEdges;
+    int drawn_seg = 0;
+    for (int ti = 0; ti < n && drawn_seg < kMaxSeg; ++ti)
+    {
+        const auto& tr = snaps[ti];
+        if (tr.active == 0 && tr.edge_from.empty())
+            continue;
+        const glm::vec4 col = bfs_thread_color(tr.thread_id >= 0 ? tr.thread_id : ti);
+        const size_t ne = std::min(tr.edge_from.size(), tr.edge_to.size());
+        for (size_t e = 0; e < ne && drawn_seg < kMaxSeg; ++e)
+        {
+            const std::string& a = tr.edge_from[e];
+            const std::string& b = tr.edge_to[e];
+            if (a.empty() || b.empty())
+                continue;
+            if (drawn_set.count(a) == 0 || drawn_set.count(b) == 0)
+                continue;
+            auto ia = positions.find(a);
+            auto ib = positions.find(b);
+            if (ia == positions.end() || ib == positions.end())
+                continue;
+            // Fade older edges in the short ring slightly.
+            const float age = (ne > 1) ? static_cast<float>(e) / static_cast<float>(ne - 1) : 1.f;
+            glm::vec4 c = col;
+            c.a *= (0.35f + 0.65f * age);
+            debug.add_line(ia->second, ib->second, c);
+            ++drawn_seg;
+        }
+        // Head marker (small wire box) — no second Sobel outline.
+        if (!tr.head.empty() && drawn_set.count(tr.head) != 0)
+        {
+            auto ih = positions.find(tr.head);
+            if (ih != positions.end())
+                debug.add_wire_box(ih->second, 0.55f, col);
+        }
     }
 }
 
@@ -857,6 +931,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         tip_dep_tick_and_draw_(*debug, block_positions, live_nodes, drawn, green_display,
                                cyan_owners, frontier_domain, tip_len, tip_rad, shaft_r,
                                clearance);
+        draw_bfs_traces_(*debug, block_positions, drawn);
 
         uint32_t arrow_count = 0;
         std::unordered_set<std::string> eph_seen;

@@ -6,7 +6,8 @@
 // Block state model (BlockFlow viz) — production keep list:
 //   confirmed_          — proven main-chain bag (solid when deps live)
 //   confirmed_hash_[L]  — sequential frontier tip H_c (green Sobel + full blockDeps arrows)
-//   frontier_walk_[L]   — multi-step green walk animation path (chain-walk)
+//   frontier_walk_[L]   — multi-step green walk animation path (chain-walk tip jump)
+//   bfs_traces_         — parallel BFS confirm rays (N=2G-1), short edge paths
 //   pending_hash_[L]    — adapter next-seed bookkeeping only (not a render input;
 //                         cyan frontier-children are classified in ScenePresenter)
 #include "domain/alph_block.hpp"
@@ -59,6 +60,24 @@ public:
     // Presenter only: call while holding scene.mutex().
     std::vector<NodeId> frontier_walk_locked(uint32_t lane) const;
     void clear_frontier_walk_locked(uint32_t lane);
+
+    // Parallel BFS confirm traces (adapter writes; presenter draws short paths).
+    // N = 2*ALPH_NUM_GROUPS - 1; edges are parent→dep (newer→older).
+    static constexpr int kBfsThreadCount = 2 * ALPH_NUM_GROUPS - 1;
+    static constexpr int kBfsTraceMaxEdges = 48;
+    struct BfsTraceSnap
+    {
+        int  thread_id  = -1;
+        int  generation = 0;
+        int  active     = 0; // 0 idle, 1 running, 2 paused
+        NodeId head;
+        // Parallel arrays, size <= kBfsTraceMaxEdges.
+        std::vector<NodeId> edge_from;
+        std::vector<NodeId> edge_to;
+    };
+    void set_bfs_traces(const BfsTraceSnap* traces, int n);
+    // Presenter only: hold mutex().
+    void copy_bfs_traces_locked(BfsTraceSnap out[kBfsThreadCount], int* n_out) const;
 
     // Adapter next-seed bookkeeping (not cyan Sobel). Self-locking.
     void set_pending_tip(uint32_t lane, const NodeId& hash);
@@ -181,6 +200,8 @@ private:
     bool   frontier_valid_[kLaneCount]{};
     NodeId pending_hash_[kLaneCount]{};
     std::vector<NodeId> frontier_walk_[kLaneCount]{};
+    BfsTraceSnap bfs_traces_[kBfsThreadCount]{};
+    int          bfs_trace_n_ = 0;
 
     int trace_phase_  = 0;
     int trace_offset_ = 0;

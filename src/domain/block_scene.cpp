@@ -33,6 +33,9 @@ void BlockScene::reset()
         frontier_walk_[i].clear();
         network_hud_.tip_height_by_lane[i] = -1;
     }
+    for (int i = 0; i < kBfsThreadCount; ++i)
+        bfs_traces_[i] = BfsTraceSnap{};
+    bfs_trace_n_ = 0;
     trace_phase_ = 0;
     trace_offset_ = 0;
     genesis_ms_.store(ALPH_GENESIS_TIMESTAMP_MS_FALLBACK, std::memory_order_relaxed);
@@ -273,6 +276,30 @@ void BlockScene::clear_frontier_walk_locked(uint32_t lane)
     if (lane >= static_cast<uint32_t>(kLaneCount))
         return;
     frontier_walk_[lane].clear();
+}
+
+void BlockScene::set_bfs_traces(const BfsTraceSnap* traces, int n)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    bfs_trace_n_ = 0;
+    if (!traces || n <= 0)
+        return;
+    const int count = std::min(n, kBfsThreadCount);
+    for (int i = 0; i < count; ++i)
+        bfs_traces_[i] = traces[i];
+    bfs_trace_n_ = count;
+}
+
+void BlockScene::copy_bfs_traces_locked(BfsTraceSnap out[kBfsThreadCount], int* n_out) const
+{
+    // Caller holds mu_.
+    if (!out)
+        return;
+    const int n = std::min(bfs_trace_n_, kBfsThreadCount);
+    for (int i = 0; i < n; ++i)
+        out[i] = bfs_traces_[i];
+    if (n_out)
+        *n_out = n;
 }
 
 void BlockScene::set_pending_tip(uint32_t lane, const NodeId& hash)

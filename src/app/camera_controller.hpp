@@ -90,6 +90,16 @@ public:
         scroll_z_target_ = std::clamp(z, z_min_, z_max_);
     }
 
+    // Snap both current and target (minimap page / edge wrap) so network
+    // lookback index sees the new Z without scroll lerp lag.
+    void set_scroll_z_immediate(float z)
+    {
+        detach_timeline_();
+        const float c = std::clamp(z, z_min_, z_max_);
+        scroll_z_target_ = c;
+        scroll_z_ = c;
+    }
+
     // Move scroll target; actual eye Z linear-approaches in update_scroll_.
     void nudge_scroll(float world_delta)
     {

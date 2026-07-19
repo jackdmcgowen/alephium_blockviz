@@ -36,15 +36,15 @@ Network owns curl lifecycle, the poller thread, REST helpers (`commands.c`), and
 ### Adapter phases
 
 ```text
-BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady
+BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady
 ```
 
 | Phase | Behavior (summary) |
 |-------|---------------------|
 | **BootstrapPoll** | First lookback window poll |
 | **IdentifyTips** | Establish tips / main-chain identity; poll may be gated |
-| **DfsTrace** | Per-lane confirm walk (pool-oriented); poll may be gated |
-| **Steady** | Interval polls; concurrent confirm maintenance |
+| **BfsTrace** | Parallel BFS confirm (`N=2G−1` workers): phase A seeds diagonal tips `[g→g]` only; phase B seeds remaining tips only if not already visited. Cross-shard deps. Pool-only expand; live holes hash-fill, history time-slots. Restart when segment fully loads. |
+| **Steady** | Interval polls; BFS maintenance + camera-unlock restart |
 
 Additional policy themes (see header comments on `AlephiumAdapter`): sequential frontier height `H_c`, free-main dep propagation, chain-walk multi-step confirm, live vs historical fetch rules (history may restrict hash fetches).
 
