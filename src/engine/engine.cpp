@@ -164,6 +164,12 @@ public:
         return graphics_ ? graphics_->copy_selected_block() : AlphBlock{};
     }
 
+    void set_ui_dep_hover(const std::string& hash) override
+    {
+        if (graphics_)
+            graphics_->set_ui_dep_hover(hash);
+    }
+
     std::string consume_detail_refill_request() override
     {
         return graphics_ ? graphics_->consume_detail_refill_request() : std::string{};

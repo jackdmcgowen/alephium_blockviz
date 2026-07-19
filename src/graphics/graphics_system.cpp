@@ -414,6 +414,12 @@ void GraphicsSystem::set_selection(const std::string& hash)
     set_selection_unlocked(hash);
 }
 
+void GraphicsSystem::set_ui_dep_hover(const std::string& hash)
+{
+    std::lock_guard<std::mutex> lock(selection_mutex_);
+    ui_dep_hover_hash_ = hash;
+}
+
 std::string GraphicsSystem::consume_detail_refill_request()
 {
     std::lock_guard<std::mutex> lock(detail_refill_mutex_);
@@ -502,12 +508,14 @@ void GraphicsSystem::render_loop()
 
         std::string selected_hash_local;
         std::string hovered_hash_local;
+        std::string ui_dep_hover_local;
         AlphBlock selected_detail_local;
 
         {
             std::lock_guard<std::mutex> slock(selection_mutex_);
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
+            ui_dep_hover_local = ui_dep_hover_hash_;
             selected_detail_local = selected_block;
         }
 
@@ -519,6 +527,7 @@ void GraphicsSystem::render_loop()
             refresh_selection_if_needed(*scene_);
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
+            ui_dep_hover_local = ui_dep_hover_hash_;
             selected_detail_local = selected_block;
         }
 
@@ -537,8 +546,9 @@ void GraphicsSystem::render_loop()
             FrameSourceInput fin{};
             fin.selected_hash = selected_hash_local;
             fin.hovered_hash = hovered_hash_local;
+            fin.ui_dep_hover_hash = ui_dep_hover_local;
             fin.selected_detail = selected_detail_local;
-            // Half-extents for unit cube mesh (Â±1); slight inflate avoids edge pop.
+            // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
             fin.instance_half_extents = glm::vec3(1.05f);
 
             // Look target from layout is still needed for aim; run a thin prepare after

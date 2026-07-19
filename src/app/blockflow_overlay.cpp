@@ -553,6 +553,8 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
 {
     const float rail_w = ui_chrome::rail_width(ui_w);
     g_explorer_host = network_domain_explorer_host(domain_);
+    // Cleared unless a Deps row is hovered this frame (recolors selection arrows).
+    std::string dep_hover_this_frame;
 
     // Prefer live selection detail if feed click updated selection this frame
     AlphBlock inspector = ui.selected_detail;
@@ -610,7 +612,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
                                 static_cast<int>(inspector.uncles.size()));
         }
 
-        // â”€â”€ Dependencies (collapsed by default) â”€â”€
+        // --- Dependencies: hover recolors 3D arrow; click selects + looks (no explorer) ---
         if (!inspector.deps.empty() &&
             ImGui::TreeNodeEx("##deps", ImGuiTreeNodeFlags_SpanAvailWidth,
                               "Deps (%d)", static_cast<int>(inspector.deps.size())))
@@ -620,11 +622,15 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             {
                 ImGui::PushID(di++);
                 short_id(dep, id_buf, sizeof(id_buf));
-                explorer_url(url, sizeof(url), "blocks", dep);
                 ImGui::Bullet();
-                ImGui::TextLinkOpenURL(dep.empty() ? "##dep" : id_buf, url);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", dep.c_str());
+                if (!dep.empty() &&
+                    ImGui::Selectable(id_buf, false, ImGuiSelectableFlags_DontClosePopups))
+                    engine_.set_selection(dep);
+                if (ImGui::IsItemHovered() && !dep.empty())
+                {
+                    dep_hover_this_frame = dep;
+                    ImGui::SetTooltip("%s\n(click to select / look at)", dep.c_str());
+                }
                 ImGui::PopID();
             }
             ImGui::TreePop();
@@ -729,5 +735,6 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
+    engine_.set_ui_dep_hover(dep_hover_this_frame);
     ImGui::End();
 }

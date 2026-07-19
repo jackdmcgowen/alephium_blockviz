@@ -19,6 +19,8 @@ struct FrameSourceInput
 {
     std::string selected_hash;
     std::string hovered_hash;
+    // Inspector Deps row hover (not 3D pick); recolors selection→dep arrow.
+    std::string ui_dep_hover_hash;
     AlphBlock   selected_detail;
     const Frustum* frustum = nullptr;
     glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };

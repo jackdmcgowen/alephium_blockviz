@@ -831,6 +831,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
         const float ghost_half = 1.0f;
 
+        // Placement colors for dep-hover recolor (inspector Deps row).
+        std::unordered_map<std::string, glm::vec3> placement_color;
+        placement_color.reserve(layout.placements.size());
+        for (const PlacedBlock& p : layout.placements)
+            placement_color[p.hash] = p.color;
+
         auto draw_selection_deps = [&](const AlphBlock& block) {
             auto listing_it = block_positions.find(block.hash);
             if (listing_it == block_positions.end())
@@ -839,14 +845,31 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const int parent_lane = block.chain_idx();
             int missing_i = 0;
             int stagger_i = 0;
+            const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
 
             for (const std::string& dep_hash : block.deps)
             {
                 auto dep_it = block_positions.find(dep_hash);
                 if (dep_it != block_positions.end())
                 {
+                    const bool focus =
+                        any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                    glm::vec4 arrow_col = kSelectionArrowColor;
+                    if (focus)
+                    {
+                        auto cit = placement_color.find(dep_hash);
+                        const glm::vec3 c = (cit != placement_color.end())
+                                                ? cit->second
+                                                : glm::vec3(arrow_col);
+                        arrow_col = glm::vec4(c, 1.f);
+                    }
+                    else if (any_ui_dep_hover)
+                    {
+                        // Dim non-focused selection edges while inspecting one dep.
+                        arrow_col.a = 0.35f;
+                    }
                     add_eph_arrow('s', block.hash, dep_hash, listing_pos, dep_it->second,
-                                  kSelectionArrowColor, 1.15f, stagger_i++);
+                                  arrow_col, focus ? 1.28f : 1.15f, stagger_i++);
                     continue;
                 }
 
@@ -861,8 +884,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     radius * std::sin(angle),
                     listing_pos.z + meters_per_second *
                                         static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
-                debug->add_wire_box(ghost, ghost_half, kMissingOutline);
-                debug->add_line(listing_pos, ghost, kMissingOutline);
+                const bool focus_missing =
+                    any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                const glm::vec4 ghost_col =
+                    focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f) : kMissingOutline;
+                debug->add_wire_box(ghost, ghost_half, ghost_col);
+                debug->add_line(listing_pos, ghost, ghost_col);
                 ++missing_i;
             }
         };
