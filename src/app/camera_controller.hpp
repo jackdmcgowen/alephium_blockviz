@@ -40,9 +40,25 @@ public:
     static constexpr float kSidePitch  = 0.10f;
     // Up/Down in Side: orbit rate (rad/s while key held).
     static constexpr float kOrbitRadPerSec = 1.15f;
+    static constexpr float kViewBlendSec   = 0.40f;
 
     // End = look along +Z into polar ring; Side = profile timeline along Z.
     enum class ViewPreset : int { End = 0, Side = 1 };
+
+    struct CameraPose
+    {
+        float     scroll_z = 0.f;
+        float     scroll_z_target = 0.f;
+        glm::vec3 pan{ 0.f };
+        glm::vec3 pan_target{ 0.f };
+        float     yaw = 0.f;
+        float     pitch = 0.f;
+        float     yaw_target = 0.f;
+        float     pitch_target = 0.f;
+        float     orbit_rad = 0.f;
+        bool      timeline_attached = true;
+        bool      valid = false; // false until first visit saved
+    };
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
@@ -119,7 +135,7 @@ public:
     // Side view only: rotate eye around timeline Z axis (radians).
     void nudge_orbit(float delta_rad)
     {
-        if (view_preset_ != ViewPreset::Side)
+        if (view_preset_ != ViewPreset::Side || blending_)
             return;
         free_look_ = false;
         look_engaged_ = false;
@@ -206,13 +222,47 @@ public:
 
     void set_view_preset(ViewPreset p)
     {
-        view_preset_ = p;
+        if (p == view_preset_ && !blending_)
+            return;
         look_engaged_ = false;
         look_aim_hash_.clear();
         free_look_ = false;
-        if (p == ViewPreset::Side)
-            orbit_rad_ = 0.f; // default: eye on +X
-        apply_view_preset_targets_(p);
+
+        // Remember current live pose under the outgoing preset.
+        save_pose_(view_preset_);
+
+        CameraPose to{};
+        if (pose_[static_cast<int>(p)].valid)
+            to = pose_[static_cast<int>(p)];
+        else
+        {
+            // First visit: defaults for that preset (keep current scroll_z).
+            to.scroll_z = scroll_z_;
+            to.scroll_z_target = scroll_z_target_;
+            to.timeline_attached = timeline_attached_;
+            to.orbit_rad = (p == ViewPreset::Side) ? 0.f : orbit_rad_;
+            to.valid = true;
+            // Apply default look/pan into a temp by setting targets then snapshot.
+            const ViewPreset prev = view_preset_;
+            view_preset_ = p;
+            orbit_rad_ = to.orbit_rad;
+            apply_view_preset_targets_(p);
+            to.pan = pan_target_;
+            to.pan_target = pan_target_;
+            to.yaw = yaw_target_;
+            to.pitch = pitch_target_;
+            to.yaw_target = yaw_target_;
+            to.pitch_target = pitch_target_;
+            view_preset_ = prev;
+        }
+
+        blend_from_ = capture_live_pose_();
+        blend_to_ = to;
+        blending_ = true;
+        blend_t_ = 0.f;
+        view_preset_ = p;
+        // Immediate target so mid-blend scroll attach uses correct mode.
+        apply_pose_targets_(to);
     }
 
     void toggle_view_preset()
@@ -228,6 +278,24 @@ public:
 
     const Camera& tick(float dt_sec)
     {
+        if (blending_)
+        {
+            blend_t_ += dt_sec / kViewBlendSec;
+            if (blend_t_ >= 1.f)
+            {
+                blend_t_ = 1.f;
+                blending_ = false;
+                apply_pose_full_(blend_to_);
+                pose_[static_cast<int>(view_preset_)] = blend_to_;
+                pose_[static_cast<int>(view_preset_)].valid = true;
+            }
+            else
+            {
+                apply_pose_lerp_(blend_from_, blend_to_, blend_t_);
+                rebuild_camera_();
+                return camera_;
+            }
+        }
         update_look_(dt_sec);
         update_pan_(dt_sec);
         update_scroll_(dt_sec);
@@ -244,6 +312,81 @@ private:
     static inline const glm::vec3 kForward{ 0.f, 0.f, 1.f };
 
     void detach_timeline_() { timeline_attached_ = false; }
+
+    CameraPose capture_live_pose_() const
+    {
+        CameraPose p;
+        p.scroll_z = scroll_z_;
+        p.scroll_z_target = scroll_z_target_;
+        p.pan = pan_;
+        p.pan_target = pan_target_;
+        p.yaw = yaw_;
+        p.pitch = pitch_;
+        p.yaw_target = yaw_target_;
+        p.pitch_target = pitch_target_;
+        p.orbit_rad = orbit_rad_;
+        p.timeline_attached = timeline_attached_;
+        p.valid = true;
+        return p;
+    }
+
+    void save_pose_(ViewPreset preset)
+    {
+        pose_[static_cast<int>(preset)] = capture_live_pose_();
+    }
+
+    void apply_pose_targets_(const CameraPose& p)
+    {
+        scroll_z_target_ = p.scroll_z_target;
+        pan_target_ = p.pan_target;
+        yaw_target_ = p.yaw_target;
+        pitch_target_ = p.pitch_target;
+        orbit_rad_ = p.orbit_rad;
+        timeline_attached_ = p.timeline_attached;
+    }
+
+    void apply_pose_full_(const CameraPose& p)
+    {
+        scroll_z_ = p.scroll_z;
+        scroll_z_target_ = p.scroll_z_target;
+        pan_ = p.pan;
+        pan_target_ = p.pan_target;
+        yaw_ = p.yaw;
+        pitch_ = p.pitch;
+        yaw_target_ = p.yaw_target;
+        pitch_target_ = p.pitch_target;
+        orbit_rad_ = p.orbit_rad;
+        timeline_attached_ = p.timeline_attached;
+        look_dir_ = yaw_pitch_to_dir_(yaw_, pitch_);
+        look_dir_init_ = true;
+    }
+
+    static float lerp_angle_(float a, float b, float t)
+    {
+        float d = b - a;
+        if (d > glm::pi<float>())
+            d -= glm::two_pi<float>();
+        if (d < -glm::pi<float>())
+            d += glm::two_pi<float>();
+        return a + d * t;
+    }
+
+    void apply_pose_lerp_(const CameraPose& a, const CameraPose& b, float t)
+    {
+        t = std::clamp(t, 0.f, 1.f);
+        scroll_z_ = glm::mix(a.scroll_z, b.scroll_z, t);
+        scroll_z_target_ = glm::mix(a.scroll_z_target, b.scroll_z_target, t);
+        pan_ = glm::mix(a.pan, b.pan, t);
+        pan_target_ = glm::mix(a.pan_target, b.pan_target, t);
+        yaw_ = lerp_angle_(a.yaw, b.yaw, t);
+        pitch_ = glm::mix(a.pitch, b.pitch, t);
+        yaw_target_ = lerp_angle_(a.yaw_target, b.yaw_target, t);
+        pitch_target_ = glm::mix(a.pitch_target, b.pitch_target, t);
+        orbit_rad_ = lerp_angle_(a.orbit_rad, b.orbit_rad, t);
+        timeline_attached_ = (t < 0.5f) ? a.timeline_attached : b.timeline_attached;
+        look_dir_ = yaw_pitch_to_dir_(yaw_, pitch_);
+        look_dir_init_ = true;
+    }
 
     void apply_view_preset_targets_(ViewPreset p)
     {
@@ -376,6 +519,12 @@ private:
     bool      free_look_ = false;
     ViewPreset view_preset_ = ViewPreset::End;
     float      orbit_rad_ = 0.f; // Side: angle of eye around Z (0 = +X)
+
+    CameraPose pose_[2]{};
+    bool       blending_ = false;
+    float      blend_t_ = 0.f;
+    CameraPose blend_from_{};
+    CameraPose blend_to_{};
 
     Camera camera_{};
 };

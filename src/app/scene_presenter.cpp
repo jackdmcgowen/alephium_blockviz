@@ -130,6 +130,12 @@ void ScenePresenter::clear_dep_walk_()
         else
             ++it;
     }
+    // Start TRACE Sobel fade if we had visited marks; else clear.
+    if (!walk_visited_sobel_.empty())
+    {
+        walk_sobel_fading_ = true;
+        walk_sobel_fade_start_sec_ = now_sec_();
+    }
 }
 
 bool ScenePresenter::dep_walk_active_() const
@@ -187,22 +193,40 @@ void ScenePresenter::restart_dep_walk_(
     const std::string& root_hash,
     const std::unordered_map<std::string, glm::vec3>& positions)
 {
-    clear_dep_walk_();
+    // Soft clear without forcing sobel fade mid-restart.
+    walk_slots_.clear();
+    walk_seeded_from_detail_ = false;
+    for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end();)
+    {
+        if (!it->first.empty() && (it->first[0] == 's' || it->first[0] == 'w'))
+            it = ephemeral_birth_sec_.erase(it);
+        else
+            ++it;
+    }
+    walk_visited_sobel_.clear();
+    walk_sobel_fading_ = false;
+    walk_sobel_fade_start_sec_ = -1.f;
+
     if (root_hash.empty())
+    {
+        walk_root_hash_.clear();
         return;
+    }
     walk_root_hash_ = root_hash;
     const float now = now_sec_();
     const StyleBlockflow& st = sty();
     const float stagger = st.walk_slot_stagger_sec > 0.f ? st.walk_slot_stagger_sec
                                                          : kWalkSlotStagger;
 
-    // Walks start FROM each direct dependency of the selected block (not from H).
+    // hop0 TRACE: selected H → each dep[i] so all 2G−1 slots are visible.
     std::vector<std::string> dep_roots;
     if (auto d = scene_.detail_store().get(root_hash))
     {
         dep_roots = d->deps;
         walk_seeded_from_detail_ = true;
     }
+    walk_visited_sobel_[root_hash] = 1.f;
+
     const int nslots = kWalkSlotCount;
     walk_slots_.resize(static_cast<size_t>(nslots));
     for (int i = 0; i < nslots; ++i)
@@ -213,33 +237,18 @@ void ScenePresenter::restart_dep_walk_(
         s.delay = stagger * static_cast<float>(i);
         s.state = WalkSlotState::Pending;
         s.state_start_sec = now;
-
-        if (i >= static_cast<int>(dep_roots.size()) || dep_roots[static_cast<size_t>(i)].empty())
-        {
-            // No dep in this slot — stay pending then die without drawing.
-            continue;
-        }
-        const std::string& dep_root = dep_roots[static_cast<size_t>(i)];
-        s.from_hash = dep_root;
+        s.from_hash = root_hash;
         s.visited.insert(root_hash);
-        s.visited.insert(dep_root);
-        auto fit = positions.find(dep_root);
+        auto fit = positions.find(root_hash);
         if (fit != positions.end())
             s.from_pos = fit->second;
 
-        // First hop: dep_root → next of dep_root (deeper into history).
-        const std::string next = next_walk_dep_(dep_root, s.visited, positions);
-        if (next.empty())
-        {
-            // Dead-end at first dep: brief red pulse from dep_root.
-            s.to_hash = dep_root;
-            s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 4.f);
-            s.has_pos = fit != positions.end();
-            s.ghost_target = true;
-            continue;
-        }
-        s.to_hash = next;
-        auto tit = positions.find(next);
+        if (i >= static_cast<int>(dep_roots.size()) || dep_roots[static_cast<size_t>(i)].empty())
+            continue; // empty slot → die when Pending ends
+
+        const std::string& dep0 = dep_roots[static_cast<size_t>(i)];
+        s.to_hash = dep0;
+        auto tit = positions.find(dep0);
         if (tit != positions.end())
         {
             s.to_pos = tit->second;
@@ -251,6 +260,7 @@ void ScenePresenter::restart_dep_walk_(
             s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
             s.has_pos = true;
             s.ghost_target = true;
+            scene_.request_block_fetch(dep0);
         }
     }
 }
@@ -268,12 +278,27 @@ void ScenePresenter::tick_dep_walk_(
         }
     }
 
+    // Fade TRACE Sobel after all walks finished.
+    if (walk_sobel_fading_)
+    {
+        const float fade_sec = sty().walk_sobel_fade_sec > 0.f ? sty().walk_sobel_fade_sec
+                                                               : 0.35f;
+        const float t =
+            std::clamp((now - walk_sobel_fade_start_sec_) / fade_sec, 0.f, 1.f);
+        for (auto& kv : walk_visited_sobel_)
+            kv.second = 1.f - t;
+        if (t >= 1.f)
+        {
+            walk_visited_sobel_.clear();
+            walk_sobel_fading_ = false;
+        }
+    }
+
     for (DepWalkSlot& s : walk_slots_)
     {
         if (s.state == WalkSlotState::Dead)
             continue;
 
-        // Refresh positions while alive.
         if (!s.from_hash.empty())
         {
             auto it = positions.find(s.from_hash);
@@ -300,7 +325,6 @@ void ScenePresenter::tick_dep_walk_(
                 s.state_start_sec = now;
                 s.die_alpha = 1.f;
                 s.grow = 1.f;
-                // Minimal ghost segment for red fade if we have from.
                 if (!s.has_pos && !s.from_hash.empty())
                 {
                     auto it = positions.find(s.from_hash);
@@ -312,11 +336,14 @@ void ScenePresenter::tick_dep_walk_(
                         s.ghost_target = true;
                     }
                 }
+                if (!s.to_hash.empty())
+                    scene_.request_block_fetch(s.to_hash);
                 continue;
             }
             s.state = WalkSlotState::Flying;
             s.state_start_sec = now;
             s.grow = 0.f;
+            walk_visited_sobel_[s.from_hash] = 1.f;
             continue;
         }
 
@@ -331,6 +358,8 @@ void ScenePresenter::tick_dep_walk_(
             s.state = WalkSlotState::Arrived;
             s.state_start_sec = now;
             s.grow = 1.f;
+            if (!s.ghost_target && !s.to_hash.empty())
+                walk_visited_sobel_[s.to_hash] = 1.f;
             continue;
         }
 
@@ -345,6 +374,8 @@ void ScenePresenter::tick_dep_walk_(
                 s.state = WalkSlotState::Dying;
                 s.state_start_sec = now;
                 s.die_alpha = 1.f;
+                if (s.ghost_target && !s.to_hash.empty())
+                    scene_.request_block_fetch(s.to_hash);
                 continue;
             }
             s.visited.insert(s.to_hash);
@@ -373,6 +404,7 @@ void ScenePresenter::tick_dep_walk_(
                 s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 8.f);
                 s.has_pos = true;
                 s.ghost_target = true;
+                scene_.request_block_fetch(next);
             }
             s.state = WalkSlotState::Flying;
             s.state_start_sec = now;
@@ -391,12 +423,20 @@ void ScenePresenter::tick_dep_walk_(
                 s.state = WalkSlotState::Dead;
         }
     }
+
+    // When all slots dead, begin TRACE Sobel fade (if not already).
+    if (!walk_slots_.empty() && !dep_walk_active_() && !walk_sobel_fading_ &&
+        !walk_visited_sobel_.empty())
+    {
+        walk_sobel_fading_ = true;
+        walk_sobel_fade_start_sec_ = now;
+    }
 }
 
 void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad,
                                     float shaft_r, float clearance)
 {
-    const glm::vec4 live_col = kSelectionArrowColor();
+    const glm::vec4 live_col = sty().walk_trace;
     const glm::vec4 die_col = kDeathArrowColor();
     for (const DepWalkSlot& s : walk_slots_)
     {
@@ -416,9 +456,9 @@ void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip
             grow_u = 1.f;
         }
         else if (s.state == WalkSlotState::Flying)
-            col.a = 0.95f;
+            col.a = live_col.a;
         else
-            col.a = 0.9f;
+            col.a = live_col.a * 0.95f;
         if (col.a < 0.02f)
             continue;
         const float ts = sty().arrow_tip_scale;
@@ -1203,19 +1243,28 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Selection multi-hop dep walk: restart on select change, then tick.
-    if (in.selected_hash != walk_root_hash_)
+    // Selection multi-hop dep walk: restart on select change or replay request.
+    const uint64_t replay_gen = scene_.walk_replay_gen();
+    const bool want_replay =
+        replay_gen != last_walk_replay_gen_ && !in.selected_hash.empty();
+    if (want_replay)
+        last_walk_replay_gen_ = replay_gen;
+
+    if (in.selected_hash != walk_root_hash_ || want_replay)
     {
         if (in.selected_hash.empty())
             clear_dep_walk_();
         else
             restart_dep_walk_(in.selected_hash, block_positions);
     }
-    if (!walk_root_hash_.empty())
+    if (!walk_root_hash_.empty() || walk_sobel_fading_)
         tick_dep_walk_(now, block_positions);
 
     std::unordered_set<std::string> walk_force;
     collect_walk_force_hashes_(walk_force);
+    for (const auto& kv : walk_visited_sobel_)
+        if (kv.second > 0.02f)
+            walk_force.insert(kv.first);
     // Force-draw direct deps so selection fan + walk roots stay visible under filters.
     if (!in.selected_hash.empty())
     {
@@ -1340,11 +1389,52 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             out.sobel_outlines.push_back(
                 SobelOutlineInstance{ selected_idx, sty().sobel_select() });
         }
-        else if (in.enable_role_outlines)
+
+        // TRACE Sobel on walk-visited nodes (selected stays gold above).
+        for (const auto& kv : walk_visited_sobel_)
+        {
+            if (kv.second < 0.02f || kv.first.empty())
+                continue;
+            if (!in.selected_hash.empty() && kv.first == in.selected_hash)
+                continue;
+            push_outline(kv.first, sty().sobel_walk_trace(kv.second));
+        }
+
+        if (in.enable_role_outlines && selected_idx == ~0u)
         {
             std::unordered_set<std::string> claimed;
             claimed.reserve(green_display.size() + cyan_owners.size() + incomplete_pool.size());
+            for (const auto& kv : walk_visited_sobel_)
+                if (kv.second > 0.02f)
+                    claimed.insert(kv.first);
 
+            for (const std::string& h : green_display)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_tip());
+            }
+            for (const std::string& h : cyan_owners)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_frontier());
+            }
+            for (const std::string& h : incomplete_pool)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_incomplete());
+            }
+        }
+        else if (in.enable_role_outlines)
+        {
+            // Selection exclusive gold still allow co-visible roles on other cubes.
+            std::unordered_set<std::string> claimed;
+            claimed.insert(in.selected_hash);
+            for (const auto& kv : walk_visited_sobel_)
+                if (kv.second > 0.02f)
+                    claimed.insert(kv.first);
             for (const std::string& h : green_display)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)

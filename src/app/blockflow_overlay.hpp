@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+class BlockScene;
+
 class BlockflowOverlay : public IUiOverlay
 {
 public:
@@ -19,6 +21,7 @@ public:
     void draw() override; // render thread; ImGui only
 
     void set_session_start_ms(int64_t start_ms) { session_start_ms_ = start_ms; }
+    void set_block_scene(BlockScene* scene) { scene_ = scene; }
 
     // Optional config URLs for domain resolution (mainnet/testnet from config.json).
     void set_domain_urls(std::vector<std::string> urls);
@@ -42,6 +45,7 @@ private:
 
     CameraController& camera_;
     IEngine&  engine_;
+    BlockScene*       scene_ = nullptr;
     int64_t           session_start_ms_ = 0;
 
     NetworkDomain domain_ = NetworkDomain::Mainnet;

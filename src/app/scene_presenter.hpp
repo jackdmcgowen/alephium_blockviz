@@ -166,4 +166,9 @@ private:
     std::string              walk_root_hash_;
     std::vector<DepWalkSlot> walk_slots_;
     bool                     walk_seeded_from_detail_ = false;
+    uint64_t                 last_walk_replay_gen_ = 0;
+    // TRACE Sobel strength on visited nodes (fade after all slots dead).
+    std::unordered_map<std::string, float> walk_visited_sobel_;
+    bool  walk_sobel_fading_ = false;
+    float walk_sobel_fade_start_sec_ = -1.f;
 };

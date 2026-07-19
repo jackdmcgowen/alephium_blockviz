@@ -2,6 +2,7 @@
 #include "app/blockflow_overlay.hpp"
 #include "app/user_prefs.hpp"
 #include "app/ui_chrome.hpp"
+#include "domain/block_scene.hpp"
 #include "network/network_domain.hpp"
 
 #include "imgui.h"
@@ -144,6 +145,8 @@ void BlockflowOverlay::draw()
             camera_.set_view_preset(CameraController::ViewPreset::Side);
         if (ImGui::IsKeyPressed(ImGuiKey_V, false))
             camera_.toggle_view_preset();
+        if (ImGui::IsKeyPressed(ImGuiKey_R, false) && scene_)
+            scene_->request_walk_replay();
     }
     // Positive MouseWheel = scroll up → +scroll_z (timeline).
     if (over_scene && io.MouseWheel != 0.f)
@@ -1164,6 +1167,10 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
                                 static_cast<int>(inspector.deps.size()),
                                 static_cast<int>(inspector.uncles.size()));
         }
+        if (scene_ && ImGui::SmallButton("Replay walk"))
+            scene_->request_walk_replay();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Re-run multi-hop dep trace (R)");
 
         // --- Dependencies: hover recolors 3D arrow; click selects + looks (no explorer) ---
         if (!inspector.deps.empty() &&

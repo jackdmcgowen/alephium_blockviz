@@ -28,9 +28,9 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
 | Timeline minimap (overlay) | **Full-width sliding 3-window histogram** (newer flush right); Z from genesis-aligned segment bounds; labels = **segment number** (`#G_seg`); Live prefix on tip segment when on-track; page steps one window; draw ring from camera Z with **alpha fade** |
-| Camera view presets | **End** (1) / **Side** (2) / **V** toggle. **L/R** = timeline Z. **End U/D** = Z; **Side U/D** = orbit around chain. Wheel = Z. Short RMB homes current preset + Live reattach |
-| Selection + dep walk | Gold **one-hop** selected→deps **stays** until new select. Multi-hop walks start **from each dep** outward (2G−1 logical slots, single-thread tick). Dead end → last arrow red + fast alpha fade. Style/timing: `resource/style_blockflow.json` |
-| Style tokens | `src/app/style_blockflow.hpp` + `resource/style_blockflow.json` — brand colors + walk hop speed; not a full theming engine |
+| Camera view presets | **End** (1) / **Side** (2) / **V** toggle with **pose memory** + blend. **L/R** = Z. **End U/D** = Z; **Side U/D** = orbit. Short RMB homes current preset |
+| Selection + dep walk | Gold one-hop selected→deps stays. TRACE-colored multi-hop: hop0 = H→each dep (up to 2G−1), then deeper. Visited cubes get TRACE Sobel, fade when walk ends. **R** / Replay walk. Missing next hop → request fetch. `resource/style_blockflow.json` |
+| Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |

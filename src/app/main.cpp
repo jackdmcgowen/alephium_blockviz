@@ -198,6 +198,7 @@ int main()
     if (prefs.filter_min_alph > 0.0)
         overlay->set_filter_min_alph(prefs.filter_min_alph);
     scene_presenter = new ScenePresenter(scene);
+    overlay->set_block_scene(&scene);
     engine->set_scene(&scene);
     engine->set_camera(&camera);
     engine->set_frame_source(scene_presenter);

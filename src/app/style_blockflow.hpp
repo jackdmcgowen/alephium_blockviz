@@ -21,6 +21,7 @@ struct StyleBlockflow
     float walk_slot_stagger_sec = 0.03f;
     float walk_die_fade_sec = 0.22f;
     float walk_arrived_hold_sec = 0.02f;
+    float walk_sobel_fade_sec = 0.35f;
     float arrow_tip_scale = 0.92f;
     float arrow_shaft_scale = 0.88f;
     float sobel_intensity = 1.18f;
@@ -28,6 +29,7 @@ struct StyleBlockflow
 
     // RGBA (a = shaft / outline base; Sobel multiplies intensity separately).
     glm::vec4 select_gold{ 0.94f, 0.76f, 0.29f, 0.88f };
+    glm::vec4 walk_trace{ 0.72f, 0.42f, 0.95f, 0.90f }; // multi-hop (≠ gold)
     glm::vec4 tip_green{ 0.24f, 0.86f, 0.52f, 0.86f };
     glm::vec4 frontier_cyan{ 0.18f, 0.90f, 0.94f, 0.86f };
     glm::vec4 incomplete_amber{ 1.00f, 0.54f, 0.12f, 0.88f };
@@ -36,6 +38,11 @@ struct StyleBlockflow
     glm::vec4 sobel_select() const
     {
         return glm::vec4(select_gold.r, select_gold.g, select_gold.b, sobel_intensity);
+    }
+    glm::vec4 sobel_walk_trace(float strength = 1.f) const
+    {
+        return glm::vec4(walk_trace.r, walk_trace.g, walk_trace.b,
+                         sobel_intensity * std::clamp(strength, 0.f, 1.f));
     }
     glm::vec4 sobel_tip() const
     {
@@ -122,6 +129,7 @@ private:
         read_f_(root, "walk_slot_stagger_sec", walk_slot_stagger_sec);
         read_f_(root, "walk_die_fade_sec", walk_die_fade_sec);
         read_f_(root, "walk_arrived_hold_sec", walk_arrived_hold_sec);
+        read_f_(root, "walk_sobel_fade_sec", walk_sobel_fade_sec);
         read_f_(root, "arrow_tip_scale", arrow_tip_scale);
         read_f_(root, "arrow_shaft_scale", arrow_shaft_scale);
         read_f_(root, "sobel_intensity", sobel_intensity);
@@ -130,6 +138,8 @@ private:
         glm::vec4 v;
         if (read_vec4_(cJSON_GetObjectItem(root, "select_gold"), v))
             select_gold = v;
+        if (read_vec4_(cJSON_GetObjectItem(root, "walk_trace"), v))
+            walk_trace = v;
         if (read_vec4_(cJSON_GetObjectItem(root, "tip_green"), v))
             tip_green = v;
         if (read_vec4_(cJSON_GetObjectItem(root, "frontier_cyan"), v))

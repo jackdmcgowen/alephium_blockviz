@@ -3128,6 +3128,18 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     drain_fetch_results_(ib, kMaxFetchAdmitsPerDrain);
     recheck_confirm_fill_parents_();
 
+    // Presenter walk / UI requested missing blocks (hash GET or history chunk).
+    {
+        auto want = scene_.drain_block_fetch_requests(8);
+        for (const std::string& h : want)
+        {
+            if (h.empty() || scene_.graph().contains(h))
+                continue;
+            if (!enqueue_missing_dep_(h))
+                request_history_slot_for_block_(h);
+        }
+    }
+
     // History mode: cam_k >= 1 (live tip window k0 outside sliding view).
     // Live mode: cam_k == 0. Track continuously for resync + pump boost.
     const int cam_k = camera_lookback_index_();
