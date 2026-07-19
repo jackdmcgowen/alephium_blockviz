@@ -77,6 +77,8 @@ struct UiSnapshot
     TimeSegmentUi segments[kMaxTimeSegments]{};
     // Layout Z origin for minimap / camera jump (matches ScenePresenter).
     int64_t timeline_origin_ms = 0;
+    // Chain genesis for segment numbers / minimap bounds (matches adapter/presenter).
+    int64_t genesis_ms         = 0;
     float   meters_per_second  = 1.f;
 
     // World-anchored hover billboard (ImGui projects world_pos each frame).

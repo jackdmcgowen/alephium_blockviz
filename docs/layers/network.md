@@ -58,7 +58,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Triple-buffer (sliding view/fetch):** always **`{cam_k, cam_k+1, cam_k+2}`** tip-relative, independent of tip-pipeline readiness. Load **live tip backward** only: Live mode fills k=0 then 1 then 2; History fills around camera. Never crawl from chain genesis as a fetch order. Minimap labels **genesis segment numbers** (`#G_seg`); Live prefix when tip segment is on-track.
 
-**History mode:** when `cam_k ≥ 1` (live outside the sliding window), **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget. Return to `cam_k==0` → live resync.
+**History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
+
+**Load-once 60s chunks:** successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip `force_newest` on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.
+
+**Return-to-live catch-up:** when camera returns to k=0 after History, fill missing ring sub-segments history-style (high budget, most-incomplete window first) with **Status = Catching up**, then tip refresh/seeds.
 
 **Cache / retention:** keep loaded blocks when the view slides away (draw cull only). Soft/hard RAM warnings; last-resort oldest-node prune near ~2 GB. Future: disk cache.
 

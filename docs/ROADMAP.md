@@ -38,7 +38,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| — | *(empty — sliding history ring + minimap on feature branch)* | | Merge to `main` + `app-v0.7.0` / `engine-v0.8.0` tags ([AGENTS.md](../AGENTS.md)) |
+| — | *(empty — sliding ring released app 0.7.0 / engine 0.8.0 on main)* | | Follow-up: `fix/review-history-catchup` (load-once chunks, History status, live catch-up) |
 
 ---
 

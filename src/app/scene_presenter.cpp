@@ -762,10 +762,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     };
     for (int i = 0; i < n_client; ++i)
         add_win(client_ring[i].from_ms, client_ring[i].to_ms, client_ring[i].k);
+    // HUD only when still wanted or fading out — never resurrect left rings.
     const int n_hud = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
     for (int i = 0; i < n_hud; ++i)
     {
         const auto& s = hud.segments[i];
+        if (want_k.count(s.index) == 0 && seg_fade_alpha_.count(s.index) == 0)
+            continue;
         add_win(s.from_ms, s.to_ms, s.index);
     }
 
@@ -780,8 +783,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             if (ts_ms >= merged[i].from_ms && ts_ms < merged[i].to_ms)
             {
                 const int k = merged[i].k;
-                const float f = (k >= 0) ? fade_for_k(k) : 1.f;
-                best = std::max(best, f > 0.01f ? f : 0.45f);
+                if (k < 0)
+                {
+                    best = std::max(best, 1.f);
+                    continue;
+                }
+                // Use fade map only — never invent 0.45 for missing/erased keys.
+                best = std::max(best, fade_for_k(k));
             }
         }
         // Leaving segments still fading out.
@@ -792,10 +800,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const int k = kv.first;
             if (k > G_live)
                 continue;
-            // Tip-relative window: k steps older than live tip segment.
             const int64_t live_from =
                 genesis_ms + static_cast<int64_t>(std::max(0, G_live - k)) * window_ms;
-            // Bounds by lookback from tip, not group count.
             int64_t from_ms = live_from;
             int64_t to_ms = from_ms + window_ms;
             if (k == 0)
@@ -825,7 +831,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             vis_z_hi = std::max(vis_z_hi, client_ring[i].z_old);
         }
     }
-    const float ring_z_pad = std::max(seg_width_z * 0.35f, 40.f);
+    // Small pad for boundary jitter only — not a second full-segment draw range.
+    const float ring_z_pad = std::max(8.f, seg_width_z * 0.02f);
     (void)R_cull;
 
     auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
@@ -833,14 +840,23 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             return true;
         if (ts_ms <= 0)
             return true;
+        // Primary gate: fade/time membership (no ghost neighbor segments).
         if (fade_for_ts(ts_ms) > 0.02f)
             return true;
-        // Z-span safety: placement time maps near eye ring even if ms bounds miss.
+        // Tiny Z pad only if already in a fading/wanted window time band via fade map miss
+        // with client bounds (boundary jitter). Do not expand to off-ring history.
         if (have_vis_z && ts_ms > 0)
         {
             const float z = ts_to_z(ts_ms, timeline_origin_ms, meters_per_second);
             if (z >= vis_z_lo - ring_z_pad && z <= vis_z_hi + ring_z_pad)
-                return true;
+            {
+                // Accept only if timestamp falls in a client_ring ms window.
+                for (int i = 0; i < n_client; ++i)
+                {
+                    if (ts_ms >= client_ring[i].from_ms && ts_ms < client_ring[i].to_ms)
+                        return fade_for_k(client_ring[i].k) > 0.02f;
+                }
+            }
         }
         return false;
     };
@@ -878,9 +894,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (placed.is_uncle || scene_.is_uncle_locked(placed.hash))
             alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         float seg_a = fade_for_ts(placed.timestamp_ms);
-        // If accepted by visibility (incl. Z-span safety) but fade map missed, still draw.
+        // No forced floor — off-ring / faded blocks stay hidden.
         if (seg_a < 0.02f)
-            seg_a = 0.5f;
+            return false;
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
@@ -1337,6 +1353,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.cache_pressure_level = hud.cache_pressure_level;
         out.ui.browse_mode = hud.browse_mode;
         out.ui.timeline_origin_ms = timeline_origin_ms;
+        out.ui.genesis_ms =
+            scene_.genesis_ms() > 0 ? scene_.genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
         out.ui.meters_per_second = meters_per_second;
         out.ui.segment_count =
             std::clamp(hud.segment_count, 0, UiSnapshot::kMaxTimeSegments);

@@ -8,15 +8,6 @@
 #include <ctime>
 #include <thread>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <psapi.h>
-#pragma comment(lib, "psapi.lib")
-#endif
-
 extern "C" CURL* curl;
 extern const char* baseUrl;
 
@@ -100,38 +91,9 @@ void NetworkPoller::thread_main()
         // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
-        // Retention: keep all loaded segment blocks until hard memory pressure.
-        // Sliding ring only controls view/fetch; adapter may also prune at hard cap.
-        // Last-resort drop oldest nodes (~2 GB / node soft max) with a clear warning.
-        {
-            static constexpr size_t kMemCapBytes = 2ull * 1024 * 1024 * 1024;
-            static constexpr size_t kSoftMaxNodes = 250000;
-            size_t private_bytes = 0;
-#if defined(_WIN32)
-            PROCESS_MEMORY_COUNTERS_EX pmc{};
-            if (GetProcessMemoryInfo(GetCurrentProcess(),
-                                     reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
-                                     sizeof(pmc)))
-                private_bytes = static_cast<size_t>(pmc.PrivateUsage);
-#endif
-            const size_t nodes = scene_.total_blocks();
-            const bool over_mem = private_bytes > 0 && private_bytes >= kMemCapBytes;
-            const bool over_nodes = nodes >= kSoftMaxNodes;
-            if (over_mem || over_nodes)
-            {
-                size_t cap = kSoftMaxNodes * 9 / 10;
-                if (over_mem && nodes > 1000)
-                    cap = (std::min)(cap, nodes * 85 / 100);
-                if (over_nodes)
-                    cap = (std::min)(cap, kSoftMaxNodes * 9 / 10);
-                const size_t removed = scene_.prune(/*min_timestamp_ms=*/0, cap);
-                if (removed > 0)
-                    std::printf("[net] WARNING timeline cache full — pruned oldest %zu blocks "
-                                "(mem=%zu MB nodes=%zu -> cap %zu). "
-                                "Future: disk cache to keep history across runs.\n",
-                                removed, private_bytes / (1024 * 1024), nodes, cap);
-            }
-        }
+        // Retention: adapter is sole hard-prune owner (invalidates chunk dedupe).
+        // Sliding ring is view/fetch only — keep-all until hard cap.
+        adapter_.maybe_memory_pressure_prune();
 
         adapter_.publish_hud(domain_, base_url_copy_.c_str(), /*switching=*/false);
 

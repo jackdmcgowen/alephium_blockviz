@@ -358,7 +358,8 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
     const int64_t window_ms =
         static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
-    const int64_t genesis_ms = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const int64_t genesis_ms =
+        ui.genesis_ms > 0 ? ui.genesis_ms : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     const int G_live =
         window_ms > 0 && now_ms > genesis_ms
             ? static_cast<int>((now_ms - genesis_ms) / window_ms)
@@ -371,8 +372,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
     int cam_k = 0;
     if (older_sec >= 1.f && window_ms > 0)
         cam_k = static_cast<int>(older_sec / (static_cast<float>(window_ms) * 0.001f));
-    if (cam_k < 0)
-        cam_k = 0;
+    cam_k = std::clamp(cam_k, 0, std::max(0, G_live));
 
     // Map HUD load + optional authoritative ms bounds / segment ids by lookback k.
     float hud_load[64]{};
@@ -783,12 +783,14 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     if (ImGui::IsItemHovered() && url_show[0])
         ImGui::SetTooltip("%s", url_show);
 
-    // Status pill
+    // Status pill (adapter sets History / Catching up when off live or catching up).
     const NetworkStatus st = static_cast<NetworkStatus>(
         ui.net_switching ? static_cast<int>(NetworkStatus::Switching) : ui.net_status);
     ImVec4 status_col(0.7f, 0.7f, 0.7f, 1.f);
     if (st == NetworkStatus::Steady)
         status_col = ImVec4(0.25f, 0.9f, 0.4f, 1.f);
+    else if (st == NetworkStatus::History || st == NetworkStatus::CatchingUp)
+        status_col = ImVec4(0.45f, 0.85f, 1.f, 1.f);
     else if (st == NetworkStatus::Bootstrapping || st == NetworkStatus::IdentifyTips ||
              st == NetworkStatus::ConfirmWalk || st == NetworkStatus::Connecting)
         status_col = ImVec4(1.f, 0.75f, 0.2f, 1.f);
@@ -799,17 +801,12 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::Text("Status");
     ImGui::SameLine();
     ImGui::TextColored(status_col, "%s", network_status_label(st));
-    if (ui.browse_mode != 0)
-    {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.f, 1.f), "History");
-        ImGui::TextDisabled("Live tip halted until camera returns to k0");
-    }
-    else
-    {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Live");
-    }
+    if (st == NetworkStatus::History)
+        ImGui::TextDisabled("Live tip halted until camera returns to tip window");
+    else if (st == NetworkStatus::CatchingUp)
+        ImGui::TextDisabled("Filling missed sub-segments after History");
+    else if (st == NetworkStatus::Steady)
+        ImGui::TextDisabled("Live tip");
 
     ImGui::Separator();
     ImGui::Text("Loading");

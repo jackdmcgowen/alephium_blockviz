@@ -87,6 +87,10 @@ enum class NetworkStatus : int
     Steady       = 5,
     Switching    = 6,
     Error        = 7,
+    // Sliding window off live tip (cam_k >= 1); live tip API halted.
+    History      = 8,
+    // Returned to live; filling missed 60s sub-segments before tip build.
+    CatchingUp   = 9,
 };
 
 inline constexpr const char* network_status_label(NetworkStatus s)
@@ -101,6 +105,8 @@ inline constexpr const char* network_status_label(NetworkStatus s)
     case NetworkStatus::Steady:        return "Steady";
     case NetworkStatus::Switching:     return "Switching…";
     case NetworkStatus::Error:         return "Error";
+    case NetworkStatus::History:       return "History";
+    case NetworkStatus::CatchingUp:    return "Catching up";
     }
     return "Idle";
 }
