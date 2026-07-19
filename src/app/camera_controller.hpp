@@ -37,8 +37,9 @@ public:
     static constexpr float kTimelineMetersPerSecond = 1.f;
     // Side preset: eye offset from timeline axis (layout base_radius≈20).
     static constexpr float kSideRadius = 70.f;
-    static constexpr float kSideY      = 8.f;
-    static constexpr float kSidePitch  = 0.12f;
+    static constexpr float kSidePitch  = 0.10f;
+    // Up/Down in Side: orbit rate (rad/s while key held).
+    static constexpr float kOrbitRadPerSec = 1.15f;
 
     // End = look along +Z into polar ring; Side = profile timeline along Z.
     enum class ViewPreset : int { End = 0, Side = 1 };
@@ -114,6 +115,24 @@ public:
         scroll_z_target_ =
             std::clamp(scroll_z_target_ + world_delta, z_min_, z_max_);
     }
+
+    // Side view only: rotate eye around timeline Z axis (radians).
+    void nudge_orbit(float delta_rad)
+    {
+        if (view_preset_ != ViewPreset::Side)
+            return;
+        free_look_ = false;
+        look_engaged_ = false;
+        orbit_rad_ += delta_rad;
+        // Keep finite.
+        if (orbit_rad_ > glm::pi<float>())
+            orbit_rad_ -= glm::two_pi<float>();
+        if (orbit_rad_ < -glm::pi<float>())
+            orbit_rad_ += glm::two_pi<float>();
+        apply_view_preset_targets_(ViewPreset::Side);
+    }
+
+    float orbit_rad() const { return orbit_rad_; }
 
     void add_pan_delta(float dx_px, float dy_px)
     {
@@ -191,7 +210,15 @@ public:
         look_engaged_ = false;
         look_aim_hash_.clear();
         free_look_ = false;
+        if (p == ViewPreset::Side)
+            orbit_rad_ = 0.f; // default: eye on +X
         apply_view_preset_targets_(p);
+    }
+
+    void toggle_view_preset()
+    {
+        set_view_preset(view_preset_ == ViewPreset::Side ? ViewPreset::End
+                                                         : ViewPreset::Side);
     }
 
     ViewPreset view_preset() const { return view_preset_; }
@@ -222,10 +249,14 @@ private:
     {
         if (p == ViewPreset::Side)
         {
-            // Eye on +X looking toward origin (−X of forward in yaw space).
-            pan_target_ = glm::vec3(kSideRadius, kSideY, 0.f);
-            yaw_target_ = -glm::half_pi<float>();
-            pitch_target_ = kSidePitch;
+            // Orbit around Z: eye on circle in XY looking at timeline axis.
+            const float c = std::cos(orbit_rad_);
+            const float s = std::sin(orbit_rad_);
+            pan_target_ = glm::vec3(kSideRadius * c, kSideRadius * s, 0.f);
+            // Look toward origin in XY (and slight pitch for readability).
+            const glm::vec3 dir = glm::normalize(glm::vec3(-c, -s, 0.05f));
+            dir_to_yaw_pitch_(dir, yaw_target_, pitch_target_);
+            pitch_target_ = std::clamp(pitch_target_ + kSidePitch * 0.25f, kPitchMin, kPitchMax);
         }
         else
         {
@@ -344,6 +375,7 @@ private:
     bool      look_engaged_ = false;
     bool      free_look_ = false;
     ViewPreset view_preset_ = ViewPreset::End;
+    float      orbit_rad_ = 0.f; // Side: angle of eye around Z (0 = +X)
 
     Camera camera_{};
 };

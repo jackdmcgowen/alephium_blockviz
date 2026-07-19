@@ -114,19 +114,38 @@ void BlockflowOverlay::draw()
         mx < ui_w - rail_w &&
         my < ui_h;
 
-    // Camera motion — Z-track (keys + wheel); view presets 1=End 2=Side
+    // Camera: L/R = Z always; End U/D = Z; Side U/D = orbit around chain.
+    // Presets: 1=End, 2=Side, V=toggle.
     if (!io.WantCaptureKeyboard)
     {
-        if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+        const bool side =
+            camera_.view_preset() == CameraController::ViewPreset::Side;
+        if (ImGui::IsKeyDown(ImGuiKey_LeftArrow))
             camera_.nudge_scroll(CameraController::kEyeZStep * dt_sec);
-        if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+        if (ImGui::IsKeyDown(ImGuiKey_RightArrow))
             camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
+        if (side)
+        {
+            if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+                camera_.nudge_orbit(CameraController::kOrbitRadPerSec * dt_sec);
+            if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+                camera_.nudge_orbit(-CameraController::kOrbitRadPerSec * dt_sec);
+        }
+        else
+        {
+            if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
+                camera_.nudge_scroll(CameraController::kEyeZStep * dt_sec);
+            if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
+                camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
+        }
         if (ImGui::IsKeyPressed(ImGuiKey_1, false))
             camera_.set_view_preset(CameraController::ViewPreset::End);
         if (ImGui::IsKeyPressed(ImGuiKey_2, false))
             camera_.set_view_preset(CameraController::ViewPreset::Side);
+        if (ImGui::IsKeyPressed(ImGuiKey_V, false))
+            camera_.toggle_view_preset();
     }
-    // Positive MouseWheel = scroll up â†’ +scroll_z (matches Up arrow).
+    // Positive MouseWheel = scroll up → +scroll_z (timeline).
     if (over_scene && io.MouseWheel != 0.f)
         camera_.nudge_scroll(io.MouseWheel * CameraController::kWheelStep);
 
@@ -739,8 +758,13 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
             camera_.set_view_preset(CameraController::ViewPreset::Side);
         if (side_on)
             ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("View presets: End (1) ring along +Z | Side (2) timeline profile");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("View"))
+            camera_.toggle_view_preset();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "End (1): ring +Z | Side (2): timeline profile\n"
+                "V: toggle | Side: L/R = Z, U/D = orbit | End: U/D = Z");
     }
     ImGui::SameLine();
     if (nslot > 0)

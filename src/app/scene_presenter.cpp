@@ -1,5 +1,6 @@
 ﻿#include "app/pch.h"
 #include "app/scene_presenter.hpp"
+#include "app/style_blockflow.hpp"
 
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
@@ -21,45 +22,33 @@ namespace
 float meters_per_second = 1.0f;
 constexpr float kLayoutBaseRadius = 20.0f;
 
-const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child → tip
-const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip → blockDeps
-const glm::vec4 kDeathArrowColor(1.0f, 0.12f, 0.10f, 0.95f);
-const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
-const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
+// Colors from StyleBlockflow::global() (brand tokens / style_blockflow.json).
+inline const StyleBlockflow& sty() { return StyleBlockflow::global(); }
+inline glm::vec4 kCyanArrowColor() { return sty().frontier_cyan; }
+inline glm::vec4 kGreenArrowColor() { return sty().tip_green; }
+inline glm::vec4 kDeathArrowColor() { return sty().death_red; }
+inline glm::vec4 kSelectionArrowColor() { return sty().select_gold; }
+inline glm::vec4 kHoverArrowColor()
+{
+    glm::vec4 c = sty().select_gold;
+    c.a *= 0.45f;
+    return c;
+}
 const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
 
-// Sobel outline colors (app/domain product meaning — graphics stays color-agnostic).
-// Matches docs/brand/alephium_palette.md role accents; A = edge intensity.
-const glm::vec4 kSobelSelectGold(0.94f, 0.76f, 0.29f, 1.35f);
-const glm::vec4 kSobelTipGreen(0.24f, 0.86f, 0.52f, 1.35f);
-const glm::vec4 kSobelFrontierCyan(0.18f, 0.90f, 0.94f, 1.35f);
-const glm::vec4 kSobelIncompleteOrange(1.00f, 0.54f, 0.12f, 1.35f);
-
-// Parallel BFS thread palette (N = 2G-1 = 7). High-chroma, distinct on dark canvas.
+// BFS confirm rays: muted brand family (not high-chroma rainbow).
 glm::vec4 bfs_thread_color(int thread_id)
 {
-    const int n = BlockScene::kBfsThreadCount;
-    const float t = (thread_id % std::max(1, n) + 0.5f) / static_cast<float>(std::max(1, n));
-    // HSV -> RGB (sat 0.85, val 1)
-    const float h = t;
-    const float s = 0.85f;
-    const float v = 1.0f;
-    const float i = std::floor(h * 6.f);
-    const float f = h * 6.f - i;
-    const float p = v * (1.f - s);
-    const float q = v * (1.f - f * s);
-    const float u = v * (1.f - (1.f - f) * s);
-    float r = 0.f, g = 0.f, b = 0.f;
-    switch (static_cast<int>(i) % 6)
-    {
-    case 0: r = v; g = u; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = u; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = u; g = p; b = v; break;
-    default: r = v; g = p; b = q; break;
-    }
-    return glm::vec4(r, g, b, 0.88f);
+    const StyleBlockflow& s = sty();
+    const glm::vec4 palette[] = {
+        s.frontier_cyan, s.tip_green, s.incomplete_amber, s.select_gold,
+        s.frontier_cyan * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
+        s.tip_green * 0.7f + glm::vec4(0.15f, 0.12f, 0.1f, 0.f),
+        s.incomplete_amber * 0.65f + glm::vec4(0.12f, 0.1f, 0.15f, 0.f),
+    };
+    glm::vec4 c = palette[thread_id % 7];
+    c.a = std::min(c.a, 0.75f) * s.bfs_alpha_scale;
+    return c;
 }
 
 // Shared helper: layout, planes, and segment cull all use this Z mapping.
@@ -103,6 +92,7 @@ bool parse_tip_edge_key(const std::string& key, std::string& listing, std::strin
 ScenePresenter::ScenePresenter(BlockScene& scene)
     : scene_(scene)
 {
+    StyleBlockflow::global().try_load();
 }
 
 float ScenePresenter::now_sec_() const
@@ -132,6 +122,14 @@ void ScenePresenter::clear_dep_walk_()
     walk_root_hash_.clear();
     walk_slots_.clear();
     walk_seeded_from_detail_ = false;
+    // Drop sticky selection ephemeral arrows from prior root.
+    for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end();)
+    {
+        if (!it->first.empty() && (it->first[0] == 's' || it->first[0] == 'w'))
+            it = ephemeral_birth_sec_.erase(it);
+        else
+            ++it;
+    }
 }
 
 bool ScenePresenter::dep_walk_active_() const
@@ -194,11 +192,15 @@ void ScenePresenter::restart_dep_walk_(
         return;
     walk_root_hash_ = root_hash;
     const float now = now_sec_();
+    const StyleBlockflow& st = sty();
+    const float stagger = st.walk_slot_stagger_sec > 0.f ? st.walk_slot_stagger_sec
+                                                         : kWalkSlotStagger;
 
-    std::vector<std::string> roots;
+    // Walks start FROM each direct dependency of the selected block (not from H).
+    std::vector<std::string> dep_roots;
     if (auto d = scene_.detail_store().get(root_hash))
     {
-        roots = d->deps;
+        dep_roots = d->deps;
         walk_seeded_from_detail_ = true;
     }
     const int nslots = kWalkSlotCount;
@@ -208,32 +210,46 @@ void ScenePresenter::restart_dep_walk_(
         DepWalkSlot& s = walk_slots_[static_cast<size_t>(i)];
         s = DepWalkSlot{};
         s.slot = i;
-        s.delay = kWalkSlotStagger * static_cast<float>(i);
+        s.delay = stagger * static_cast<float>(i);
         s.state = WalkSlotState::Pending;
         s.state_start_sec = now;
+
+        if (i >= static_cast<int>(dep_roots.size()) || dep_roots[static_cast<size_t>(i)].empty())
+        {
+            // No dep in this slot — stay pending then die without drawing.
+            continue;
+        }
+        const std::string& dep_root = dep_roots[static_cast<size_t>(i)];
+        s.from_hash = dep_root;
         s.visited.insert(root_hash);
-        s.from_hash = root_hash;
-        if (i < static_cast<int>(roots.size()) && !roots[static_cast<size_t>(i)].empty())
-            s.to_hash = roots[static_cast<size_t>(i)];
-        // else empty → dies when Pending ends (no root dep for this slot)
-        auto fit = positions.find(root_hash);
+        s.visited.insert(dep_root);
+        auto fit = positions.find(dep_root);
         if (fit != positions.end())
             s.from_pos = fit->second;
-        auto tit = positions.find(s.to_hash);
+
+        // First hop: dep_root → next of dep_root (deeper into history).
+        const std::string next = next_walk_dep_(dep_root, s.visited, positions);
+        if (next.empty())
+        {
+            // Dead-end at first dep: brief red pulse from dep_root.
+            s.to_hash = dep_root;
+            s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 4.f);
+            s.has_pos = fit != positions.end();
+            s.ghost_target = true;
+            continue;
+        }
+        s.to_hash = next;
+        auto tit = positions.find(next);
         if (tit != positions.end())
         {
             s.to_pos = tit->second;
             s.has_pos = (fit != positions.end());
             s.ghost_target = false;
         }
-        else if (!s.to_hash.empty())
+        else if (fit != positions.end())
         {
-            // Ghost: invent a near-parent offset for the dying hop.
-            if (fit != positions.end())
-            {
-                s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
-                s.has_pos = true;
-            }
+            s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
+            s.has_pos = true;
             s.ghost_target = true;
         }
     }
@@ -306,8 +322,10 @@ void ScenePresenter::tick_dep_walk_(
 
         if (s.state == WalkSlotState::Flying)
         {
+            const float grow_sec = sty().walk_hop_grow_sec > 0.f ? sty().walk_hop_grow_sec
+                                                                : kWalkHopGrowSec;
             const float age = now - s.state_start_sec;
-            s.grow = std::clamp(age / kWalkHopGrowSec, 0.f, 1.f);
+            s.grow = std::clamp(age / grow_sec, 0.f, 1.f);
             if (s.grow < 1.f)
                 continue;
             s.state = WalkSlotState::Arrived;
@@ -318,8 +336,9 @@ void ScenePresenter::tick_dep_walk_(
 
         if (s.state == WalkSlotState::Arrived)
         {
-            // Brief hold then next hop or die.
-            if (now - s.state_start_sec < 0.08f)
+            const float hold = sty().walk_arrived_hold_sec > 0.f ? sty().walk_arrived_hold_sec
+                                                                : kWalkArrivedHoldSec;
+            if (now - s.state_start_sec < hold)
                 continue;
             if (s.ghost_target || s.hops_done + 1 >= kWalkMaxHops)
             {
@@ -363,8 +382,9 @@ void ScenePresenter::tick_dep_walk_(
 
         if (s.state == WalkSlotState::Dying)
         {
-            const float t =
-                std::clamp((now - s.state_start_sec) / kWalkDieFadeSec, 0.f, 1.f);
+            const float die_sec = sty().walk_die_fade_sec > 0.f ? sty().walk_die_fade_sec
+                                                               : kWalkDieFadeSec;
+            const float t = std::clamp((now - s.state_start_sec) / die_sec, 0.f, 1.f);
             s.die_alpha = 1.f - t;
             s.grow = 1.f;
             if (t >= 1.f)
@@ -376,8 +396,8 @@ void ScenePresenter::tick_dep_walk_(
 void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad,
                                     float shaft_r, float clearance)
 {
-    const glm::vec4 live_col = kSelectionArrowColor;
-    const glm::vec4 die_col(1.f, 0.15f, 0.12f, 1.f);
+    const glm::vec4 live_col = kSelectionArrowColor();
+    const glm::vec4 die_col = kDeathArrowColor();
     for (const DepWalkSlot& s : walk_slots_)
     {
         if (s.state == WalkSlotState::Dead || s.state == WalkSlotState::Pending)
@@ -401,8 +421,10 @@ void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip
             col.a = 0.9f;
         if (col.a < 0.02f)
             continue;
-        debug.add_arrow(from_inset, to_inset, col, tip_len * 1.2f, tip_rad * 1.15f,
-                        shaft_r * 1.1f, 8, grow_u);
+        const float ts = sty().arrow_tip_scale;
+        const float ss = sty().arrow_shaft_scale;
+        debug.add_arrow(from_inset, to_inset, col, tip_len * 1.05f * ts, tip_rad * ts,
+                        shaft_r * ss, 8, grow_u);
     }
 }
 
@@ -491,7 +513,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.from_pos = e.from_pos;
         anim.to_pos = e.to_pos;
         anim.has_pos = true;
-        anim.base_alpha = e.green ? kGreenArrowColor.a : kCyanArrowColor.a;
+        anim.base_alpha = e.green ? kGreenArrowColor().a : kCyanArrowColor().a;
         anim.tip_scale = 1.f;
 
         // Cyan â†’ green color blend when the same edge key changes role.
@@ -611,7 +633,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             anim.confirm_blend_t = blend;
         }
 
-        glm::vec4 color = glm::mix(kCyanArrowColor, kGreenArrowColor, blend);
+        glm::vec4 color = glm::mix(kCyanArrowColor(), kGreenArrowColor(), blend);
 
         if (anim.phase == ArrowPhase::Growing)
         {
@@ -627,7 +649,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         }
         else if (anim.phase == ArrowPhase::Dying)
         {
-            color = kDeathArrowColor;
+            color = kDeathArrowColor();
             const float t = std::clamp((now - anim.fade_start_sec) / kDeathSec, 0.f, 1.f);
             alpha = anim.base_alpha * (1.f - t);
             if (t >= 1.f)
@@ -651,11 +673,12 @@ void ScenePresenter::draw_bfs_traces_(
     const std::unordered_map<std::string, glm::vec3>& positions,
     const std::unordered_set<std::string>& drawn_set)
 {
-    // Thin line layer only — claim-once edges from adapter; cap N*K segments.
+    // Confirm BFS is policy-only (adapter cooperative). Draw thin newest-edge trails only.
     BlockScene::BfsTraceSnap snaps[BlockScene::kBfsThreadCount]{};
     int n = 0;
     scene_.copy_bfs_traces_locked(snaps, &n);
-    constexpr int kMaxSeg = BlockScene::kBfsThreadCount * BlockScene::kBfsTraceMaxEdges;
+    constexpr int kMaxSeg = BlockScene::kBfsThreadCount * 12; // newest-ish only
+    constexpr size_t kNewestPerThread = 8;
     int drawn_seg = 0;
     for (int ti = 0; ti < n && drawn_seg < kMaxSeg; ++ti)
     {
@@ -664,7 +687,8 @@ void ScenePresenter::draw_bfs_traces_(
             continue;
         const glm::vec4 col = bfs_thread_color(tr.thread_id >= 0 ? tr.thread_id : ti);
         const size_t ne = std::min(tr.edge_from.size(), tr.edge_to.size());
-        for (size_t e = 0; e < ne && drawn_seg < kMaxSeg; ++e)
+        const size_t start = (ne > kNewestPerThread) ? (ne - kNewestPerThread) : 0;
+        for (size_t e = start; e < ne && drawn_seg < kMaxSeg; ++e)
         {
             const std::string& a = tr.edge_from[e];
             const std::string& b = tr.edge_to[e];
@@ -676,19 +700,14 @@ void ScenePresenter::draw_bfs_traces_(
             auto ib = positions.find(b);
             if (ia == positions.end() || ib == positions.end())
                 continue;
-            // Fade older edges in the short ring slightly.
-            const float age = (ne > 1) ? static_cast<float>(e) / static_cast<float>(ne - 1) : 1.f;
+            const float age =
+                (ne > 1) ? static_cast<float>(e - start) /
+                               static_cast<float>(std::max<size_t>(1, ne - start - 1))
+                         : 1.f;
             glm::vec4 c = col;
-            c.a *= (0.35f + 0.65f * age);
+            c.a *= (0.25f + 0.55f * age);
             debug.add_line(ia->second, ib->second, c);
             ++drawn_seg;
-        }
-        // Head marker (small wire box) — no second Sobel outline.
-        if (!tr.head.empty() && drawn_set.count(tr.head) != 0)
-        {
-            auto ih = positions.find(tr.head);
-            if (ih != positions.end())
-                debug.add_wire_box(ih->second, 0.55f, col);
         }
     }
 }
@@ -1197,6 +1216,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     std::unordered_set<std::string> walk_force;
     collect_walk_force_hashes_(walk_force);
+    // Force-draw direct deps so selection fan + walk roots stay visible under filters.
+    if (!in.selected_hash.empty())
+    {
+        if (auto d = scene_.detail_store().get(in.selected_hash))
+        {
+            for (const std::string& dep : d->deps)
+                if (!dep.empty())
+                    walk_force.insert(dep);
+        }
+    }
 
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
@@ -1309,7 +1338,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (selected_idx != ~0u)
         {
             out.sobel_outlines.push_back(
-                SobelOutlineInstance{ selected_idx, kSobelSelectGold });
+                SobelOutlineInstance{ selected_idx, sty().sobel_select() });
         }
         else if (in.enable_role_outlines)
         {
@@ -1320,19 +1349,19 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelTipGreen);
+                push_outline(h, sty().sobel_tip());
             }
             for (const std::string& h : cyan_owners)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelFrontierCyan);
+                push_outline(h, sty().sobel_frontier());
             }
             for (const std::string& h : incomplete_pool)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelIncompleteOrange);
+                push_outline(h, sty().sobel_incomplete());
             }
         }
     }
@@ -1409,7 +1438,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 {
                     const bool focus =
                         any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
-                    glm::vec4 arrow_col = kSelectionArrowColor;
+                    glm::vec4 arrow_col = kSelectionArrowColor();
                     if (focus)
                     {
                         auto cit = placement_color.find(dep_hash);
@@ -1454,16 +1483,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             }
         };
 
-        // Multi-hop walk replaces static one-hop fan while any slot is active.
-        if (dep_walk_active_() && debug)
-            draw_dep_walk_(*debug, tip_len, tip_rad, shaft_r, clearance);
-        else if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
+        // One-hop selection fan stays for whole selection; multi-hop continues from deps.
+        if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
             draw_selection_deps(in.selected_detail);
         else if (!in.selected_hash.empty())
         {
             if (auto d = scene_.detail_store().get(in.selected_hash))
                 draw_selection_deps(*d);
         }
+        if (dep_walk_active_() && debug)
+            draw_dep_walk_(*debug, tip_len, tip_rad, shaft_r, clearance);
 
         if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash &&
             drawn.count(in.hovered_hash) != 0)
@@ -1482,7 +1511,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                         if (dep_it == block_positions.end())
                             continue;
                         add_eph_arrow('h', d->hash, dep_hash, listing_it->second, dep_it->second,
-                                      kHoverArrowColor, 1.05f, stagger_i++);
+                                      kHoverArrowColor(), 1.05f * sty().arrow_tip_scale,
+                                      stagger_i++);
                     }
                 }
             }

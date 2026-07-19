@@ -1,0 +1,15 @@
+{
+  "walk_hop_grow_sec": 0.12,
+  "walk_slot_stagger_sec": 0.03,
+  "walk_die_fade_sec": 0.22,
+  "walk_arrived_hold_sec": 0.02,
+  "arrow_tip_scale": 0.92,
+  "arrow_shaft_scale": 0.88,
+  "sobel_intensity": 1.18,
+  "select_gold": [0.94, 0.76, 0.29, 0.88],
+  "tip_green": [0.24, 0.86, 0.52, 0.86],
+  "frontier_cyan": [0.18, 0.90, 0.94, 0.86],
+  "incomplete_amber": [1.0, 0.54, 0.12, 0.88],
+  "death_red": [1.0, 0.12, 0.10, 0.92],
+  "bfs_alpha_scale": 0.55
+}

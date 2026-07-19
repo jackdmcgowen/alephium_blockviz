@@ -40,10 +40,11 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
-    // Selection multi-hop dep walk (N = 2G−1 concurrent slots).
-    static constexpr float  kWalkHopGrowSec    = 0.32f;
-    static constexpr float  kWalkSlotStagger   = 0.07f;
-    static constexpr float  kWalkDieFadeSec    = 0.55f;
+    // Selection multi-hop: defaults; runtime overrides via StyleBlockflow JSON.
+    static constexpr float  kWalkHopGrowSec    = 0.12f;
+    static constexpr float  kWalkSlotStagger   = 0.03f;
+    static constexpr float  kWalkDieFadeSec    = 0.22f;
+    static constexpr float  kWalkArrivedHoldSec = 0.02f;
     static constexpr int    kWalkMaxHops       = 32;
     static constexpr int    kWalkSlotCount     = ALPH_NUM_GROUPS * 2 - 1; // 2G−1
 
