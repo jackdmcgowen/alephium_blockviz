@@ -9,6 +9,8 @@ Grounded in the official [Alephium Brand Guide](https://github.com/alephium/alep
 
 Exact logo SVG geometry is in the brand guide; orange below matches common Alephium token/marketing orange (~`#FF5C00`). Re-sample the brand kit color board if marketing ships a stricter token set.
 
+**Runtime polish:** optional `resource/style_blockflow.json` (loaded by `StyleBlockflow`) can override role RGBA and walk hop timings without recompiling. Not a full theme engine — see app layer non-goals.
+
 ## Foundation
 
 | Token | Hex | RGB (0–1) | Use |

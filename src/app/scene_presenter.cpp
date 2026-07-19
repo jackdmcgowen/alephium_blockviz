@@ -1,5 +1,6 @@
 ﻿#include "app/pch.h"
 #include "app/scene_presenter.hpp"
+#include "app/style_blockflow.hpp"
 
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
@@ -11,6 +12,7 @@
 #include <ctime>
 #include <cstring>
 #include <functional>
+#include <optional>
 
 #include <glm/glm.hpp>
 
@@ -21,45 +23,33 @@ namespace
 float meters_per_second = 1.0f;
 constexpr float kLayoutBaseRadius = 20.0f;
 
-const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child → tip
-const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip → blockDeps
-const glm::vec4 kDeathArrowColor(1.0f, 0.12f, 0.10f, 0.95f);
-const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
-const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
+// Colors from StyleBlockflow::global() (brand tokens / style_blockflow.json).
+inline const StyleBlockflow& sty() { return StyleBlockflow::global(); }
+inline glm::vec4 kCyanArrowColor() { return sty().frontier_cyan; }
+inline glm::vec4 kGreenArrowColor() { return sty().tip_green; }
+inline glm::vec4 kDeathArrowColor() { return sty().death_red; }
+inline glm::vec4 kSelectionArrowColor() { return sty().select_gold; }
+inline glm::vec4 kHoverArrowColor()
+{
+    glm::vec4 c = sty().select_gold;
+    c.a *= 0.45f;
+    return c;
+}
 const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
 
-// Sobel outline colors (app/domain product meaning — graphics stays color-agnostic).
-// Matches docs/brand/alephium_palette.md role accents; A = edge intensity.
-const glm::vec4 kSobelSelectGold(0.94f, 0.76f, 0.29f, 1.35f);
-const glm::vec4 kSobelTipGreen(0.24f, 0.86f, 0.52f, 1.35f);
-const glm::vec4 kSobelFrontierCyan(0.18f, 0.90f, 0.94f, 1.35f);
-const glm::vec4 kSobelIncompleteOrange(1.00f, 0.54f, 0.12f, 1.35f);
-
-// Parallel BFS thread palette (N = 2G-1 = 7). High-chroma, distinct on dark canvas.
+// BFS confirm rays: muted brand family (not high-chroma rainbow).
 glm::vec4 bfs_thread_color(int thread_id)
 {
-    const int n = BlockScene::kBfsThreadCount;
-    const float t = (thread_id % std::max(1, n) + 0.5f) / static_cast<float>(std::max(1, n));
-    // HSV -> RGB (sat 0.85, val 1)
-    const float h = t;
-    const float s = 0.85f;
-    const float v = 1.0f;
-    const float i = std::floor(h * 6.f);
-    const float f = h * 6.f - i;
-    const float p = v * (1.f - s);
-    const float q = v * (1.f - f * s);
-    const float u = v * (1.f - (1.f - f) * s);
-    float r = 0.f, g = 0.f, b = 0.f;
-    switch (static_cast<int>(i) % 6)
-    {
-    case 0: r = v; g = u; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = u; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = u; g = p; b = v; break;
-    default: r = v; g = p; b = q; break;
-    }
-    return glm::vec4(r, g, b, 0.88f);
+    const StyleBlockflow& s = sty();
+    const glm::vec4 palette[] = {
+        s.frontier_cyan, s.tip_green, s.incomplete_amber, s.select_gold,
+        s.frontier_cyan * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
+        s.tip_green * 0.7f + glm::vec4(0.15f, 0.12f, 0.1f, 0.f),
+        s.incomplete_amber * 0.65f + glm::vec4(0.12f, 0.1f, 0.15f, 0.f),
+    };
+    glm::vec4 c = palette[thread_id % 7];
+    c.a = std::min(c.a, 0.75f) * s.bfs_alpha_scale;
+    return c;
 }
 
 // Shared helper: layout, planes, and segment cull all use this Z mapping.
@@ -103,6 +93,7 @@ bool parse_tip_edge_key(const std::string& key, std::string& listing, std::strin
 ScenePresenter::ScenePresenter(BlockScene& scene)
     : scene_(scene)
 {
+    StyleBlockflow::global().try_load();
 }
 
 float ScenePresenter::now_sec_() const
@@ -111,7 +102,8 @@ float ScenePresenter::now_sec_() const
 }
 
 float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_delay,
-                                        std::unordered_set<std::string>& seen)
+                                        std::unordered_set<std::string>& seen,
+                                        float grow_sec)
 {
     seen.insert(key);
     const float now = now_sec_();
@@ -124,7 +116,134 @@ float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_de
     const float age = now - it->second;
     if (age <= 0.f)
         return 0.f;
-    return std::clamp(age / kArrowGrowSec, 0.f, 1.f);
+    const float g = grow_sec > 1e-4f ? grow_sec : kArrowGrowSec;
+    return std::clamp(age / g, 0.f, 1.f);
+}
+
+void ScenePresenter::clear_selection_deps_()
+{
+    sel_dep_ = SelectionDepTrace{};
+    // Drop sticky selection ephemeral arrows from prior root.
+    for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end();)
+    {
+        if (!it->first.empty() && (it->first[0] == 's' || it->first[0] == 'w'))
+            it = ephemeral_birth_sec_.erase(it);
+        else
+            ++it;
+    }
+}
+
+void ScenePresenter::collect_selection_dep_force_(std::unordered_set<std::string>& out) const
+{
+    for (const std::string& h : sel_dep_.nodes)
+        if (!h.empty())
+            out.insert(h);
+}
+
+void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
+{
+    clear_selection_deps_();
+    if (root_hash.empty())
+        return;
+
+    sel_dep_.root = root_hash;
+    sel_dep_.nodes.push_back(root_hash);
+    sel_dep_.node_set.insert(root_hash);
+
+    std::unordered_map<std::string, int> depth;
+    depth[root_hash] = 0;
+
+    std::vector<std::string> queue;
+    queue.push_back(root_hash);
+    size_t qi = 0;
+
+    if (auto root = scene_.detail_store().get(root_hash))
+        if (!root->deps.empty())
+            sel_dep_.seeded_from_detail = true;
+
+    while (qi < queue.size() &&
+           static_cast<int>(sel_dep_.nodes.size()) < kMaxSelDepNodes &&
+           static_cast<int>(sel_dep_.edges.size()) < kMaxSelDepEdges)
+    {
+        const std::string u = queue[qi++];
+        const int du = depth[u];
+        std::vector<std::string> deps = sorted_deps_(u);
+        if (deps.empty())
+        {
+            if (auto d = scene_.detail_store().get(u))
+                deps = d->deps;
+        }
+        if (!deps.empty())
+            sel_dep_.seeded_from_detail = true;
+
+        for (const std::string& v : deps)
+        {
+            if (v.empty())
+                continue;
+            if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
+                break;
+            sel_dep_.edges.push_back(SelectionDepEdge{ u, v, du });
+
+            if (sel_dep_.node_set.count(v) != 0)
+                continue;
+            // Expand only if we know the node (detail or graph) so BFS stays in loaded set.
+            const bool known = scene_.detail_store().get(v) || scene_.graph().get(v);
+            if (!known)
+                continue;
+            if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
+                continue;
+            sel_dep_.node_set.insert(v);
+            sel_dep_.nodes.push_back(v);
+            depth[v] = du + 1;
+            queue.push_back(v);
+        }
+    }
+}
+
+int ScenePresenter::chain_idx_for_hash_(const std::string& hash) const
+{
+    if (hash.empty())
+        return 255;
+    if (auto d = scene_.detail_store().get(hash))
+        return static_cast<int>(d->chain_idx()) & 15;
+    if (auto n = scene_.graph().get(hash))
+    {
+        if (n->lane < 16)
+            return static_cast<int>(n->lane);
+    }
+    return 255; // unknown → sort last
+}
+
+std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_hash) const
+{
+    std::vector<std::string> out;
+    if (node_hash.empty())
+        return out;
+    auto d = scene_.detail_store().get(node_hash);
+    if (!d || d->deps.empty())
+        return out;
+    struct Item
+    {
+        std::string hash;
+        int         shard = 255;
+    };
+    std::vector<Item> items;
+    items.reserve(d->deps.size());
+    for (const std::string& dep : d->deps)
+    {
+        if (dep.empty())
+            continue;
+        items.push_back(Item{ dep, chain_idx_for_hash_(dep) });
+    }
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
+        if (a.shard != b.shard)
+            return a.shard < b.shard;
+        return a.hash < b.hash;
+    });
+    out.reserve(items.size());
+    for (const Item& it : items)
+        out.push_back(it.hash);
+    return out;
 }
 
 void ScenePresenter::tip_dep_tick_and_draw_(
@@ -212,7 +331,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.from_pos = e.from_pos;
         anim.to_pos = e.to_pos;
         anim.has_pos = true;
-        anim.base_alpha = e.green ? kGreenArrowColor.a : kCyanArrowColor.a;
+        anim.base_alpha = e.green ? kGreenArrowColor().a : kCyanArrowColor().a;
         anim.tip_scale = 1.f;
 
         // Cyan â†’ green color blend when the same edge key changes role.
@@ -332,7 +451,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             anim.confirm_blend_t = blend;
         }
 
-        glm::vec4 color = glm::mix(kCyanArrowColor, kGreenArrowColor, blend);
+        glm::vec4 color = glm::mix(kCyanArrowColor(), kGreenArrowColor(), blend);
 
         if (anim.phase == ArrowPhase::Growing)
         {
@@ -348,7 +467,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         }
         else if (anim.phase == ArrowPhase::Dying)
         {
-            color = kDeathArrowColor;
+            color = kDeathArrowColor();
             const float t = std::clamp((now - anim.fade_start_sec) / kDeathSec, 0.f, 1.f);
             alpha = anim.base_alpha * (1.f - t);
             if (t >= 1.f)
@@ -372,11 +491,12 @@ void ScenePresenter::draw_bfs_traces_(
     const std::unordered_map<std::string, glm::vec3>& positions,
     const std::unordered_set<std::string>& drawn_set)
 {
-    // Thin line layer only — claim-once edges from adapter; cap N*K segments.
+    // Confirm BFS is policy-only (adapter cooperative). Draw thin newest-edge trails only.
     BlockScene::BfsTraceSnap snaps[BlockScene::kBfsThreadCount]{};
     int n = 0;
     scene_.copy_bfs_traces_locked(snaps, &n);
-    constexpr int kMaxSeg = BlockScene::kBfsThreadCount * BlockScene::kBfsTraceMaxEdges;
+    constexpr int kMaxSeg = BlockScene::kBfsThreadCount * 12; // newest-ish only
+    constexpr size_t kNewestPerThread = 8;
     int drawn_seg = 0;
     for (int ti = 0; ti < n && drawn_seg < kMaxSeg; ++ti)
     {
@@ -385,7 +505,8 @@ void ScenePresenter::draw_bfs_traces_(
             continue;
         const glm::vec4 col = bfs_thread_color(tr.thread_id >= 0 ? tr.thread_id : ti);
         const size_t ne = std::min(tr.edge_from.size(), tr.edge_to.size());
-        for (size_t e = 0; e < ne && drawn_seg < kMaxSeg; ++e)
+        const size_t start = (ne > kNewestPerThread) ? (ne - kNewestPerThread) : 0;
+        for (size_t e = start; e < ne && drawn_seg < kMaxSeg; ++e)
         {
             const std::string& a = tr.edge_from[e];
             const std::string& b = tr.edge_to[e];
@@ -397,19 +518,14 @@ void ScenePresenter::draw_bfs_traces_(
             auto ib = positions.find(b);
             if (ia == positions.end() || ib == positions.end())
                 continue;
-            // Fade older edges in the short ring slightly.
-            const float age = (ne > 1) ? static_cast<float>(e) / static_cast<float>(ne - 1) : 1.f;
+            const float age =
+                (ne > 1) ? static_cast<float>(e - start) /
+                               static_cast<float>(std::max<size_t>(1, ne - start - 1))
+                         : 1.f;
             glm::vec4 c = col;
-            c.a *= (0.35f + 0.65f * age);
+            c.a *= (0.25f + 0.55f * age);
             debug.add_line(ia->second, ib->second, c);
             ++drawn_seg;
-        }
-        // Head marker (small wire box) — no second Sobel outline.
-        if (!tr.head.empty() && drawn_set.count(tr.head) != 0)
-        {
-            auto ih = positions.find(tr.head);
-            if (ih != positions.end())
-                debug.add_wire_box(ih->second, 0.55f, col);
         }
     }
 }
@@ -762,10 +878,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     };
     for (int i = 0; i < n_client; ++i)
         add_win(client_ring[i].from_ms, client_ring[i].to_ms, client_ring[i].k);
+    // HUD only when still wanted or fading out — never resurrect left rings.
     const int n_hud = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
     for (int i = 0; i < n_hud; ++i)
     {
         const auto& s = hud.segments[i];
+        if (want_k.count(s.index) == 0 && seg_fade_alpha_.count(s.index) == 0)
+            continue;
         add_win(s.from_ms, s.to_ms, s.index);
     }
 
@@ -780,8 +899,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             if (ts_ms >= merged[i].from_ms && ts_ms < merged[i].to_ms)
             {
                 const int k = merged[i].k;
-                const float f = (k >= 0) ? fade_for_k(k) : 1.f;
-                best = std::max(best, f > 0.01f ? f : 0.45f);
+                if (k < 0)
+                {
+                    best = std::max(best, 1.f);
+                    continue;
+                }
+                // Use fade map only — never invent 0.45 for missing/erased keys.
+                best = std::max(best, fade_for_k(k));
             }
         }
         // Leaving segments still fading out.
@@ -792,10 +916,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const int k = kv.first;
             if (k > G_live)
                 continue;
-            // Tip-relative window: k steps older than live tip segment.
             const int64_t live_from =
                 genesis_ms + static_cast<int64_t>(std::max(0, G_live - k)) * window_ms;
-            // Bounds by lookback from tip, not group count.
             int64_t from_ms = live_from;
             int64_t to_ms = from_ms + window_ms;
             if (k == 0)
@@ -825,7 +947,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             vis_z_hi = std::max(vis_z_hi, client_ring[i].z_old);
         }
     }
-    const float ring_z_pad = std::max(seg_width_z * 0.35f, 40.f);
+    // Small pad for boundary jitter only — not a second full-segment draw range.
+    const float ring_z_pad = std::max(8.f, seg_width_z * 0.02f);
     (void)R_cull;
 
     auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
@@ -833,14 +956,23 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             return true;
         if (ts_ms <= 0)
             return true;
+        // Primary gate: fade/time membership (no ghost neighbor segments).
         if (fade_for_ts(ts_ms) > 0.02f)
             return true;
-        // Z-span safety: placement time maps near eye ring even if ms bounds miss.
+        // Tiny Z pad only if already in a fading/wanted window time band via fade map miss
+        // with client bounds (boundary jitter). Do not expand to off-ring history.
         if (have_vis_z && ts_ms > 0)
         {
             const float z = ts_to_z(ts_ms, timeline_origin_ms, meters_per_second);
             if (z >= vis_z_lo - ring_z_pad && z <= vis_z_hi + ring_z_pad)
-                return true;
+            {
+                // Accept only if timestamp falls in a client_ring ms window.
+                for (int i = 0; i < n_client; ++i)
+                {
+                    if (ts_ms >= client_ring[i].from_ms && ts_ms < client_ring[i].to_ms)
+                        return fade_for_k(client_ring[i].k) > 0.02f;
+                }
+            }
         }
         return false;
     };
@@ -878,9 +1010,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (placed.is_uncle || scene_.is_uncle_locked(placed.hash))
             alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         float seg_a = fade_for_ts(placed.timestamp_ms);
-        // If accepted by visibility (incl. Z-span safety) but fade map missed, still draw.
+        // No forced floor — off-ring / faded blocks stay hidden.
         if (seg_a < 0.02f)
-            seg_a = 0.5f;
+            return false;
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
@@ -888,6 +1020,34 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(placed.hash);
         return true;
     };
+
+    // Selection full BFS block-dep fan: rebuild on select change, replay, or late detail.
+    const uint64_t replay_gen = scene_.walk_replay_gen();
+    const bool want_replay =
+        replay_gen != last_walk_replay_gen_ && !in.selected_hash.empty();
+    if (want_replay)
+        last_walk_replay_gen_ = replay_gen;
+
+    if (in.selected_hash.empty())
+    {
+        if (!sel_dep_.root.empty())
+            clear_selection_deps_();
+    }
+    else if (in.selected_hash != sel_dep_.root || want_replay)
+    {
+        rebuild_selection_dep_bfs_(in.selected_hash);
+    }
+    else if (!sel_dep_.seeded_from_detail)
+    {
+        if (auto d = scene_.detail_store().get(in.selected_hash))
+        {
+            if (!d->deps.empty())
+                rebuild_selection_dep_bfs_(in.selected_hash);
+        }
+    }
+
+    std::unordered_set<std::string> walk_force;
+    collect_selection_dep_force_(walk_force);
 
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
@@ -911,12 +1071,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const bool is_sel =
             (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
             (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
-        if (!is_sel && !block_in_visible_segment(placed.timestamp_ms))
+        const bool is_walk = walk_force.count(placed.hash) != 0;
+        if (!is_sel && !is_walk && !block_in_visible_segment(placed.timestamp_ms))
             continue;
-        // Multi-tx filter: still force selected/hovered; other force roles must pass filter.
-        if (!is_sel && !passes_txn_filter(placed))
+        // Multi-tx filter: still force selected/hovered/walk; other force roles must pass.
+        if (!is_sel && !is_walk && !passes_txn_filter(placed))
             continue;
-        const bool force = is_sel || missing_dep[placed.hash] ||
+        const bool force = is_sel || is_walk || missing_dep[placed.hash] ||
                            green_display.count(placed.hash) ||
                            cyan_owners.count(placed.hash);
         if (!force)
@@ -999,9 +1160,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (selected_idx != ~0u)
         {
             out.sobel_outlines.push_back(
-                SobelOutlineInstance{ selected_idx, kSobelSelectGold });
+                SobelOutlineInstance{ selected_idx, sty().sobel_select() });
         }
-        else if (in.enable_role_outlines)
+
+        if (in.enable_role_outlines && selected_idx == ~0u)
         {
             std::unordered_set<std::string> claimed;
             claimed.reserve(green_display.size() + cyan_owners.size() + incomplete_pool.size());
@@ -1010,19 +1172,43 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelTipGreen);
+                push_outline(h, sty().sobel_tip());
             }
             for (const std::string& h : cyan_owners)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelFrontierCyan);
+                push_outline(h, sty().sobel_frontier());
             }
             for (const std::string& h : incomplete_pool)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
                     continue;
-                push_outline(h, kSobelIncompleteOrange);
+                push_outline(h, sty().sobel_incomplete());
+            }
+        }
+        else if (in.enable_role_outlines)
+        {
+            // Selection exclusive gold still allow co-visible roles on other cubes.
+            std::unordered_set<std::string> claimed;
+            claimed.insert(in.selected_hash);
+            for (const std::string& h : green_display)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_tip());
+            }
+            for (const std::string& h : cyan_owners)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_frontier());
+            }
+            for (const std::string& h : incomplete_pool)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, sty().sobel_incomplete());
             }
         }
     }
@@ -1052,7 +1238,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                  const std::string& to_hash,
                                  const glm::vec3& from, const glm::vec3& to,
                                  const glm::vec4& color, float tip_scale, int stagger_i) {
-            // No arrows to/from filtered-out cubes (both ends must be drawn).
+            // Hover / misc ephemeral (own small budget).
             if (drawn.count(from_hash) == 0 || drawn.count(to_hash) == 0)
                 return;
             if (arrow_count >= kMaxDepArrows)
@@ -1080,76 +1266,132 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             placement_color[p.hash] = p.color;
 
-        auto draw_selection_deps = [&](const AlphBlock& block) {
-            if (drawn.count(block.hash) == 0)
-                return;
-            auto listing_it = block_positions.find(block.hash);
-            if (listing_it == block_positions.end())
-                return;
-            const glm::vec3& listing_pos = listing_it->second;
-            const int parent_lane = block.chain_idx();
-            int missing_i = 0;
-            int stagger_i = 0;
-            const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
-
-            for (const std::string& dep_hash : block.deps)
+        // Full BFS selection fan: own budget (matches edge cap) + fast level-wave anim.
+        const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
+        if (!sel_dep_.root.empty() && !sel_dep_.edges.empty())
+        {
+            uint32_t sel_arrow_count = 0;
+            int within_level = 0;
+            int prev_depth = -1;
+            for (const SelectionDepEdge& e : sel_dep_.edges)
             {
-                auto dep_it = block_positions.find(dep_hash);
-                if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)
+                if (static_cast<int>(sel_arrow_count) >= kMaxSelDepArrows)
+                    break;
+                auto fit = block_positions.find(e.from);
+                auto tit = block_positions.find(e.to);
+                if (fit == block_positions.end() || tit == block_positions.end())
+                    continue;
+                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
+                    continue;
+
+                if (e.depth != prev_depth)
                 {
-                    const bool focus =
-                        any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
-                    glm::vec4 arrow_col = kSelectionArrowColor;
-                    if (focus)
-                    {
-                        auto cit = placement_color.find(dep_hash);
-                        const glm::vec3 c = (cit != placement_color.end())
-                                                ? cit->second
-                                                : glm::vec3(arrow_col);
-                        arrow_col = glm::vec4(c, 1.f);
-                    }
-                    else if (any_ui_dep_hover)
-                    {
-                        // Dim non-focused selection edges while inspecting one dep.
-                        arrow_col.a = 0.35f;
-                    }
-                    add_eph_arrow('s', block.hash, dep_hash, listing_pos, dep_it->second,
-                                  arrow_col, focus ? 1.28f : 1.15f, stagger_i++);
+                    prev_depth = e.depth;
+                    within_level = 0;
+                }
+
+                const bool focus =
+                    any_ui_dep_hover && e.to == in.ui_dep_hover_hash;
+                glm::vec4 arrow_col = kSelectionArrowColor();
+                if (focus)
+                {
+                    auto cit = placement_color.find(e.to);
+                    const glm::vec3 c = (cit != placement_color.end())
+                                            ? cit->second
+                                            : glm::vec3(arrow_col);
+                    arrow_col = glm::vec4(c, 1.f);
+                }
+                else if (any_ui_dep_hover)
+                    arrow_col.a = 0.35f;
+                else if (e.depth > 0)
+                {
+                    // Slightly softer for deeper shells so hop-1 stays strongest.
+                    arrow_col.a *= std::max(0.45f, 1.f - 0.08f * static_cast<float>(e.depth));
+                }
+
+                glm::vec3 from_inset, to_inset;
+                if (!inset_segment(fit->second, tit->second, clearance, from_inset, to_inset))
+                {
+                    ++within_level;
                     continue;
                 }
 
-                // Missing-dep ghost only if parent is drawn (selection always force-drawn).
-                if (dep_it != block_positions.end() && drawn.count(dep_hash) == 0)
-                    continue; // dep filtered out — no arrow/ghost
+                // Quick shells: depth wave + micro within-level, hard-capped total delay.
+                const float delay = std::min(
+                    kSelDepMaxStaggerSec,
+                    static_cast<float>(e.depth) * kSelDepLevelStagger +
+                        static_cast<float>(within_level) * kSelDepEdgeStagger);
+                const std::string key = eph_key('s', e.from, e.to);
+                const float grow =
+                    ephemeral_grow_u_(key, delay, eph_seen, kSelDepGrowSec);
+                ++within_level;
+                if (grow <= 0.f)
+                    continue;
 
-                const float angle =
-                    ((static_cast<float>(parent_lane) + 0.35f +
-                      0.08f * static_cast<float>(missing_i)) /
-                     16.0f) *
-                    2.0f * 3.14159265f;
-                const float radius = 20.0f * 0.9f;
-                // Match layout X flip (−cos) so ghost sits with lane ring.
-                glm::vec3 ghost(
-                    -radius * std::cos(angle),
-                    radius * std::sin(angle),
-                    listing_pos.z + meters_per_second *
-                                        static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
-                const bool focus_missing =
-                    any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
-                const glm::vec4 ghost_col =
-                    focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f) : kMissingOutline;
-                debug->add_wire_box(ghost, ghost_half, ghost_col);
-                debug->add_line(listing_pos, ghost, ghost_col);
-                ++missing_i;
+                const float tip_scale = focus ? 1.28f : (e.depth == 0 ? 1.15f : 1.05f);
+                debug->add_arrow(from_inset, to_inset, arrow_col, tip_len * tip_scale,
+                                 tip_rad * tip_scale, shaft_r * tip_scale, kDepRadial,
+                                 grow);
+                ++sel_arrow_count;
             }
-        };
+        }
 
-        if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
-            draw_selection_deps(in.selected_detail);
-        else if (!in.selected_hash.empty())
+        // 1-hop missing ghosts for direct deps of selection only (no deep ghosts).
+        if (!in.selected_hash.empty() && drawn.count(in.selected_hash) != 0)
         {
-            if (auto d = scene_.detail_store().get(in.selected_hash))
-                draw_selection_deps(*d);
+            auto listing_it = block_positions.find(in.selected_hash);
+            if (listing_it != block_positions.end())
+            {
+                const AlphBlock* root_blk = nullptr;
+                std::optional<AlphBlock> root_opt;
+                if (in.selected_detail.hash == in.selected_hash)
+                    root_blk = &in.selected_detail;
+                else
+                {
+                    root_opt = scene_.detail_store().get(in.selected_hash);
+                    if (root_opt)
+                        root_blk = &*root_opt;
+                }
+                if (root_blk)
+                {
+                    const int parent_lane = root_blk->chain_idx();
+                    int missing_i = 0;
+                    const std::vector<std::string> gold_deps = sorted_deps_(root_blk->hash);
+                    const std::vector<std::string>& dep_list =
+                        gold_deps.empty() ? root_blk->deps : gold_deps;
+                    for (const std::string& dep_hash : dep_list)
+                    {
+                        if (dep_hash.empty())
+                            continue;
+                        auto dep_it = block_positions.find(dep_hash);
+                        if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)
+                            continue; // drawn edge already in BFS fan
+                        if (dep_it != block_positions.end() && drawn.count(dep_hash) == 0)
+                            continue; // filtered out
+
+                        const float angle =
+                            ((static_cast<float>(parent_lane) + 0.35f +
+                              0.08f * static_cast<float>(missing_i)) /
+                             16.0f) *
+                            2.0f * 3.14159265f;
+                        const float radius = 20.0f * 0.9f;
+                        glm::vec3 ghost(
+                            -radius * std::cos(angle),
+                            radius * std::sin(angle),
+                            listing_it->second.z +
+                                meters_per_second *
+                                    static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
+                        const bool focus_missing =
+                            any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                        const glm::vec4 ghost_col =
+                            focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f)
+                                          : kMissingOutline;
+                        debug->add_wire_box(ghost, ghost_half, ghost_col);
+                        debug->add_line(listing_it->second, ghost, ghost_col);
+                        ++missing_i;
+                    }
+                }
+            }
         }
 
         if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash &&
@@ -1169,7 +1411,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                         if (dep_it == block_positions.end())
                             continue;
                         add_eph_arrow('h', d->hash, dep_hash, listing_it->second, dep_it->second,
-                                      kHoverArrowColor, 1.05f, stagger_i++);
+                                      kHoverArrowColor(), 1.05f * sty().arrow_tip_scale,
+                                      stagger_i++);
                     }
                 }
             }
@@ -1337,6 +1580,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.cache_pressure_level = hud.cache_pressure_level;
         out.ui.browse_mode = hud.browse_mode;
         out.ui.timeline_origin_ms = timeline_origin_ms;
+        out.ui.genesis_ms =
+            scene_.genesis_ms() > 0 ? scene_.genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
         out.ui.meters_per_second = meters_per_second;
         out.ui.segment_count =
             std::clamp(hud.segment_count, 0, UiSnapshot::kMaxTimeSegments);

@@ -8,7 +8,7 @@
 //   green    — per-lane frontier tip H_c (or walk-anim display) + full blockDeps arrows
 //   cyan     — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip
 //   orange   — missing-dep incompletes (not green/cyan)
-//   gold     — selection
+//   gold     — selection + full BFS block-dep fan from selected root
 //   red      — removal death fade
 //   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
 #include "domain/block_scene.hpp"
@@ -40,9 +40,34 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
+    // Selection BFS dep fan: multi-segment DAG + snappy level-wave anim.
+    static constexpr int    kMaxSelDepNodes       = 4096;
+    static constexpr int    kMaxSelDepEdges       = 8192;
+    static constexpr int    kMaxSelDepArrows      = 8192; // match edge cap (own budget)
+    static constexpr float  kSelDepGrowSec        = 0.08f;
+    static constexpr float  kSelDepLevelStagger   = 0.012f; // delay per BFS depth
+    static constexpr float  kSelDepEdgeStagger    = 0.0015f; // within-level micro delay
+    static constexpr float  kSelDepMaxStaggerSec  = 0.25f;  // hard cap — fan never waits seconds
 
     // Growing → Held → Dying (remove only). No unused Fading/Gone.
     enum class ArrowPhase : uint8_t { Growing, Held, Dying };
+
+    // Full BFS of block deps from selected root (static gold fan).
+    struct SelectionDepEdge
+    {
+        std::string from;
+        std::string to;
+        int         depth = 0; // depth of `from` (edge spans depth → depth+1)
+    };
+
+    struct SelectionDepTrace
+    {
+        std::string                   root;
+        std::vector<std::string>      nodes;
+        std::unordered_set<std::string> node_set;
+        std::vector<SelectionDepEdge> edges;
+        bool                          seeded_from_detail = false;
+    };
 
     struct DepArrowAnim
     {
@@ -97,7 +122,16 @@ private:
                                 float now);
 
     float ephemeral_grow_u_(const std::string& key, float stagger_delay,
-                            std::unordered_set<std::string>& seen);
+                            std::unordered_set<std::string>& seen,
+                            float grow_sec = kArrowGrowSec);
+
+    void clear_selection_deps_();
+    void rebuild_selection_dep_bfs_(const std::string& root_hash);
+    void collect_selection_dep_force_(std::unordered_set<std::string>& out) const;
+    // Shard (chain_idx) for hash; 255 if unknown.
+    int chain_idx_for_hash_(const std::string& hash) const;
+    // Deps of node sorted by chain_idx then hash (stable BFS expand + gold order).
+    std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
 
     BlockScene& scene_;
     PolarShardLayout layout_;
@@ -113,4 +147,8 @@ private:
     // Sliding-window segment fade by lookback k (0 = live): 0..1 for enter/leave.
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
+
+    // Selection full BFS block-dep fan.
+    SelectionDepTrace sel_dep_;
+    uint64_t          last_walk_replay_gen_ = 0;
 };

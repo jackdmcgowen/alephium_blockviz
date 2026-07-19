@@ -49,20 +49,21 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 ```text
 render thread (frame_loop.cpp):
   apply published GpuFrameSlot (gpu_frame_publish.cpp)
-  IFrameSource::prepare → new FrameSourceOutput
+  IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
   publish_frame / upload
-  record main pass (+ debug arrows)  // graphics_system::record_command_buffer
-  optional async Sobel (async_sobel_submit.cpp)
+  record main: cubes → debug mesh (planes after arrows) → ImGui
   optional pick pass
-  IUiOverlay::draw → ImGui render
+  optional async Sobel: outline depth → CMP edges → overlay LOAD on swapchain (last)
   present
 ```
+
+**Order note:** segment barrier planes are debug quads in the main pass. Sobel edge composite runs **after** planes (and ImGui) as a depth-free overlay so selection/TRACE edges read as a highlight on top of translucent planes.
 
 ### Sobel (domain-agnostic, single pass)
 
 - App builds `std::vector<SobelOutlineInstance>` (`instance_index` + `color`); graphics has **no** role names (gold/green/cyan/orange).
-- All outline cubes drawn in **one** depth+color pass (unless culled earlier in presenter).
-- Compute Sobel produces a **white** edge mask; overlay multiplies `edge × instance_color`.
+- All outline cubes drawn in **one** private depth+color pass (scene depth unused).
+- Compute Sobel produces a **white** edge mask; overlay multiplies `edge × instance_color` onto swapchain **after** main color (cubes + planes).
 - Kill-switch `visualize_confirmed_tips` is passed to the presenter as `enable_role_outlines` (selection gold still emitted when selected).
 - Product colors live in `ScenePresenter` (brand palette); see [app.md](app.md).
 

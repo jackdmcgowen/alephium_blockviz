@@ -68,6 +68,8 @@ public:
     void drain_verify(int max_jobs, const std::atomic<bool>& running);
 
     void maybe_refill_selection_detail();
+    // Sole hard-prune owner (poller calls this). Invalidates chunk dedupe for dropped ranges.
+    void maybe_memory_pressure_prune();
 
     Phase phase() const { return phase_; }
     // HUD: lanes still on confirm walk (0 when idle).
@@ -150,6 +152,11 @@ private:
     void recompute_window_chunk_stats_(int window_index);
     // Force live newest chunk(s) + tip reseed after returning from history.
     void resync_live_chain_();
+    // Enter/advance/exit history→live catch-up (fill missing 60s chunks first).
+    void begin_live_catchup_();
+    void pump_live_catchup_();
+    bool live_catchup_ring_complete_() const;
+    void finish_live_catchup_();
     // Steady + live window fully chunk-filled (gate deep history ≥2).
     bool live_tip_pipeline_ready_() const;
     // Dual-segment initial: windows 0 and 1 both polled.
@@ -163,7 +170,14 @@ private:
     void on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms);
     void on_interval_chunk_failed_(int64_t from_ms);
 
-    void drain_fetch_results_(int max_admits);
+    // Apply fetch results with separate interval vs hash/is_main budgets.
+    void drain_fetch_results_(int interval_budget, int other_budget);
+    void drain_fetch_results_(int max_admits)
+    {
+        drain_fetch_results_(max_admits, max_admits);
+    }
+    // After hard prune: drop load-once keys for time ranges no longer in graph.
+    void invalidate_interval_dedupe_before_(int64_t min_keep_ts_ms);
     // Live-chain only: per-hash GET /blocks/{hash}.
     bool enqueue_missing_dep_(const std::string& dep_hash);
     // On confirm: live → hash-fill deps; historical → time-slot poll (no hash).
@@ -202,8 +216,7 @@ private:
     // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
     bool try_chain_walk_confirm_(const std::string& tip_hash, uint32_t lane, int height);
     void prune_detail_store();
-    // No off-ring discard. Soft/hard memory pressure warning (+ optional last-resort
-    // oldest-node prune only when over hard cap). Sliding ring is view/fetch only.
+    // Internal implementation of maybe_memory_pressure_prune (public API).
     void maybe_memory_pressure_prune_();
 
     BlockScene& scene_;
@@ -292,8 +305,13 @@ private:
     int     cache_pressure_level_ = 0;
     // Rate-limit chunk pumps on the drain path (ms wall clock).
     int64_t last_chunk_pump_ms_ = 0;
-    // Quantized chunk from_ts of interval polls already issued (dedupe).
+    // Load-once: chunk from_ms successfully admitted (not mere HTTP attempt).
+    // Re-GET only after fail/prune invalidation, or live tip force_newest.
     std::unordered_set<int64_t> history_slots_fetched_;
+    // Returned to live: fill missing sub-segments before tip seeds.
+    bool live_catchup_active_ = false;
+    // Deferred non-interval results when interval budget is preferred.
+    std::deque<HttpIoPool::Result> deferred_fetch_results_;
 
     int poll_count_ = 0;
     int64_t last_poll_wall_ms_ = 0;

@@ -634,7 +634,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
             mx < static_cast<float>(width) - rail_w &&
             my < static_cast<float>(height);
 
-        // Short RMB reset (look home + pan origin) is in BlockflowOverlay.
+        // Short RMB deselect is in BlockflowOverlay; key 3 / Live reattaches tip.
         // Short LMB click = pick; LMB drag is free look (overlay).
         constexpr float kPickMaxDragSqr = 4.f * 4.f;
         PickKind request = PickKind::None;

@@ -108,6 +108,8 @@ void AlephiumAdapter::reset_stats()
     uncle_queued_.clear();
     pending_fill_parents_.clear();
     history_slots_fetched_.clear();
+    deferred_fetch_results_.clear();
+    live_catchup_active_ = false;
     phase_ = Phase::BootstrapPoll;
     bootstrap_poll_done_ = false;
     clear_bfs_state_();
@@ -159,6 +161,16 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     case Phase::Steady:        status = 5; break;
     }
 
+    const int cam = camera_lookback_index_();
+    // Sliding window off live tip → History; return-to-live hole fill → Catching up.
+    if (!switching && phase_ == Phase::Steady)
+    {
+        if (cam >= 1)
+            status = 8; // NetworkStatus::History
+        else if (live_catchup_active_)
+            status = 9; // NetworkStatus::CatchingUp
+    }
+
     BlockScene::NetworkHud hud{};
     hud.domain = domain;
     hud.status = switching ? 6 : status;
@@ -171,7 +183,6 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
         if (w.polled)
             ++done;
     hud.lookback_windows_done = done;
-    const int cam = camera_lookback_index_();
     hud.lookback_windows_need = std::max(1, cam + 1);
     if (static_cast<int>(lookback_windows_.size()) > hud.lookback_windows_need)
         hud.lookback_windows_need = static_cast<int>(lookback_windows_.size());
@@ -195,7 +206,7 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.poll_interval_sec = static_cast<float>(cfg_.poll_interval_ms) * 0.001f;
     hud.cache_pressure_level = cache_pressure_level_;
     // History when camera lookback k>=1 (live tip window outside sliding 3-slot view).
-    hud.browse_mode = (camera_lookback_index_() >= 1) ? 1 : 0;
+    hud.browse_mode = (cam >= 1) ? 1 : (live_catchup_active_ ? 2 : 0);
 
     // Timeline segments: only the active triple-buffer ring (scrolling minimap).
     {
@@ -2339,20 +2350,148 @@ void AlephiumAdapter::ensure_windows_for_camera_()
     }
 }
 
-void AlephiumAdapter::resync_live_chain_()
+bool AlephiumAdapter::live_catchup_ring_complete_() const
 {
-    // Force newest live chunk(s) + tip reseed; remaining window fills via pump.
-    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    std::printf("[adapter] live resync: force newest chunks + reseed tips (k=0)\n");
+    // Uses last update_segment_ring_ snapshot (caller ensures ring is current).
+    if (active_ring_n_ <= 0)
+        return lookback_windows_.empty() ||
+               (lookback_windows_[0].polled && lookback_windows_[0].pending_from_ms == 0);
+    for (int i = 0; i < active_ring_n_; ++i)
+    {
+        const int wi = active_ring_[i];
+        if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
+            return false;
+        const LookbackWindowSlot& w = lookback_windows_[static_cast<size_t>(wi)];
+        if (!w.polled || w.pending_from_ms > 0)
+            return false;
+        if (w.chunks_total > 0 && w.chunks_done < w.chunks_total)
+            return false;
+    }
+    return true;
+}
+
+void AlephiumAdapter::begin_live_catchup_()
+{
+    live_catchup_active_ = true;
+    live_poll_deferred_ = false;
+    resolve_genesis_ms_();
+    ensure_windows_for_camera_();
     ensure_lookback_window_(0, /*allow_live_poll=*/true);
     if (!lookback_windows_.empty())
     {
-        lookback_windows_[0].want_newest_refresh = true;
-        // Prefer re-filling any holes newest-first after force tip chunk.
+        // Extend open live window; hold tip force until holes filled.
+        lookback_windows_[0].want_newest_refresh = false;
         if (lookback_windows_[0].next_fill_to_ms <= 0)
             lookback_windows_[0].next_fill_to_ms = lookback_windows_[0].to_ms;
+        recompute_window_chunk_stats_(0);
     }
-    // Budget a few chunks now so tips exist before reseed.
+    for (int i = 0; i < active_ring_n_; ++i)
+    {
+        const int wi = active_ring_[i];
+        if (wi > 0 && wi < static_cast<int>(lookback_windows_.size()))
+            recompute_window_chunk_stats_(wi);
+    }
+    std::printf("[adapter] live catch-up: fill missing 60s chunks before tip seeds\n");
+    if (live_catchup_ring_complete_())
+        finish_live_catchup_();
+}
+
+void AlephiumAdapter::pump_live_catchup_()
+{
+    if (!live_catchup_active_)
+        return;
+    ensure_windows_for_camera_();
+    ensure_lookback_window_(0, /*allow_live_poll=*/true);
+
+    // Prefer most incomplete ring window (history-style tip-backward fill).
+    int best_wi = -1;
+    float best_frac = 2.f;
+    for (int i = 0; i < active_ring_n_; ++i)
+    {
+        const int wi = active_ring_[i];
+        if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
+            continue;
+        LookbackWindowSlot& w = lookback_windows_[static_cast<size_t>(wi)];
+        recompute_window_chunk_stats_(wi);
+        if (w.polled && w.pending_from_ms == 0)
+            continue;
+        const float frac =
+            w.chunks_total > 0
+                ? static_cast<float>(w.chunks_done) / static_cast<float>(w.chunks_total)
+                : 1.f;
+        if (frac < best_frac)
+        {
+            best_frac = frac;
+            best_wi = wi;
+        }
+    }
+    int budget = kMaxChunksPerPoll * 2;
+    if (best_wi >= 0)
+    {
+        while (budget-- > 0 && fetch_window_chunk_(best_wi, /*force_newest=*/false))
+        {
+        }
+    }
+    pump_timeline_chunks_(kMaxChunksPerPoll * 2);
+    drain_fetch_results_(kIntervalAdmitsPerDrain, kMaxFetchAdmitsPerDrain);
+    if (live_catchup_ring_complete_())
+        finish_live_catchup_();
+}
+
+void AlephiumAdapter::finish_live_catchup_()
+{
+    if (!live_catchup_active_)
+        return;
+    live_catchup_active_ = false;
+    if (!lookback_windows_.empty())
+        lookback_windows_[0].want_newest_refresh = true;
+    std::printf("[adapter] live catch-up complete: tip refresh + reseed\n");
+
+    // Tip reseed (same as old resync path after holes filled).
+    int seeded = 0;
+    for (const NodeId& tip : scene_.tip_ids())
+    {
+        auto n = scene_.graph().get(tip);
+        if (!n)
+            continue;
+        if (!height_in_lookback_(n->lane, static_cast<int>(n->height)))
+            continue;
+        if (main_chain_cache_.is_cached_main(tip))
+        {
+            const int h = static_cast<int>(n->height);
+            mark_scene_confirmed_(tip, static_cast<int>(n->group_from),
+                                  static_cast<int>(n->group_to), h);
+            maybe_flood_offline_(tip, n->lane, h, /*force=*/false);
+            continue;
+        }
+        SeedJob job;
+        job.hash = tip;
+        job.from = static_cast<int>(n->group_from);
+        job.to = static_cast<int>(n->group_to);
+        job.height = static_cast<int>(n->height);
+        const size_t before = seed_q_.size();
+        enqueue_seed_(std::move(job));
+        if (seed_q_.size() > before)
+            ++seeded;
+    }
+    pump_timeline_chunks_(kMaxChunksPerPoll + 1);
+    (void)seeded;
+}
+
+void AlephiumAdapter::resync_live_chain_()
+{
+    // After History: catch up missing 60s sub-segments, then tip build.
+    begin_live_catchup_();
+    if (live_catchup_active_)
+    {
+        pump_live_catchup_();
+        return;
+    }
+    // Already complete — tip refresh only.
+    std::printf("[adapter] live resync: ring complete, tip refresh only\n");
+    ensure_lookback_window_(0, /*allow_live_poll=*/true);
+    if (!lookback_windows_.empty())
+        lookback_windows_[0].want_newest_refresh = true;
     pump_timeline_chunks_(kMaxChunksPerPoll + 1);
 
     int seeded = 0;
@@ -2381,8 +2520,7 @@ void AlephiumAdapter::resync_live_chain_()
         if (seed_q_.size() > before)
             ++seeded;
     }
-    adapter_vlog("[adapter] live resync seeds+=%d seed_q=%zu now=%lld\n", seeded,
-                seed_q_.size(), static_cast<long long>(now));
+    adapter_vlog("[adapter] live resync seeds+=%d seed_q=%zu\n", seeded, seed_q_.size());
     if (phase_ == Phase::Steady || phase_ == Phase::IdentifyTips || phase_ == Phase::BfsTrace)
         advance_sequential_tips_();
 }
@@ -2468,88 +2606,155 @@ void AlephiumAdapter::advance_sequential_tips_()
     }
 }
 
-void AlephiumAdapter::drain_fetch_results_(int max_admits)
+void AlephiumAdapter::drain_fetch_results_(int interval_budget, int other_budget)
 {
-    if (!fetch_pool_ || max_admits <= 0)
+    if (!fetch_pool_)
         return;
+    if (interval_budget < 0)
+        interval_budget = 0;
+    if (other_budget < 0)
+        other_budget = 0;
 
-    auto results = fetch_pool_->drain_results(static_cast<size_t>(max_admits));
-    for (auto& r : results)
+    // Prefer applying deferred leftovers, then pool drain.
+    std::vector<HttpIoPool::Result> results;
+    results.reserve(static_cast<size_t>(interval_budget + other_budget + 8));
+    while (!deferred_fetch_results_.empty() &&
+           results.size() < static_cast<size_t>(interval_budget + other_budget))
     {
-        using Kind = HttpIoPool::Kind;
-        if (r.kind == Kind::Interval)
-        {
-            if (!r.ok || r.body.empty())
-            {
-                // HTTP fail: pool did not mark completed — retry allowed.
-                on_interval_chunk_failed_(r.from_ms);
-                continue;
-            }
-            cJSON* obj = cJSON_ParseWithLength(r.body.c_str(), r.body.size());
-            if (!obj)
-            {
-                // HTTP ok but body unusable — forget completion so pump can retry.
-                fetch_pool_->io().forget_completed_interval(r.from_ms);
-                on_interval_chunk_failed_(r.from_ms);
-                continue;
-            }
-            int seen = 0, added = 0;
-            admit_blocks_with_events_(obj, &seen, &added);
-            cJSON_Delete(obj);
-            history_slots_fetched_.insert(r.from_ms);
-            if (r.from_ms > 0 || r.to_ms > 0)
-            {
-                last_live_window_poll_ms_ =
-                    static_cast<int64_t>(std::time(nullptr)) * 1000;
-            }
-            on_interval_chunk_admitted_(r.from_ms, r.to_ms);
-            adapter_vlog("[adapter] interval admit from=%lld to=%lld seen=%d added=%d\n",
-                        static_cast<long long>(r.from_ms),
-                        static_cast<long long>(r.to_ms), seen, added);
-            continue;
-        }
+        results.push_back(std::move(deferred_fetch_results_.front()));
+        deferred_fetch_results_.pop_front();
+    }
+    auto more = fetch_pool_->drain_results(
+        static_cast<size_t>(std::max(1, interval_budget + other_budget)));
+    for (auto& r : more)
+        results.push_back(std::move(r));
 
-        if (r.kind == Kind::IsMain)
+    int interval_used = 0;
+    int other_used = 0;
+    using Kind = HttpIoPool::Kind;
+
+    auto apply_interval = [&](HttpIoPool::Result& r) {
+        if (!r.ok)
         {
-            // PR2: apply confirm on policy thread (body is JSON bool).
-            continue;
+            // HTTP fail: pool does not mark completed — retry allowed.
+            on_interval_chunk_failed_(r.from_ms);
+            return;
         }
+        if (r.body.empty())
+        {
+            // OK but empty body still marks completed in pool — forget so retry works.
+            fetch_pool_->io().forget_completed_interval(r.from_ms);
+            on_interval_chunk_failed_(r.from_ms);
+            return;
+        }
+        cJSON* obj = cJSON_ParseWithLength(r.body.c_str(), r.body.size());
+        if (!obj)
+        {
+            fetch_pool_->io().forget_completed_interval(r.from_ms);
+            on_interval_chunk_failed_(r.from_ms);
+            return;
+        }
+        int seen = 0, added = 0;
+        admit_blocks_with_events_(obj, &seen, &added);
+        cJSON_Delete(obj);
+        // Load-once: successful policy apply (including 0 blocks in span).
+        history_slots_fetched_.insert(r.from_ms);
+        if (r.from_ms > 0 || r.to_ms > 0)
+        {
+            last_live_window_poll_ms_ =
+                static_cast<int64_t>(std::time(nullptr)) * 1000;
+        }
+        on_interval_chunk_admitted_(r.from_ms, r.to_ms);
+        adapter_vlog("[adapter] interval admit from=%lld to=%lld seen=%d added=%d\n",
+                    static_cast<long long>(r.from_ms),
+                    static_cast<long long>(r.to_ms), seen, added);
+    };
+
+    auto apply_other = [&](HttpIoPool::Result& r) {
+        if (r.kind == Kind::IsMain)
+            return; // PR2: apply confirm on policy thread later
 
         // BlockHash
         if (!r.ok || r.body.empty())
         {
             if (!r.hash.empty())
                 broken_dep_failed_.insert(r.hash);
-            continue;
+            return;
         }
-
         cJSON* obj = cJSON_ParseWithLength(r.body.c_str(), r.body.size());
         if (!obj)
         {
             broken_dep_failed_.insert(r.hash);
-            continue;
+            return;
         }
-
         cJSON* block = unwrap_block_json(obj);
         AlphBlock alph(block);
         if (alph.hash.empty() || alph.hash != r.hash)
         {
             cJSON_Delete(obj);
             broken_dep_failed_.insert(r.hash);
-            continue;
+            return;
         }
-
         const bool added = scene_.add_block(block);
         cJSON_Delete(obj);
-
         if (added || scene_.graph().contains(r.hash))
         {
             ++stats_fetch_admitted_;
             if (main_chain_cache_.is_cached_main(r.hash))
                 mark_scene_confirmed_(r.hash);
         }
+    };
+
+    for (auto& r : results)
+    {
+        if (r.kind == Kind::Interval)
+        {
+            if (interval_used < interval_budget)
+            {
+                apply_interval(r);
+                ++interval_used;
+            }
+            else
+                deferred_fetch_results_.push_back(std::move(r));
+        }
+        else
+        {
+            if (other_used < other_budget)
+            {
+                apply_other(r);
+                ++other_used;
+            }
+            else
+                deferred_fetch_results_.push_back(std::move(r));
+        }
     }
     recheck_confirm_fill_parents_();
+}
+
+void AlephiumAdapter::invalidate_interval_dedupe_before_(int64_t min_keep_ts_ms)
+{
+    // Drop load-once keys for chunks that no longer have graph coverage after prune.
+    // Chunk key is from_ms; erase if chunk ends at or before min_keep_ts.
+    const int64_t c = chunk_ms_();
+    std::vector<int64_t> drop;
+    drop.reserve(history_slots_fetched_.size());
+    for (int64_t from : history_slots_fetched_)
+    {
+        const int64_t chunk_end = from + c;
+        if (min_keep_ts_ms <= 0 || chunk_end <= min_keep_ts_ms)
+            drop.push_back(from);
+    }
+    for (int64_t from : drop)
+    {
+        history_slots_fetched_.erase(from);
+        if (fetch_pool_)
+            fetch_pool_->io().forget_completed_interval(from);
+    }
+    for (int wi = 0; wi < static_cast<int>(lookback_windows_.size()); ++wi)
+        recompute_window_chunk_stats_(wi);
+    if (!drop.empty())
+        adapter_vlog("[adapter] invalidate %zu chunk keys before ts=%lld\n", drop.size(),
+                    static_cast<long long>(min_keep_ts_ms));
 }
 
 void AlephiumAdapter::enqueue_uncles_from_block_(const AlphBlock& alph)
@@ -2795,11 +3000,16 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     replace_non_main_(seed);
 }
 
+void AlephiumAdapter::maybe_memory_pressure_prune()
+{
+    maybe_memory_pressure_prune_();
+}
+
 void AlephiumAdapter::maybe_memory_pressure_prune_()
 {
     // Sliding ring is view/fetch only — do NOT drop graph nodes when the camera
     // leaves a segment. Blocks stay so revisiting redraws without re-GET.
-    // Last-resort prune only under hard memory pressure (poller also enforces ~2 GB).
+    // Sole hard-prune owner (poller calls public maybe_memory_pressure_prune).
     // Soft pressure: set HUD warning only.
     if (phase_ != Phase::Steady)
         return;
@@ -2848,9 +3058,20 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
     if (removed > 0)
     {
         stats_removed_ += static_cast<int>(removed);
+        // Oldest remaining node ts — invalidate load-once keys older than that.
+        int64_t min_keep = 0;
+        const auto snap = scene_.nodes_snapshot();
+        for (const auto& n : snap)
+        {
+            if (n.timestamp_ms <= 0)
+                continue;
+            if (min_keep == 0 || n.timestamp_ms < min_keep)
+                min_keep = n.timestamp_ms;
+        }
+        invalidate_interval_dedupe_before_(min_keep);
         std::printf("[adapter] memory pressure prune removed=%zu (cap=%zu) — "
-                    "some history dropped; re-visit may re-fetch\n",
-                    removed, cap);
+                    "chunk dedupe invalidated before ts=%lld; re-visit may re-fetch\n",
+                    removed, cap, static_cast<long long>(min_keep));
     }
 }
 
@@ -2900,13 +3121,24 @@ void AlephiumAdapter::maybe_refill_selection_detail()
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
     maybe_refill_selection_detail();
-    // History / deep ring: prefer applying interval chunks so pending_from_ms clears.
-    // Hash admits stay on the smaller budget so confirm work does not starve timeline.
+    // Separate interval vs hash budgets (History / catch-up prioritize intervals).
     const int cam_k_early = camera_lookback_index_();
-    const int interval_budget =
-        (cam_k_early >= 1) ? kIntervalAdmitsPerDrain : kMaxFetchAdmitsPerDrain;
-    drain_fetch_results_(std::max(interval_budget, kMaxFetchAdmitsPerDrain));
+    const int ib =
+        (cam_k_early >= 1 || live_catchup_active_) ? kIntervalAdmitsPerDrain : 8;
+    drain_fetch_results_(ib, kMaxFetchAdmitsPerDrain);
     recheck_confirm_fill_parents_();
+
+    // Presenter walk / UI requested missing blocks (hash GET or history chunk).
+    {
+        auto want = scene_.drain_block_fetch_requests(8);
+        for (const std::string& h : want)
+        {
+            if (h.empty() || scene_.graph().contains(h))
+                continue;
+            if (!enqueue_missing_dep_(h))
+                request_history_slot_for_block_(h);
+        }
+    }
 
     // History mode: cam_k >= 1 (live tip window k0 outside sliding view).
     // Live mode: cam_k == 0. Track continuously for resync + pump boost.
@@ -2917,16 +3149,17 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     const bool history_mode = !live_cam;
     if (live_cam && prev_k > 0 && phase_ == Phase::Steady)
     {
-        const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
-        const int64_t poll_iv = cfg_.poll_interval_ms > 0 ? cfg_.poll_interval_ms : 8000;
-        if (last_live_window_poll_ms_ == 0 || (now - last_live_window_poll_ms_) >= poll_iv)
-            resync_live_chain_();
-        else
-            adapter_vlog("[adapter] return to live (drain): skip force poll (interval)\n");
+        // Always start catch-up when returning from history (missing sub-segments).
+        resync_live_chain_();
+    }
+    else if (live_cam && live_catchup_active_)
+    {
+        pump_live_catchup_();
     }
     else if (history_mode)
     {
         live_poll_deferred_ = true;
+        live_catchup_active_ = false;
     }
 
     // Progressive timeline fill (rate-limited). Tip-backward: never genesis-first.
@@ -2934,23 +3167,22 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     {
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const bool cam_stepped = (cam_k != prev_k);
-        if (last_chunk_pump_ms_ == 0 || cam_stepped ||
+        if (last_chunk_pump_ms_ == 0 || cam_stepped || live_catchup_active_ ||
             (now - last_chunk_pump_ms_) >= kChunkPumpIntervalMs)
         {
             ensure_windows_for_camera_();
             int budget = kAheadChunksPerDrain;
             if (phase_ == Phase::BootstrapPoll)
                 budget = kBootstrapChunksPerDrain;
-            else if (history_mode || cam_k >= 1)
+            else if (history_mode || cam_k >= 1 || live_catchup_active_)
                 budget = std::max(kAheadChunksPerDrain, kMaxChunksPerPoll * 2);
             else if (!live_tip_pipeline_ready_())
                 budget = std::max(kPreTipChunksPerDrain, kAheadChunksPerDrain);
             if (cam_stepped)
                 budget = std::max(budget, kMaxChunksPerPoll * 2);
             pump_timeline_chunks_(budget);
-            // Apply interval results immediately so next pump can advance cursors.
-            if (history_mode || cam_stepped)
-                drain_fetch_results_(kIntervalAdmitsPerDrain);
+            if (history_mode || cam_stepped || live_catchup_active_)
+                drain_fetch_results_(kIntervalAdmitsPerDrain, kMaxFetchAdmitsPerDrain);
         }
     }
 
@@ -2973,11 +3205,12 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     // History mode (live k0 outside sliding window): no new live tip discovery.
 
     if (phase_ == Phase::IdentifyTips || phase_ == Phase::BootstrapPoll ||
-        (phase_ == Phase::Steady && !fills_block_steady_seeds && live_cam) ||
-        (phase_ == Phase::BfsTrace && live_cam))
+        (phase_ == Phase::Steady && !fills_block_steady_seeds && live_cam &&
+         !live_catchup_active_) ||
+        (phase_ == Phase::BfsTrace && live_cam && !live_catchup_active_))
     {
-        if (live_cam && seed_q_.empty() && tip_pending_confirmation_() &&
-            !fills_block_steady_seeds)
+        if (live_cam && !live_catchup_active_ && seed_q_.empty() &&
+            tip_pending_confirmation_() && !fills_block_steady_seeds)
         {
             for (const NodeId& tip : scene_.tip_ids())
             {
@@ -3069,10 +3302,6 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     last_cam_lookback_k_ = cam_k;
     const bool live_cam = (cam_k == 0);
     const bool returned_to_live = (prev_k > 0 && live_cam);
-    const int64_t poll_iv = cfg_.poll_interval_ms > 0 ? cfg_.poll_interval_ms : 8000;
-    const bool live_interval_elapsed =
-        last_live_window_poll_ms_ == 0 ||
-        (now - last_live_window_poll_ms_) >= poll_iv;
 
     // Bootstrap: high-budget fill of windows 0 then 1 (dual-segment) before tips.
     // Stay in Bootstrap until both complete so history ≥2 never races tip build.
@@ -3112,11 +3341,10 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     if (!live_cam)
     {
         live_poll_deferred_ = true;
+        live_catchup_active_ = false;
         ensure_windows_for_camera_();
-        // Tip-backward fill around camera only (cam_k..cam_k+2).
         pump_timeline_chunks_(std::max(kMaxChunksPerPoll, kMaxChunksPerPoll * 2));
-        // High interval admit budget so multi-window history applies promptly.
-        drain_fetch_results_(kHistoryIntervalAdmitsPerPoll);
+        drain_fetch_results_(kHistoryIntervalAdmitsPerPoll, kMaxFetchAdmitsPerDrain);
 
         const size_t fetch_pend = fetch_pool_ ? fetch_pool_->pending_jobs() : 0;
         const size_t fetch_inflight = fetch_pool_ ? fetch_pool_->in_flight() : 0;
@@ -3131,18 +3359,16 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         return;
     }
 
-    // Back at live tip: if away long enough (or never polled), live resync.
-    if (returned_to_live && live_interval_elapsed)
+    // Back at live tip: catch up missing sub-segments then tip build.
+    if (returned_to_live || live_catchup_active_)
     {
-        resync_live_chain_();
+        if (returned_to_live)
+            resync_live_chain_();
+        else
+            pump_live_catchup_();
         ensure_windows_for_camera_();
-        pump_timeline_chunks_(kMaxChunksPerPoll);
-    }
-    else if (returned_to_live && !live_interval_elapsed)
-    {
-        adapter_vlog("[adapter] return to live: skip force poll (interval not elapsed)\n");
-        ensure_windows_for_camera_();
-        pump_timeline_chunks_(kMaxChunksPerPoll);
+        pump_timeline_chunks_(kMaxChunksPerPoll * 2);
+        drain_fetch_results_(kIntervalAdmitsPerDrain, kMaxFetchAdmitsPerDrain);
     }
     else
     {
@@ -3150,12 +3376,12 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
         ensure_lookback_window_(0, /*allow_live_poll=*/true);
         ensure_windows_for_camera_();
         pump_timeline_chunks_(kMaxChunksPerPoll);
+        drain_fetch_results_(8, kMaxFetchAdmitsPerDrain);
     }
 
-    // Seed current live tips for is_main (pool filled by lookback windows).
-    // resync_live_chain_ already reseeded when that path ran.
+    // Seed current live tips only after catch-up (finish_live_catchup_ reseeds).
     int seeded = 0;
-    if (!(returned_to_live && live_interval_elapsed))
+    if (!live_catchup_active_ && !returned_to_live)
     {
         for (const NodeId& tip : scene_.tip_ids())
         {
@@ -3183,8 +3409,6 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
                 ++seeded;
         }
     }
-
-    drain_fetch_results_(kMaxFetchAdmitsPerDrain);
 
     const size_t fetch_pend = fetch_pool_ ? fetch_pool_->pending_jobs() : 0;
     const size_t fetch_inflight = fetch_pool_ ? fetch_pool_->in_flight() : 0;

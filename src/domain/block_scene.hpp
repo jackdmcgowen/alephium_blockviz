@@ -102,6 +102,20 @@ public:
     std::vector<NodeId> tip_ids() const;
     size_t unconfirmed_live_count() const;
 
+    // UI / presenter: request adapter to fetch a missing block (hash GET or history).
+    // Thread-safe; adapter drains with drain_block_fetch_requests.
+    void request_block_fetch(const NodeId& hash);
+    // Caller already holds mutex() — do not re-lock (presenter prepare path).
+    void request_block_fetch_locked(const NodeId& hash);
+    std::vector<NodeId> drain_block_fetch_requests(size_t max_n = 32);
+
+    // Overlay → presenter: bump to re-run dep walk on current selection.
+    void request_walk_replay() { walk_replay_gen_.fetch_add(1, std::memory_order_relaxed); }
+    uint64_t walk_replay_gen() const
+    {
+        return walk_replay_gen_.load(std::memory_order_relaxed);
+    }
+
     void  set_camera_scroll_z(float z) { camera_scroll_z_.store(z, std::memory_order_relaxed); }
     float camera_scroll_z() const { return camera_scroll_z_.load(std::memory_order_relaxed); }
 
@@ -211,4 +225,9 @@ private:
     int trace_offset_ = 0;
 
     NetworkHud network_hud_{};
+
+    // Missing-block fetch requests (presenter → adapter).
+    std::unordered_set<NodeId> block_fetch_pending_;
+    std::deque<NodeId>         block_fetch_q_;
+    std::atomic<uint64_t>      walk_replay_gen_{ 0 };
 };

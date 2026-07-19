@@ -4,7 +4,7 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).
 
 **Last updated:** 2026-07-19  
-**Versions:** app **0.7.0** · engine **0.8.0** (see identity headers)
+**Versions:** app **0.8.0** · engine **0.9.0** (see identity headers)
 
 | Status | Meaning |
 |--------|---------|
@@ -38,7 +38,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| — | *(empty — sliding history ring + minimap on feature branch)* | | Merge to `main` + `app-v0.7.0` / `engine-v0.8.0` tags ([AGENTS.md](../AGENTS.md)) |
+| — | *(empty — side cam / BFS fan / minimap released app 0.8.0 / engine 0.9.0)* | | Next: `feature/segment-disk-cache` |
 
 ---
 
@@ -58,7 +58,8 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 7 | Richer **dep-viz modes** (selection / frontier / LOD) | [app](layers/app.md) | Product decision first; avoid full edge soup by default |
+| 7 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection full BFS fan shipped on feature branch; avoid scene-wide edge soup |
+| 7b | **Sharded group-dependency walk** (separate view) | [app](layers/app.md) | Not block-parent BFS; abstract clique / group topology — different product surface |
 | 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
 | 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
 | 10 | **History depth + LOD** presentation | app · network | Sliding 3-slot view + keep-all-loaded in RAM; presentation LOD still open |

@@ -26,7 +26,7 @@ void GraphicsSystem::clear_selection_unlocked()
     selected_hash_.clear();
     selected_block = AlphBlock{};
     if (camera_)
-        camera_->clear_look_target();
+        camera_->release_look_aim();
     if (scene_)
         scene_->detail_store().set_full_detail_pin({});
 }

@@ -48,6 +48,8 @@ void BlockScene::reset()
     network_hud_.stats_fetch_admitted = 0;
     network_hud_.stats_removed = 0;
     network_hud_.stats_seed_q = 0;
+    block_fetch_pending_.clear();
+    block_fetch_q_.clear();
     network_hud_.last_poll_ms = 0;
 }
 
@@ -526,6 +528,44 @@ size_t BlockScene::unconfirmed_live_count() const
             ++n;
     }
     return n;
+}
+
+void BlockScene::request_block_fetch_locked(const NodeId& hash)
+{
+    // Requires mu_ held by caller (e.g. ScenePresenter::prepare).
+    if (hash.empty())
+        return;
+    if (block_fetch_pending_.count(hash) != 0)
+        return;
+    if (graph_.contains(hash))
+        return;
+    if (block_fetch_q_.size() >= 48)
+        return;
+    block_fetch_pending_.insert(hash);
+    block_fetch_q_.push_back(hash);
+}
+
+void BlockScene::request_block_fetch(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    request_block_fetch_locked(hash);
+}
+
+std::vector<NodeId> BlockScene::drain_block_fetch_requests(size_t max_n)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    std::vector<NodeId> out;
+    while (!block_fetch_q_.empty() && out.size() < max_n)
+    {
+        NodeId h = std::move(block_fetch_q_.front());
+        block_fetch_q_.pop_front();
+        block_fetch_pending_.erase(h);
+        if (!h.empty() && !graph_.contains(h))
+            out.push_back(std::move(h));
+    }
+    return out;
 }
 
 std::vector<NodeId> BlockScene::tip_ids() const
