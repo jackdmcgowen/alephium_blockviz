@@ -114,13 +114,17 @@ void BlockflowOverlay::draw()
         mx < ui_w - rail_w &&
         my < ui_h;
 
-    // Camera motion â€” Z-track (keys + wheel)
+    // Camera motion — Z-track (keys + wheel); view presets 1=End 2=Side
     if (!io.WantCaptureKeyboard)
     {
         if (ImGui::IsKeyDown(ImGuiKey_UpArrow))
             camera_.nudge_scroll(CameraController::kEyeZStep * dt_sec);
         if (ImGui::IsKeyDown(ImGuiKey_DownArrow))
             camera_.nudge_scroll(-CameraController::kEyeZStep * dt_sec);
+        if (ImGui::IsKeyPressed(ImGuiKey_1, false))
+            camera_.set_view_preset(CameraController::ViewPreset::End);
+        if (ImGui::IsKeyPressed(ImGuiKey_2, false))
+            camera_.set_view_preset(CameraController::ViewPreset::Side);
     }
     // Positive MouseWheel = scroll up â†’ +scroll_z (matches Up arrow).
     if (over_scene && io.MouseWheel != 0.f)
@@ -716,6 +720,28 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
     ImGui::SameLine();
     if (ImGui::SmallButton("Seg >"))
         page_newer_one();
+    ImGui::SameLine();
+    {
+        const bool end_on =
+            camera_.view_preset() == CameraController::ViewPreset::End;
+        if (end_on)
+            ImGui::BeginDisabled();
+        if (ImGui::SmallButton("End"))
+            camera_.set_view_preset(CameraController::ViewPreset::End);
+        if (end_on)
+            ImGui::EndDisabled();
+        ImGui::SameLine();
+        const bool side_on =
+            camera_.view_preset() == CameraController::ViewPreset::Side;
+        if (side_on)
+            ImGui::BeginDisabled();
+        if (ImGui::SmallButton("Side"))
+            camera_.set_view_preset(CameraController::ViewPreset::Side);
+        if (side_on)
+            ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("View presets: End (1) ring along +Z | Side (2) timeline profile");
+    }
     ImGui::SameLine();
     if (nslot > 0)
     {

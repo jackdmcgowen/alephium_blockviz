@@ -28,6 +28,8 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
 | Timeline minimap (overlay) | **Full-width sliding 3-window histogram** (newer flush right); Z from genesis-aligned segment bounds; labels = **segment number** (`#G_seg`); Live prefix on tip segment when on-track; page steps one window; draw ring from camera Z with **alpha fade** |
+| Camera view presets | **End** (1) look +Z into polar ring; **Side** (2) offset eye for timeline profile without pan-to-center; Z wheel/arrows still page history; short RMB homes current preset + live reattach |
+| Selection dep walk | On select: **2G−1** concurrent multi-hop dep walks (one per dep root); arrows grow hop-by-hop; dead end → last arrow **red + alpha fade**; replaces static one-hop fan while active |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |

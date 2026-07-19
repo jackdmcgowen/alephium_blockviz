@@ -40,9 +40,42 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
+    // Selection multi-hop dep walk (N = 2G−1 concurrent slots).
+    static constexpr float  kWalkHopGrowSec    = 0.32f;
+    static constexpr float  kWalkSlotStagger   = 0.07f;
+    static constexpr float  kWalkDieFadeSec    = 0.55f;
+    static constexpr int    kWalkMaxHops       = 32;
+    static constexpr int    kWalkSlotCount     = ALPH_NUM_GROUPS * 2 - 1; // 2G−1
 
     // Growing → Held → Dying (remove only). No unused Fading/Gone.
     enum class ArrowPhase : uint8_t { Growing, Held, Dying };
+
+    enum class WalkSlotState : uint8_t
+    {
+        Pending = 0, // waiting start stagger
+        Flying  = 1, // hop arrow growing
+        Arrived = 2, // brief hold then next hop
+        Dying   = 3, // last hop red + alpha fade
+        Dead    = 4,
+    };
+
+    struct DepWalkSlot
+    {
+        int           slot = 0;
+        std::string   from_hash;
+        std::string   to_hash;
+        glm::vec3     from_pos{ 0.f };
+        glm::vec3     to_pos{ 0.f };
+        bool          has_pos = false;
+        bool          ghost_target = false; // to is missing — die after first draw
+        float         grow = 0.f;
+        float         die_alpha = 1.f;
+        float         state_start_sec = -1.f;
+        float         delay = 0.f;
+        int           hops_done = 0;
+        WalkSlotState state = WalkSlotState::Pending;
+        std::unordered_set<std::string> visited; // cycle guard
+    };
 
     struct DepArrowAnim
     {
@@ -99,6 +132,20 @@ private:
     float ephemeral_grow_u_(const std::string& key, float stagger_delay,
                             std::unordered_set<std::string>& seen);
 
+    void restart_dep_walk_(const std::string& root_hash,
+                           const std::unordered_map<std::string, glm::vec3>& positions);
+    void clear_dep_walk_();
+    void tick_dep_walk_(float now,
+                        const std::unordered_map<std::string, glm::vec3>& positions);
+    void draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad, float shaft_r,
+                        float clearance);
+    // First live+positioned dep of node, skipping visited; empty if none.
+    std::string next_walk_dep_(const std::string& node_hash,
+                               const std::unordered_set<std::string>& visited,
+                               const std::unordered_map<std::string, glm::vec3>& positions) const;
+    void collect_walk_force_hashes_(std::unordered_set<std::string>& out) const;
+    bool dep_walk_active_() const;
+
     BlockScene& scene_;
     PolarShardLayout layout_;
 
@@ -113,4 +160,9 @@ private:
     // Sliding-window segment fade by lookback k (0 = live): 0..1 for enter/leave.
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
+
+    // Selection multi-hop walk (2G−1 slots).
+    std::string              walk_root_hash_;
+    std::vector<DepWalkSlot> walk_slots_;
+    bool                     walk_seeded_from_detail_ = false;
 };

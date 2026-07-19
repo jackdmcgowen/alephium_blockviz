@@ -35,6 +35,13 @@ public:
     static constexpr float kPitchMax  =  1.35f;
     // Follow: 1 world unit per real second (matches layout time axis).
     static constexpr float kTimelineMetersPerSecond = 1.f;
+    // Side preset: eye offset from timeline axis (layout base_radius≈20).
+    static constexpr float kSideRadius = 70.f;
+    static constexpr float kSideY      = 8.f;
+    static constexpr float kSidePitch  = 0.12f;
+
+    // End = look along +Z into polar ring; Side = profile timeline along Z.
+    enum class ViewPreset : int { End = 0, Side = 1 };
 
     CameraController()
         : scroll_z_(static_cast<float>(-ALPH_LOOKBACK_WINDOW_SECONDS))
@@ -162,15 +169,13 @@ public:
         pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
     }
 
-    // Short RMB: home look + pan origin + reattach to live timeline Z.
+    // Short RMB: home look/pan for current preset + reattach to live timeline Z.
     void clear_look_target()
     {
         look_engaged_ = false;
         look_aim_hash_.clear();
         free_look_ = false;
-        yaw_target_ = 0.f;
-        pitch_target_ = 0.f;
-        pan_target_ = glm::vec3(0.f);
+        apply_view_preset_targets_(view_preset_);
         reattach_timeline();
     }
 
@@ -179,6 +184,17 @@ public:
         timeline_attached_ = true;
         scroll_z_target_ = std::clamp(live_scroll_z_, z_min_, z_max_);
     }
+
+    void set_view_preset(ViewPreset p)
+    {
+        view_preset_ = p;
+        look_engaged_ = false;
+        look_aim_hash_.clear();
+        free_look_ = false;
+        apply_view_preset_targets_(p);
+    }
+
+    ViewPreset view_preset() const { return view_preset_; }
 
     const std::string& look_aim_hash() const { return look_aim_hash_; }
     bool look_engaged() const { return look_engaged_; }
@@ -201,6 +217,24 @@ private:
     static inline const glm::vec3 kForward{ 0.f, 0.f, 1.f };
 
     void detach_timeline_() { timeline_attached_ = false; }
+
+    void apply_view_preset_targets_(ViewPreset p)
+    {
+        if (p == ViewPreset::Side)
+        {
+            // Eye on +X looking toward origin (−X of forward in yaw space).
+            pan_target_ = glm::vec3(kSideRadius, kSideY, 0.f);
+            yaw_target_ = -glm::half_pi<float>();
+            pitch_target_ = kSidePitch;
+        }
+        else
+        {
+            pan_target_ = glm::vec3(0.f);
+            yaw_target_ = 0.f;
+            pitch_target_ = 0.f;
+        }
+        pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
+    }
 
     glm::vec3 eye_position_() const
     {
@@ -309,6 +343,7 @@ private:
     std::string look_aim_hash_;
     bool      look_engaged_ = false;
     bool      free_look_ = false;
+    ViewPreset view_preset_ = ViewPreset::End;
 
     Camera camera_{};
 };

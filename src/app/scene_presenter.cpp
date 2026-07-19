@@ -127,6 +127,285 @@ float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_de
     return std::clamp(age / kArrowGrowSec, 0.f, 1.f);
 }
 
+void ScenePresenter::clear_dep_walk_()
+{
+    walk_root_hash_.clear();
+    walk_slots_.clear();
+    walk_seeded_from_detail_ = false;
+}
+
+bool ScenePresenter::dep_walk_active_() const
+{
+    for (const DepWalkSlot& s : walk_slots_)
+        if (s.state != WalkSlotState::Dead)
+            return true;
+    return false;
+}
+
+void ScenePresenter::collect_walk_force_hashes_(std::unordered_set<std::string>& out) const
+{
+    if (!walk_root_hash_.empty())
+        out.insert(walk_root_hash_);
+    for (const DepWalkSlot& s : walk_slots_)
+    {
+        if (s.state == WalkSlotState::Dead || s.state == WalkSlotState::Pending)
+            continue;
+        if (!s.from_hash.empty())
+            out.insert(s.from_hash);
+        if (!s.to_hash.empty() && !s.ghost_target)
+            out.insert(s.to_hash);
+    }
+}
+
+std::string ScenePresenter::next_walk_dep_(
+    const std::string& node_hash,
+    const std::unordered_set<std::string>& visited,
+    const std::unordered_map<std::string, glm::vec3>& positions) const
+{
+    if (node_hash.empty())
+        return {};
+    auto d = scene_.detail_store().get(node_hash);
+    if (!d || d->deps.empty())
+        return {};
+    // Prefer first dep present in layout positions (stable order); skip visited.
+    for (const std::string& dep : d->deps)
+    {
+        if (dep.empty() || visited.count(dep) != 0)
+            continue;
+        if (positions.find(dep) != positions.end())
+            return dep;
+    }
+    // Missing-in-layout first dep still named → caller may ghost-die.
+    for (const std::string& dep : d->deps)
+    {
+        if (dep.empty() || visited.count(dep) != 0)
+            continue;
+        return dep; // may not be in positions
+    }
+    return {};
+}
+
+void ScenePresenter::restart_dep_walk_(
+    const std::string& root_hash,
+    const std::unordered_map<std::string, glm::vec3>& positions)
+{
+    clear_dep_walk_();
+    if (root_hash.empty())
+        return;
+    walk_root_hash_ = root_hash;
+    const float now = now_sec_();
+
+    std::vector<std::string> roots;
+    if (auto d = scene_.detail_store().get(root_hash))
+    {
+        roots = d->deps;
+        walk_seeded_from_detail_ = true;
+    }
+    const int nslots = kWalkSlotCount;
+    walk_slots_.resize(static_cast<size_t>(nslots));
+    for (int i = 0; i < nslots; ++i)
+    {
+        DepWalkSlot& s = walk_slots_[static_cast<size_t>(i)];
+        s = DepWalkSlot{};
+        s.slot = i;
+        s.delay = kWalkSlotStagger * static_cast<float>(i);
+        s.state = WalkSlotState::Pending;
+        s.state_start_sec = now;
+        s.visited.insert(root_hash);
+        s.from_hash = root_hash;
+        if (i < static_cast<int>(roots.size()) && !roots[static_cast<size_t>(i)].empty())
+            s.to_hash = roots[static_cast<size_t>(i)];
+        // else empty → dies when Pending ends (no root dep for this slot)
+        auto fit = positions.find(root_hash);
+        if (fit != positions.end())
+            s.from_pos = fit->second;
+        auto tit = positions.find(s.to_hash);
+        if (tit != positions.end())
+        {
+            s.to_pos = tit->second;
+            s.has_pos = (fit != positions.end());
+            s.ghost_target = false;
+        }
+        else if (!s.to_hash.empty())
+        {
+            // Ghost: invent a near-parent offset for the dying hop.
+            if (fit != positions.end())
+            {
+                s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
+                s.has_pos = true;
+            }
+            s.ghost_target = true;
+        }
+    }
+}
+
+void ScenePresenter::tick_dep_walk_(
+    float now, const std::unordered_map<std::string, glm::vec3>& positions)
+{
+    // Late detail: re-seed once when deps appear.
+    if (!walk_root_hash_.empty() && !walk_seeded_from_detail_)
+    {
+        if (auto d = scene_.detail_store().get(walk_root_hash_))
+        {
+            if (!d->deps.empty())
+                restart_dep_walk_(walk_root_hash_, positions);
+        }
+    }
+
+    for (DepWalkSlot& s : walk_slots_)
+    {
+        if (s.state == WalkSlotState::Dead)
+            continue;
+
+        // Refresh positions while alive.
+        if (!s.from_hash.empty())
+        {
+            auto it = positions.find(s.from_hash);
+            if (it != positions.end())
+                s.from_pos = it->second;
+        }
+        if (!s.ghost_target && !s.to_hash.empty())
+        {
+            auto it = positions.find(s.to_hash);
+            if (it != positions.end())
+            {
+                s.to_pos = it->second;
+                s.has_pos = true;
+            }
+        }
+
+        if (s.state == WalkSlotState::Pending)
+        {
+            if (now - s.state_start_sec < s.delay)
+                continue;
+            if (s.to_hash.empty() || !s.has_pos)
+            {
+                s.state = WalkSlotState::Dying;
+                s.state_start_sec = now;
+                s.die_alpha = 1.f;
+                s.grow = 1.f;
+                // Minimal ghost segment for red fade if we have from.
+                if (!s.has_pos && !s.from_hash.empty())
+                {
+                    auto it = positions.find(s.from_hash);
+                    if (it != positions.end())
+                    {
+                        s.from_pos = it->second;
+                        s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 6.f);
+                        s.has_pos = true;
+                        s.ghost_target = true;
+                    }
+                }
+                continue;
+            }
+            s.state = WalkSlotState::Flying;
+            s.state_start_sec = now;
+            s.grow = 0.f;
+            continue;
+        }
+
+        if (s.state == WalkSlotState::Flying)
+        {
+            const float age = now - s.state_start_sec;
+            s.grow = std::clamp(age / kWalkHopGrowSec, 0.f, 1.f);
+            if (s.grow < 1.f)
+                continue;
+            s.state = WalkSlotState::Arrived;
+            s.state_start_sec = now;
+            s.grow = 1.f;
+            continue;
+        }
+
+        if (s.state == WalkSlotState::Arrived)
+        {
+            // Brief hold then next hop or die.
+            if (now - s.state_start_sec < 0.08f)
+                continue;
+            if (s.ghost_target || s.hops_done + 1 >= kWalkMaxHops)
+            {
+                s.state = WalkSlotState::Dying;
+                s.state_start_sec = now;
+                s.die_alpha = 1.f;
+                continue;
+            }
+            s.visited.insert(s.to_hash);
+            s.hops_done += 1;
+            const std::string next =
+                next_walk_dep_(s.to_hash, s.visited, positions);
+            if (next.empty())
+            {
+                s.state = WalkSlotState::Dying;
+                s.state_start_sec = now;
+                s.die_alpha = 1.f;
+                continue;
+            }
+            s.from_hash = s.to_hash;
+            s.from_pos = s.to_pos;
+            s.to_hash = next;
+            auto tit = positions.find(next);
+            if (tit != positions.end())
+            {
+                s.to_pos = tit->second;
+                s.has_pos = true;
+                s.ghost_target = false;
+            }
+            else
+            {
+                s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 8.f);
+                s.has_pos = true;
+                s.ghost_target = true;
+            }
+            s.state = WalkSlotState::Flying;
+            s.state_start_sec = now;
+            s.grow = 0.f;
+            continue;
+        }
+
+        if (s.state == WalkSlotState::Dying)
+        {
+            const float t =
+                std::clamp((now - s.state_start_sec) / kWalkDieFadeSec, 0.f, 1.f);
+            s.die_alpha = 1.f - t;
+            s.grow = 1.f;
+            if (t >= 1.f)
+                s.state = WalkSlotState::Dead;
+        }
+    }
+}
+
+void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad,
+                                    float shaft_r, float clearance)
+{
+    const glm::vec4 live_col = kSelectionArrowColor;
+    const glm::vec4 die_col(1.f, 0.15f, 0.12f, 1.f);
+    for (const DepWalkSlot& s : walk_slots_)
+    {
+        if (s.state == WalkSlotState::Dead || s.state == WalkSlotState::Pending)
+            continue;
+        if (!s.has_pos)
+            continue;
+        glm::vec3 from_inset, to_inset;
+        if (!inset_segment(s.from_pos, s.to_pos, clearance, from_inset, to_inset))
+            continue;
+        float grow_u = s.grow;
+        glm::vec4 col = live_col;
+        if (s.state == WalkSlotState::Dying || s.ghost_target)
+        {
+            col = die_col;
+            col.a = s.die_alpha * 0.95f;
+            grow_u = 1.f;
+        }
+        else if (s.state == WalkSlotState::Flying)
+            col.a = 0.95f;
+        else
+            col.a = 0.9f;
+        if (col.a < 0.02f)
+            continue;
+        debug.add_arrow(from_inset, to_inset, col, tip_len * 1.2f, tip_rad * 1.15f,
+                        shaft_r * 1.1f, 8, grow_u);
+    }
+}
+
 void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
@@ -905,6 +1184,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
+    // Selection multi-hop dep walk: restart on select change, then tick.
+    if (in.selected_hash != walk_root_hash_)
+    {
+        if (in.selected_hash.empty())
+            clear_dep_walk_();
+        else
+            restart_dep_walk_(in.selected_hash, block_positions);
+    }
+    if (!walk_root_hash_.empty())
+        tick_dep_walk_(now, block_positions);
+
+    std::unordered_set<std::string> walk_force;
+    collect_walk_force_hashes_(walk_force);
+
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
     {
@@ -927,12 +1220,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const bool is_sel =
             (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
             (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
-        if (!is_sel && !block_in_visible_segment(placed.timestamp_ms))
+        const bool is_walk = walk_force.count(placed.hash) != 0;
+        if (!is_sel && !is_walk && !block_in_visible_segment(placed.timestamp_ms))
             continue;
-        // Multi-tx filter: still force selected/hovered; other force roles must pass filter.
-        if (!is_sel && !passes_txn_filter(placed))
+        // Multi-tx filter: still force selected/hovered/walk; other force roles must pass.
+        if (!is_sel && !is_walk && !passes_txn_filter(placed))
             continue;
-        const bool force = is_sel || missing_dep[placed.hash] ||
+        const bool force = is_sel || is_walk || missing_dep[placed.hash] ||
                            green_display.count(placed.hash) ||
                            cyan_owners.count(placed.hash);
         if (!force)
@@ -1160,7 +1454,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             }
         };
 
-        if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
+        // Multi-hop walk replaces static one-hop fan while any slot is active.
+        if (dep_walk_active_() && debug)
+            draw_dep_walk_(*debug, tip_len, tip_rad, shaft_r, clearance);
+        else if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
             draw_selection_deps(in.selected_detail);
         else if (!in.selected_hash.empty())
         {
