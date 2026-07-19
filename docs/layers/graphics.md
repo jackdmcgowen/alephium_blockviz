@@ -16,6 +16,7 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | Pick pass + Sobel compute / overlay | Poll watermark |
 | ImGui **host** (backends NewFrame / Render) | Overlay widget layout (app) |
 | `gpu_pub_lib.h` public types | curl / cJSON |
+| Client-rect resize / swapchain recreate | Host borderless fullscreen (app HWND) |
 
 ## Current surface
 
@@ -71,6 +72,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 4. ImGui host only; chrome via `IUiOverlay` on the render thread.
 5. Fast rebuilds: PCH, `/MP`, incremental shaders — [build-performance.md](../build-performance.md).
 6. Public header remains Vulkan-free.
+7. Fullscreen is **host-owned** (borderless HWND); graphics only follows client size via `Resize()`.
 
 ## Non-goals
 

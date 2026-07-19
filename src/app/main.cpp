@@ -10,6 +10,7 @@
 #include "app/scene_presenter.hpp"
 #include "app/config.h"
 #include "app/user_prefs.hpp"
+#include "app/window_fullscreen.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
@@ -32,6 +33,7 @@ static CameraController camera;
 static IEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
 static ScenePresenter* scene_presenter = nullptr;
+static WindowFullscreenState g_fullscreen{};
 
 static void stop_engine_once()
 {
@@ -39,6 +41,12 @@ static void stop_engine_once()
         return;
     engine->stop();
     engine_stopped = true;
+}
+
+static void request_resize_if_engine()
+{
+    if (engine)
+        engine->on_resize();
 }
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -51,6 +59,35 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         if (engine)
             engine->on_resize();
+        break;
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        // Ignore key repeats (bit 30 of lParam).
+        if (lParam & (1 << 30))
+            break;
+        if (wParam == VK_F11)
+        {
+            if (toggle_borderless_fullscreen(hwnd, g_fullscreen))
+                request_resize_if_engine();
+            return 0;
+        }
+        if (wParam == VK_ESCAPE)
+        {
+            if (g_fullscreen.fullscreen)
+            {
+                if (set_borderless_fullscreen(hwnd, g_fullscreen, false))
+                    request_resize_if_engine();
+            }
+            else
+            {
+                // Windowed: Esc quits (historical behavior).
+                keepRunning = false;
+                stop_engine_once();
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
         break;
 
     case WM_CLOSE:
@@ -180,11 +217,7 @@ int main()
             DispatchMessage(&msg);
         }
 
-        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
-        {
-            keepRunning = false;
-            stop_engine_once();
-        }
+        // Esc / F11 handled in WndProc (FS-aware). Do not poll GetAsyncKeyState here.
 
         Sleep(10);
     }

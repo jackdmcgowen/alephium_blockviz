@@ -461,6 +461,12 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
             engine_.request_screenshot(nullptr);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Save client PNG under docs/images/capture_*.png");
+        ImGui::TextDisabled("F11 fullscreen  ·  Esc exit FS / quit");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "F11: borderless fullscreen (monitor of the window)\n"
+                "Esc in fullscreen: return to windowed\n"
+                "Esc windowed: quit application");
 
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;

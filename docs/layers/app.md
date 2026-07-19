@@ -16,12 +16,14 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `ScenePresenter` visual policy | Graphics pipelines / Sobel barriers |
 | `CameraController` timeline UX | Network thread lifecycle |
 | Host identity (`app_identity.hpp`) | Engine version tags |
+| Borderless fullscreen (HWND style + placement) | Exclusive display mode / Vulkan FS exclusive |
 
 ## Current surface
 
 | Path | Role |
 |------|------|
-| `src/app/main.cpp` | Window, config boot, system register, message pump |
+| `src/app/main.cpp` | Window, config boot, system register, message pump; F11/Esc fullscreen |
+| `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (save style + placement) |
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, highlight hash lists, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
@@ -55,6 +57,7 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 4. Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.
 5. Keep product color / filter policy out of graphics Vulkan code.
 6. Ship host version via `app_identity` + `app-v*` tags on `main` (`AGENTS.md`).
+7. **Borderless fullscreen:** F11 toggles; **Esc exits fullscreen** (windowed Esc still quits). Graphics only resizes.
 
 ## Non-goals
 
