@@ -12,6 +12,7 @@
 #include <ctime>
 #include <cstring>
 #include <functional>
+#include <optional>
 
 #include <glm/glm.hpp>
 
@@ -101,7 +102,8 @@ float ScenePresenter::now_sec_() const
 }
 
 float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_delay,
-                                        std::unordered_set<std::string>& seen)
+                                        std::unordered_set<std::string>& seen,
+                                        float grow_sec)
 {
     seen.insert(key);
     const float now = now_sec_();
@@ -114,14 +116,13 @@ float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_de
     const float age = now - it->second;
     if (age <= 0.f)
         return 0.f;
-    return std::clamp(age / kArrowGrowSec, 0.f, 1.f);
+    const float g = grow_sec > 1e-4f ? grow_sec : kArrowGrowSec;
+    return std::clamp(age / g, 0.f, 1.f);
 }
 
-void ScenePresenter::clear_dep_walk_()
+void ScenePresenter::clear_selection_deps_()
 {
-    walk_root_hash_.clear();
-    walk_slots_.clear();
-    walk_seeded_from_detail_ = false;
+    sel_dep_ = SelectionDepTrace{};
     // Drop sticky selection ephemeral arrows from prior root.
     for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end();)
     {
@@ -130,34 +131,72 @@ void ScenePresenter::clear_dep_walk_()
         else
             ++it;
     }
-    // Start TRACE Sobel fade if we had visited marks; else clear.
-    if (!walk_visited_sobel_.empty())
-    {
-        walk_sobel_fading_ = true;
-        walk_sobel_fade_start_sec_ = now_sec_();
-    }
 }
 
-bool ScenePresenter::dep_walk_active_() const
+void ScenePresenter::collect_selection_dep_force_(std::unordered_set<std::string>& out) const
 {
-    for (const DepWalkSlot& s : walk_slots_)
-        if (s.state != WalkSlotState::Dead)
-            return true;
-    return false;
+    for (const std::string& h : sel_dep_.nodes)
+        if (!h.empty())
+            out.insert(h);
 }
 
-void ScenePresenter::collect_walk_force_hashes_(std::unordered_set<std::string>& out) const
+void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
 {
-    if (!walk_root_hash_.empty())
-        out.insert(walk_root_hash_);
-    for (const DepWalkSlot& s : walk_slots_)
+    clear_selection_deps_();
+    if (root_hash.empty())
+        return;
+
+    sel_dep_.root = root_hash;
+    sel_dep_.nodes.push_back(root_hash);
+    sel_dep_.node_set.insert(root_hash);
+
+    std::unordered_map<std::string, int> depth;
+    depth[root_hash] = 0;
+
+    std::vector<std::string> queue;
+    queue.push_back(root_hash);
+    size_t qi = 0;
+
+    if (auto root = scene_.detail_store().get(root_hash))
+        if (!root->deps.empty())
+            sel_dep_.seeded_from_detail = true;
+
+    while (qi < queue.size() &&
+           static_cast<int>(sel_dep_.nodes.size()) < kMaxSelDepNodes &&
+           static_cast<int>(sel_dep_.edges.size()) < kMaxSelDepEdges)
     {
-        if (s.state == WalkSlotState::Dead || s.state == WalkSlotState::Pending)
-            continue;
-        if (!s.from_hash.empty())
-            out.insert(s.from_hash);
-        if (!s.to_hash.empty() && !s.ghost_target)
-            out.insert(s.to_hash);
+        const std::string u = queue[qi++];
+        const int du = depth[u];
+        std::vector<std::string> deps = sorted_deps_(u);
+        if (deps.empty())
+        {
+            if (auto d = scene_.detail_store().get(u))
+                deps = d->deps;
+        }
+        if (!deps.empty())
+            sel_dep_.seeded_from_detail = true;
+
+        for (const std::string& v : deps)
+        {
+            if (v.empty())
+                continue;
+            if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
+                break;
+            sel_dep_.edges.push_back(SelectionDepEdge{ u, v, du });
+
+            if (sel_dep_.node_set.count(v) != 0)
+                continue;
+            // Expand only if we know the node (detail or graph) so BFS stays in loaded set.
+            const bool known = scene_.detail_store().get(v) || scene_.graph().get(v);
+            if (!known)
+                continue;
+            if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
+                continue;
+            sel_dep_.node_set.insert(v);
+            sel_dep_.nodes.push_back(v);
+            depth[v] = du + 1;
+            queue.push_back(v);
+        }
     }
 }
 
@@ -205,396 +244,6 @@ std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_ha
     for (const Item& it : items)
         out.push_back(it.hash);
     return out;
-}
-
-std::string ScenePresenter::next_walk_dep_for_slot_(
-    const std::string& node_hash, int slot,
-    const std::unordered_set<std::string>& visited) const
-{
-    // Leave hop: slot s = s-th shard-sorted dep of node on the same-shard spine.
-    if (node_hash.empty() || slot < 0)
-        return {};
-    const std::vector<std::string> sorted = sorted_deps_(node_hash);
-    if (slot >= static_cast<int>(sorted.size()))
-        return {};
-    const std::string& dep = sorted[static_cast<size_t>(slot)];
-    if (dep.empty() || visited.count(dep) != 0)
-        return {};
-    return dep;
-}
-
-bool ScenePresenter::hash_on_shard_(const std::string& hash, int from, int to) const
-{
-    int f = 0, t = 0;
-    if (!shard_of_hash_(hash, f, t))
-        return false;
-    return f == from && t == to;
-}
-
-bool ScenePresenter::shard_of_hash_(const std::string& hash, int& from_out, int& to_out) const
-{
-    if (hash.empty())
-        return false;
-    if (auto d = scene_.detail_store().get(hash))
-    {
-        from_out = d->chainFrom;
-        to_out = d->chainTo;
-        return true;
-    }
-    if (auto n = scene_.graph().get(hash))
-    {
-        from_out = static_cast<int>(n->group_from);
-        to_out = static_cast<int>(n->group_to);
-        return true;
-    }
-    return false;
-}
-
-std::string ScenePresenter::find_dep_on_shard_(
-    const std::string& node_hash, int from, int to,
-    const std::unordered_set<std::string>& visited) const
-{
-    // Among deps of node, pick one on shard [from→to] (rejoin uses reverse of leave target).
-    if (node_hash.empty())
-        return {};
-    auto d = scene_.detail_store().get(node_hash);
-    if (!d || d->deps.empty())
-        return {};
-    // Prefer oldest (lowest timestamp) for history depth.
-    std::string best;
-    int64_t best_ts = 0;
-    bool have_ts = false;
-    for (const std::string& dep : d->deps)
-    {
-        if (dep.empty() || visited.count(dep) != 0)
-            continue;
-        if (!hash_on_shard_(dep, from, to))
-            continue;
-        int64_t ts = 0;
-        if (auto dd = scene_.detail_store().get(dep))
-            ts = dd->timestamp;
-        else if (auto n = scene_.graph().get(dep))
-            ts = n->timestamp_ms;
-        if (!have_ts || (ts > 0 && (best_ts <= 0 || ts < best_ts)))
-        {
-            best = dep;
-            best_ts = ts;
-            have_ts = true;
-        }
-        else if (!have_ts)
-            best = dep;
-    }
-    return best;
-}
-
-void ScenePresenter::restart_dep_walk_(
-    const std::string& root_hash,
-    const std::unordered_map<std::string, glm::vec3>& positions)
-{
-    // Soft clear without forcing sobel fade mid-restart.
-    walk_slots_.clear();
-    walk_seeded_from_detail_ = false;
-    for (auto it = ephemeral_birth_sec_.begin(); it != ephemeral_birth_sec_.end();)
-    {
-        if (!it->first.empty() && (it->first[0] == 's' || it->first[0] == 'w'))
-            it = ephemeral_birth_sec_.erase(it);
-        else
-            ++it;
-    }
-    walk_visited_sobel_.clear();
-    walk_sobel_fading_ = false;
-    walk_sobel_fade_start_sec_ = -1.f;
-
-    if (root_hash.empty())
-    {
-        walk_root_hash_.clear();
-        return;
-    }
-    walk_root_hash_ = root_hash;
-    const float now = now_sec_();
-    const StyleBlockflow& st = sty();
-    const float stagger = st.walk_slot_stagger_sec > 0.f ? st.walk_slot_stagger_sec
-                                                         : kWalkSlotStagger;
-
-    // Shard-rejoin TRACE: hop0 Leave H→D[s], then Rejoin to original shard S, …
-    int orig_from = 0;
-    int orig_to = 0;
-    if (auto root = scene_.detail_store().get(root_hash))
-    {
-        orig_from = root->chainFrom;
-        orig_to = root->chainTo;
-        walk_seeded_from_detail_ = true;
-    }
-    else if (auto n = scene_.graph().get(root_hash))
-    {
-        orig_from = static_cast<int>(n->group_from);
-        orig_to = static_cast<int>(n->group_to);
-    }
-
-    std::vector<std::string> dep_roots = sorted_deps_(root_hash);
-    if (!dep_roots.empty())
-        walk_seeded_from_detail_ = true;
-    walk_visited_sobel_[root_hash] = 1.f;
-
-    const int nslots = kWalkSlotCount;
-    walk_slots_.resize(static_cast<size_t>(nslots));
-    for (int i = 0; i < nslots; ++i)
-    {
-        DepWalkSlot& s = walk_slots_[static_cast<size_t>(i)];
-        s = DepWalkSlot{};
-        s.slot = i;
-        s.orig_from = orig_from;
-        s.orig_to = orig_to;
-        s.last_hop = WalkHopKind::Leave; // hop0 is leave into clique
-        s.delay = stagger * static_cast<float>(i);
-        s.state = WalkSlotState::Pending;
-        s.state_start_sec = now;
-        s.from_hash = root_hash;
-        s.visited.insert(root_hash);
-        auto fit = positions.find(root_hash);
-        if (fit != positions.end())
-            s.from_pos = fit->second;
-
-        if (i >= static_cast<int>(dep_roots.size()) || dep_roots[static_cast<size_t>(i)].empty())
-            continue;
-
-        const std::string& dep0 = dep_roots[static_cast<size_t>(i)];
-        s.to_hash = dep0;
-        auto tit = positions.find(dep0);
-        if (tit != positions.end())
-        {
-            s.to_pos = tit->second;
-            s.has_pos = (fit != positions.end());
-            s.ghost_target = false;
-        }
-        else if (fit != positions.end())
-        {
-            s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
-            s.has_pos = true;
-            s.ghost_target = true;
-            scene_.request_block_fetch_locked(dep0);
-        }
-    }
-}
-
-void ScenePresenter::tick_dep_walk_(
-    float now, const std::unordered_map<std::string, glm::vec3>& positions)
-{
-    // Late detail: re-seed once when deps appear.
-    if (!walk_root_hash_.empty() && !walk_seeded_from_detail_)
-    {
-        if (auto d = scene_.detail_store().get(walk_root_hash_))
-        {
-            if (!d->deps.empty())
-                restart_dep_walk_(walk_root_hash_, positions);
-        }
-    }
-
-    // Fade TRACE Sobel after all walks finished.
-    if (walk_sobel_fading_)
-    {
-        const float fade_sec = sty().walk_sobel_fade_sec > 0.f ? sty().walk_sobel_fade_sec
-                                                               : 0.35f;
-        const float t =
-            std::clamp((now - walk_sobel_fade_start_sec_) / fade_sec, 0.f, 1.f);
-        for (auto& kv : walk_visited_sobel_)
-            kv.second = 1.f - t;
-        if (t >= 1.f)
-        {
-            walk_visited_sobel_.clear();
-            walk_sobel_fading_ = false;
-        }
-    }
-
-    for (DepWalkSlot& s : walk_slots_)
-    {
-        if (s.state == WalkSlotState::Dead)
-            continue;
-
-        if (!s.from_hash.empty())
-        {
-            auto it = positions.find(s.from_hash);
-            if (it != positions.end())
-                s.from_pos = it->second;
-        }
-        if (!s.ghost_target && !s.to_hash.empty())
-        {
-            auto it = positions.find(s.to_hash);
-            if (it != positions.end())
-            {
-                s.to_pos = it->second;
-                s.has_pos = true;
-            }
-        }
-
-        if (s.state == WalkSlotState::Pending)
-        {
-            if (now - s.state_start_sec < s.delay)
-                continue;
-            if (s.to_hash.empty() || !s.has_pos)
-            {
-                s.state = WalkSlotState::Dying;
-                s.state_start_sec = now;
-                s.die_alpha = 1.f;
-                s.grow = 1.f;
-                if (!s.has_pos && !s.from_hash.empty())
-                {
-                    auto it = positions.find(s.from_hash);
-                    if (it != positions.end())
-                    {
-                        s.from_pos = it->second;
-                        s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 6.f);
-                        s.has_pos = true;
-                        s.ghost_target = true;
-                    }
-                }
-                if (!s.to_hash.empty())
-                    scene_.request_block_fetch_locked(s.to_hash);
-                continue;
-            }
-            s.state = WalkSlotState::Flying;
-            s.state_start_sec = now;
-            s.grow = 0.f;
-            walk_visited_sobel_[s.from_hash] = 1.f;
-            continue;
-        }
-
-        if (s.state == WalkSlotState::Flying)
-        {
-            const float grow_sec = sty().walk_hop_grow_sec > 0.f ? sty().walk_hop_grow_sec
-                                                                : kWalkHopGrowSec;
-            const float age = now - s.state_start_sec;
-            s.grow = std::clamp(age / grow_sec, 0.f, 1.f);
-            if (s.grow < 1.f)
-                continue;
-            s.state = WalkSlotState::Arrived;
-            s.state_start_sec = now;
-            s.grow = 1.f;
-            if (!s.ghost_target && !s.to_hash.empty())
-                walk_visited_sobel_[s.to_hash] = 1.f;
-            continue;
-        }
-
-        if (s.state == WalkSlotState::Arrived)
-        {
-            const float hold = sty().walk_arrived_hold_sec > 0.f ? sty().walk_arrived_hold_sec
-                                                                : kWalkArrivedHoldSec;
-            if (now - s.state_start_sec < hold)
-                continue;
-            if (s.ghost_target || s.hops_done + 1 >= kWalkMaxHops)
-            {
-                s.state = WalkSlotState::Dying;
-                s.state_start_sec = now;
-                s.die_alpha = 1.f;
-                if (s.ghost_target && !s.to_hash.empty())
-                    scene_.request_block_fetch_locked(s.to_hash);
-                continue;
-            }
-            s.visited.insert(s.to_hash);
-            s.hops_done += 1;
-            // Alternate Leave (clique slot s) and Rejoin (reverse of leave-target shard).
-            // Example: leave to [0→1] → rejoin looks for dep on [1→0]; [0→0] reverses to itself.
-            std::string next;
-            if (s.last_hop == WalkHopKind::Leave)
-            {
-                int uf = 0, ut = 0;
-                if (shard_of_hash_(s.to_hash, uf, ut))
-                {
-                    // Reverse of the node we just landed on.
-                    next = find_dep_on_shard_(s.to_hash, /*from=*/ut, /*to=*/uf, s.visited);
-                }
-                s.last_hop = WalkHopKind::Rejoin;
-            }
-            else
-            {
-                // After rejoin, leave again via sticky clique index s.
-                next = next_walk_dep_for_slot_(s.to_hash, s.slot, s.visited);
-                s.last_hop = WalkHopKind::Leave;
-            }
-            if (next.empty())
-            {
-                s.state = WalkSlotState::Dying;
-                s.state_start_sec = now;
-                s.die_alpha = 1.f;
-                continue;
-            }
-            s.from_hash = s.to_hash;
-            s.from_pos = s.to_pos;
-            s.to_hash = next;
-            auto tit = positions.find(next);
-            if (tit != positions.end())
-            {
-                s.to_pos = tit->second;
-                s.has_pos = true;
-                s.ghost_target = false;
-            }
-            else
-            {
-                s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 8.f);
-                s.has_pos = true;
-                s.ghost_target = true;
-                scene_.request_block_fetch_locked(next);
-            }
-            s.state = WalkSlotState::Flying;
-            s.state_start_sec = now;
-            s.grow = 0.f;
-            continue;
-        }
-
-        if (s.state == WalkSlotState::Dying)
-        {
-            const float die_sec = sty().walk_die_fade_sec > 0.f ? sty().walk_die_fade_sec
-                                                               : kWalkDieFadeSec;
-            const float t = std::clamp((now - s.state_start_sec) / die_sec, 0.f, 1.f);
-            s.die_alpha = 1.f - t;
-            s.grow = 1.f;
-            if (t >= 1.f)
-                s.state = WalkSlotState::Dead;
-        }
-    }
-
-    // When all slots dead, begin TRACE Sobel fade (if not already).
-    if (!walk_slots_.empty() && !dep_walk_active_() && !walk_sobel_fading_ &&
-        !walk_visited_sobel_.empty())
-    {
-        walk_sobel_fading_ = true;
-        walk_sobel_fade_start_sec_ = now;
-    }
-}
-
-void ScenePresenter::draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad,
-                                    float shaft_r, float clearance)
-{
-    const glm::vec4 live_col = sty().walk_trace;
-    const glm::vec4 die_col = kDeathArrowColor();
-    for (const DepWalkSlot& s : walk_slots_)
-    {
-        if (s.state == WalkSlotState::Dead || s.state == WalkSlotState::Pending)
-            continue;
-        if (!s.has_pos)
-            continue;
-        glm::vec3 from_inset, to_inset;
-        if (!inset_segment(s.from_pos, s.to_pos, clearance, from_inset, to_inset))
-            continue;
-        float grow_u = s.grow;
-        glm::vec4 col = live_col;
-        if (s.state == WalkSlotState::Dying || s.ghost_target)
-        {
-            col = die_col;
-            col.a = s.die_alpha * 0.95f;
-            grow_u = 1.f;
-        }
-        else if (s.state == WalkSlotState::Flying)
-            col.a = live_col.a;
-        else
-            col.a = live_col.a * 0.95f;
-        if (col.a < 0.02f)
-            continue;
-        const float ts = sty().arrow_tip_scale;
-        const float ss = sty().arrow_shaft_scale;
-        debug.add_arrow(from_inset, to_inset, col, tip_len * 1.05f * ts, tip_rad * ts,
-                        shaft_r * ss, 8, grow_u);
-    }
 }
 
 void ScenePresenter::tip_dep_tick_and_draw_(
@@ -1372,38 +1021,33 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Selection multi-hop dep walk: restart on select change or replay request.
+    // Selection full BFS block-dep fan: rebuild on select change, replay, or late detail.
     const uint64_t replay_gen = scene_.walk_replay_gen();
     const bool want_replay =
         replay_gen != last_walk_replay_gen_ && !in.selected_hash.empty();
     if (want_replay)
         last_walk_replay_gen_ = replay_gen;
 
-    if (in.selected_hash != walk_root_hash_ || want_replay)
+    if (in.selected_hash.empty())
     {
-        if (in.selected_hash.empty())
-            clear_dep_walk_();
-        else
-            restart_dep_walk_(in.selected_hash, block_positions);
+        if (!sel_dep_.root.empty())
+            clear_selection_deps_();
     }
-    if (!walk_root_hash_.empty() || walk_sobel_fading_)
-        tick_dep_walk_(now, block_positions);
-
-    std::unordered_set<std::string> walk_force;
-    collect_walk_force_hashes_(walk_force);
-    for (const auto& kv : walk_visited_sobel_)
-        if (kv.second > 0.02f)
-            walk_force.insert(kv.first);
-    // Force-draw direct deps so selection fan + walk roots stay visible under filters.
-    if (!in.selected_hash.empty())
+    else if (in.selected_hash != sel_dep_.root || want_replay)
+    {
+        rebuild_selection_dep_bfs_(in.selected_hash);
+    }
+    else if (!sel_dep_.seeded_from_detail)
     {
         if (auto d = scene_.detail_store().get(in.selected_hash))
         {
-            for (const std::string& dep : d->deps)
-                if (!dep.empty())
-                    walk_force.insert(dep);
+            if (!d->deps.empty())
+                rebuild_selection_dep_bfs_(in.selected_hash);
         }
     }
+
+    std::unordered_set<std::string> walk_force;
+    collect_selection_dep_force_(walk_force);
 
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
@@ -1519,23 +1163,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 SobelOutlineInstance{ selected_idx, sty().sobel_select() });
         }
 
-        // TRACE Sobel on walk-visited nodes (selected stays gold above).
-        for (const auto& kv : walk_visited_sobel_)
-        {
-            if (kv.second < 0.02f || kv.first.empty())
-                continue;
-            if (!in.selected_hash.empty() && kv.first == in.selected_hash)
-                continue;
-            push_outline(kv.first, sty().sobel_walk_trace(kv.second));
-        }
-
         if (in.enable_role_outlines && selected_idx == ~0u)
         {
             std::unordered_set<std::string> claimed;
             claimed.reserve(green_display.size() + cyan_owners.size() + incomplete_pool.size());
-            for (const auto& kv : walk_visited_sobel_)
-                if (kv.second > 0.02f)
-                    claimed.insert(kv.first);
 
             for (const std::string& h : green_display)
             {
@@ -1561,9 +1192,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             // Selection exclusive gold still allow co-visible roles on other cubes.
             std::unordered_set<std::string> claimed;
             claimed.insert(in.selected_hash);
-            for (const auto& kv : walk_visited_sobel_)
-                if (kv.second > 0.02f)
-                    claimed.insert(kv.first);
             for (const std::string& h : green_display)
             {
                 if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
@@ -1610,7 +1238,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                  const std::string& to_hash,
                                  const glm::vec3& from, const glm::vec3& to,
                                  const glm::vec4& color, float tip_scale, int stagger_i) {
-            // No arrows to/from filtered-out cubes (both ends must be drawn).
+            // Hover / misc ephemeral (own small budget).
             if (drawn.count(from_hash) == 0 || drawn.count(to_hash) == 0)
                 return;
             if (arrow_count >= kMaxDepArrows)
@@ -1638,84 +1266,133 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             placement_color[p.hash] = p.color;
 
-        auto draw_selection_deps = [&](const AlphBlock& block) {
-            if (drawn.count(block.hash) == 0)
-                return;
-            auto listing_it = block_positions.find(block.hash);
-            if (listing_it == block_positions.end())
-                return;
-            const glm::vec3& listing_pos = listing_it->second;
-            const int parent_lane = block.chain_idx();
-            int missing_i = 0;
-            int stagger_i = 0;
-            const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
-
-            // Same shard-sorted order as TRACE walk slots.
-            const std::vector<std::string> gold_deps = sorted_deps_(block.hash);
-            const std::vector<std::string>& dep_list =
-                gold_deps.empty() ? block.deps : gold_deps;
-            for (const std::string& dep_hash : dep_list)
+        // Full BFS selection fan: own budget (matches edge cap) + fast level-wave anim.
+        const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
+        if (!sel_dep_.root.empty() && !sel_dep_.edges.empty())
+        {
+            uint32_t sel_arrow_count = 0;
+            int within_level = 0;
+            int prev_depth = -1;
+            for (const SelectionDepEdge& e : sel_dep_.edges)
             {
-                auto dep_it = block_positions.find(dep_hash);
-                if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)
+                if (static_cast<int>(sel_arrow_count) >= kMaxSelDepArrows)
+                    break;
+                auto fit = block_positions.find(e.from);
+                auto tit = block_positions.find(e.to);
+                if (fit == block_positions.end() || tit == block_positions.end())
+                    continue;
+                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
+                    continue;
+
+                if (e.depth != prev_depth)
                 {
-                    const bool focus =
-                        any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
-                    glm::vec4 arrow_col = kSelectionArrowColor();
-                    if (focus)
-                    {
-                        auto cit = placement_color.find(dep_hash);
-                        const glm::vec3 c = (cit != placement_color.end())
-                                                ? cit->second
-                                                : glm::vec3(arrow_col);
-                        arrow_col = glm::vec4(c, 1.f);
-                    }
-                    else if (any_ui_dep_hover)
-                    {
-                        // Dim non-focused selection edges while inspecting one dep.
-                        arrow_col.a = 0.35f;
-                    }
-                    add_eph_arrow('s', block.hash, dep_hash, listing_pos, dep_it->second,
-                                  arrow_col, focus ? 1.28f : 1.15f, stagger_i++);
+                    prev_depth = e.depth;
+                    within_level = 0;
+                }
+
+                const bool focus =
+                    any_ui_dep_hover && e.to == in.ui_dep_hover_hash;
+                glm::vec4 arrow_col = kSelectionArrowColor();
+                if (focus)
+                {
+                    auto cit = placement_color.find(e.to);
+                    const glm::vec3 c = (cit != placement_color.end())
+                                            ? cit->second
+                                            : glm::vec3(arrow_col);
+                    arrow_col = glm::vec4(c, 1.f);
+                }
+                else if (any_ui_dep_hover)
+                    arrow_col.a = 0.35f;
+                else if (e.depth > 0)
+                {
+                    // Slightly softer for deeper shells so hop-1 stays strongest.
+                    arrow_col.a *= std::max(0.45f, 1.f - 0.08f * static_cast<float>(e.depth));
+                }
+
+                glm::vec3 from_inset, to_inset;
+                if (!inset_segment(fit->second, tit->second, clearance, from_inset, to_inset))
+                {
+                    ++within_level;
                     continue;
                 }
 
-                // Missing-dep ghost only if parent is drawn (selection always force-drawn).
-                if (dep_it != block_positions.end() && drawn.count(dep_hash) == 0)
-                    continue; // dep filtered out — no arrow/ghost
+                // Quick shells: depth wave + micro within-level, hard-capped total delay.
+                const float delay = std::min(
+                    kSelDepMaxStaggerSec,
+                    static_cast<float>(e.depth) * kSelDepLevelStagger +
+                        static_cast<float>(within_level) * kSelDepEdgeStagger);
+                const std::string key = eph_key('s', e.from, e.to);
+                const float grow =
+                    ephemeral_grow_u_(key, delay, eph_seen, kSelDepGrowSec);
+                ++within_level;
+                if (grow <= 0.f)
+                    continue;
 
-                const float angle =
-                    ((static_cast<float>(parent_lane) + 0.35f +
-                      0.08f * static_cast<float>(missing_i)) /
-                     16.0f) *
-                    2.0f * 3.14159265f;
-                const float radius = 20.0f * 0.9f;
-                // Match layout X flip (−cos) so ghost sits with lane ring.
-                glm::vec3 ghost(
-                    -radius * std::cos(angle),
-                    radius * std::sin(angle),
-                    listing_pos.z + meters_per_second *
-                                        static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
-                const bool focus_missing =
-                    any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
-                const glm::vec4 ghost_col =
-                    focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f) : kMissingOutline;
-                debug->add_wire_box(ghost, ghost_half, ghost_col);
-                debug->add_line(listing_pos, ghost, ghost_col);
-                ++missing_i;
+                const float tip_scale = focus ? 1.28f : (e.depth == 0 ? 1.15f : 1.05f);
+                debug->add_arrow(from_inset, to_inset, arrow_col, tip_len * tip_scale,
+                                 tip_rad * tip_scale, shaft_r * tip_scale, kDepRadial,
+                                 grow);
+                ++sel_arrow_count;
             }
-        };
-
-        // One-hop selection fan stays for whole selection; multi-hop continues from deps.
-        if (!in.selected_hash.empty() && in.selected_detail.hash == in.selected_hash)
-            draw_selection_deps(in.selected_detail);
-        else if (!in.selected_hash.empty())
-        {
-            if (auto d = scene_.detail_store().get(in.selected_hash))
-                draw_selection_deps(*d);
         }
-        if (dep_walk_active_() && debug)
-            draw_dep_walk_(*debug, tip_len, tip_rad, shaft_r, clearance);
+
+        // 1-hop missing ghosts for direct deps of selection only (no deep ghosts).
+        if (!in.selected_hash.empty() && drawn.count(in.selected_hash) != 0)
+        {
+            auto listing_it = block_positions.find(in.selected_hash);
+            if (listing_it != block_positions.end())
+            {
+                const AlphBlock* root_blk = nullptr;
+                std::optional<AlphBlock> root_opt;
+                if (in.selected_detail.hash == in.selected_hash)
+                    root_blk = &in.selected_detail;
+                else
+                {
+                    root_opt = scene_.detail_store().get(in.selected_hash);
+                    if (root_opt)
+                        root_blk = &*root_opt;
+                }
+                if (root_blk)
+                {
+                    const int parent_lane = root_blk->chain_idx();
+                    int missing_i = 0;
+                    const std::vector<std::string> gold_deps = sorted_deps_(root_blk->hash);
+                    const std::vector<std::string>& dep_list =
+                        gold_deps.empty() ? root_blk->deps : gold_deps;
+                    for (const std::string& dep_hash : dep_list)
+                    {
+                        if (dep_hash.empty())
+                            continue;
+                        auto dep_it = block_positions.find(dep_hash);
+                        if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)
+                            continue; // drawn edge already in BFS fan
+                        if (dep_it != block_positions.end() && drawn.count(dep_hash) == 0)
+                            continue; // filtered out
+
+                        const float angle =
+                            ((static_cast<float>(parent_lane) + 0.35f +
+                              0.08f * static_cast<float>(missing_i)) /
+                             16.0f) *
+                            2.0f * 3.14159265f;
+                        const float radius = 20.0f * 0.9f;
+                        glm::vec3 ghost(
+                            -radius * std::cos(angle),
+                            radius * std::sin(angle),
+                            listing_it->second.z +
+                                meters_per_second *
+                                    static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
+                        const bool focus_missing =
+                            any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                        const glm::vec4 ghost_col =
+                            focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f)
+                                          : kMissingOutline;
+                        debug->add_wire_box(ghost, ghost_half, ghost_col);
+                        debug->add_line(listing_it->second, ghost, ghost_col);
+                        ++missing_i;
+                    }
+                }
+            }
+        }
 
         if (!in.hovered_hash.empty() && in.hovered_hash != in.selected_hash &&
             drawn.count(in.hovered_hash) != 0)

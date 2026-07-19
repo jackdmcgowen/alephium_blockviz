@@ -27,9 +27,9 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
-| Timeline minimap (overlay) | **Full-width sliding 3-window histogram** (newer flush right); Z from genesis-aligned segment bounds; labels = **segment number** (`#G_seg`); Live prefix on tip segment when on-track; page steps one window; draw ring from camera Z with **alpha fade** |
-| Camera view presets | **End** (1) / **Side** (2) / **V** toggle with **pose memory** + blend. **L/R** = Z. **End U/D** = Z; **Side U/D** = orbit. Short RMB homes current preset |
-| Selection + dep walk | Gold one-hop fan stays. **Shard-rejoin TRACE**: H→D[s] (leave); rejoin finds dep on **reverse(D)** e.g. [0→1]→[1→0] (same-shard [0→0] continues on [0→0]); then leave via slot s again. **R** / Replay. Missing hop → fetch. |
+| Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`); **click** bin → teleport to segment start; Live / key **3** → tip; load bars when HUD known |
+| Camera view presets | **End** (1) / **Side** (2) / **V** toggle with pose memory. **3** = live tip. **L/R** = Z. Short **RMB** = deselect only (no reattach); RMB drag = pan |
+| Selection + dep walk | **Full BFS block-dep fan** from selected root (caps ~4k nodes / 8k edges+arrows). Gold arrows; **fast** level-wave grow (≤~0.25s stagger + 0.08s grow). 1-hop ghosts for missing direct deps only. **R** / Replay deps. Sharded **group** walk deferred (other view). |
 | Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
@@ -63,7 +63,7 @@ Graphics is domain-agnostic: the presenter emits `std::vector<SobelOutlineInstan
 2. Network + Block panels without racing live scene (`UiSnapshot`).
 3. Hot-switch Mainnet / Testnet; honest UX for reserved **Debug** domain.
 4. Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.
-5. Side/front camera toggle with Side orbit; snappy selection dep walks; brand-sleek arrows/Sobel.
+5. Side/front camera toggle with Side orbit; selection BFS dep fan; brand-sleek arrows/Sobel.
 
 ## Non-goals (presentation)
 
@@ -103,7 +103,7 @@ Graphics is domain-agnostic: the presenter emits `std::vector<SobelOutlineInstan
 | **P0** | Keep this visual model + color legend aligned with code | Update when `ScenePresenter` semantics change |
 | **Done** | Enable Debug domain in overlay | FakeChain selectable in Network panel |
 | **Done** | Config persistence | Last domain, multi-tx + min ALPH filters (`user_prefs.json`) |
-| **Done** | Timeline minimap + segment jump | Bottom strip; Live / scrub / prev-next |
+| **Done** | Timeline minimap + segment jump | Overview bins; click → start; Live / key 3 |
 | **Done** | ALPH out totals + amount filter | Sum txn outputs; billboard + inspector; min ALPH filter |
 | **Done** | Layout/camera orientation | Lane 0→0 screen-right; LMB/RMB signs fixed |
 | **P2** | Confirm polish | Feed-row confirmed badge; eye-check green vs shard palette; dual outline only if product asks |

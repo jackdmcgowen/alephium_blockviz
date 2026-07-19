@@ -204,12 +204,18 @@ public:
         pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
     }
 
-    // Short RMB: home look/pan for current preset + reattach to live timeline Z.
-    void clear_look_target()
+    // Drop selection look-aim without moving camera or reattaching timeline.
+    void release_look_aim()
     {
         look_engaged_ = false;
         look_aim_hash_.clear();
         free_look_ = false;
+    }
+
+    // Home look/pan for current preset + reattach to live timeline Z (explicit).
+    void clear_look_target()
+    {
+        release_look_aim();
         apply_view_preset_targets_(view_preset_);
         reattach_timeline();
     }

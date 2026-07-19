@@ -149,7 +149,7 @@ void GraphicsSystem::render_loop()
                 if (fout.has_look_target && selected_hash_local != camera_->look_aim_hash())
                     camera_->set_look_target(fout.look_target_pos, selected_hash_local);
                 else if (selected_hash_local.empty() && camera_->look_engaged())
-                    camera_->clear_look_target();
+                    camera_->release_look_aim();
                 // Re-tick look slerp after aim change for this frame's UBO.
                 camera_->tick(0.f);
             }

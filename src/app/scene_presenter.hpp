@@ -8,7 +8,7 @@
 //   green    — per-lane frontier tip H_c (or walk-anim display) + full blockDeps arrows
 //   cyan     — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip
 //   orange   — missing-dep incompletes (not green/cyan)
-//   gold     — selection
+//   gold     — selection + full BFS block-dep fan from selected root
 //   red      — removal death fade
 //   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
 #include "domain/block_scene.hpp"
@@ -40,51 +40,33 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
-    // Selection multi-hop: defaults; runtime overrides via StyleBlockflow JSON.
-    static constexpr float  kWalkHopGrowSec    = 0.12f;
-    static constexpr float  kWalkSlotStagger   = 0.03f;
-    static constexpr float  kWalkDieFadeSec    = 0.22f;
-    static constexpr float  kWalkArrivedHoldSec = 0.02f;
-    static constexpr int    kWalkMaxHops       = 32;
-    static constexpr int    kWalkSlotCount     = ALPH_NUM_GROUPS * 2 - 1; // 2G−1
+    // Selection BFS dep fan: multi-segment DAG + snappy level-wave anim.
+    static constexpr int    kMaxSelDepNodes       = 4096;
+    static constexpr int    kMaxSelDepEdges       = 8192;
+    static constexpr int    kMaxSelDepArrows      = 8192; // match edge cap (own budget)
+    static constexpr float  kSelDepGrowSec        = 0.08f;
+    static constexpr float  kSelDepLevelStagger   = 0.012f; // delay per BFS depth
+    static constexpr float  kSelDepEdgeStagger    = 0.0015f; // within-level micro delay
+    static constexpr float  kSelDepMaxStaggerSec  = 0.25f;  // hard cap — fan never waits seconds
 
     // Growing → Held → Dying (remove only). No unused Fading/Gone.
     enum class ArrowPhase : uint8_t { Growing, Held, Dying };
 
-    enum class WalkSlotState : uint8_t
+    // Full BFS of block deps from selected root (static gold fan).
+    struct SelectionDepEdge
     {
-        Pending = 0, // waiting start stagger
-        Flying  = 1, // hop arrow growing
-        Arrived = 2, // brief hold then next hop
-        Dying   = 3, // last hop red + alpha fade
-        Dead    = 4,
+        std::string from;
+        std::string to;
+        int         depth = 0; // depth of `from` (edge spans depth → depth+1)
     };
 
-    // Shard-rejoin TRACE: Leave = H/B→cross-shard dep; Rejoin = dep→same shard S.
-    enum class WalkHopKind : uint8_t { Leave = 0, Rejoin = 1 };
-
-    // Future: GroupHistory, DirectFan — v1 is ShardRejoin only.
-    enum class TraceType : uint8_t { ShardRejoin = 0 };
-
-    struct DepWalkSlot
+    struct SelectionDepTrace
     {
-        int           slot = 0;          // sticky clique index 0..2G-2
-        int           orig_from = 0;     // original selected shard S
-        int           orig_to = 0;
-        WalkHopKind   last_hop = WalkHopKind::Leave; // hop just completed / in flight
-        std::string   from_hash;
-        std::string   to_hash;
-        glm::vec3     from_pos{ 0.f };
-        glm::vec3     to_pos{ 0.f };
-        bool          has_pos = false;
-        bool          ghost_target = false; // to is missing — die after first draw
-        float         grow = 0.f;
-        float         die_alpha = 1.f;
-        float         state_start_sec = -1.f;
-        float         delay = 0.f;
-        int           hops_done = 0;
-        WalkSlotState state = WalkSlotState::Pending;
-        std::unordered_set<std::string> visited; // cycle guard
+        std::string                   root;
+        std::vector<std::string>      nodes;
+        std::unordered_set<std::string> node_set;
+        std::vector<SelectionDepEdge> edges;
+        bool                          seeded_from_detail = false;
     };
 
     struct DepArrowAnim
@@ -140,30 +122,16 @@ private:
                                 float now);
 
     float ephemeral_grow_u_(const std::string& key, float stagger_delay,
-                            std::unordered_set<std::string>& seen);
+                            std::unordered_set<std::string>& seen,
+                            float grow_sec = kArrowGrowSec);
 
-    void restart_dep_walk_(const std::string& root_hash,
-                           const std::unordered_map<std::string, glm::vec3>& positions);
-    void clear_dep_walk_();
-    void tick_dep_walk_(float now,
-                        const std::unordered_map<std::string, glm::vec3>& positions);
-    void draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad, float shaft_r,
-                        float clearance);
+    void clear_selection_deps_();
+    void rebuild_selection_dep_bfs_(const std::string& root_hash);
+    void collect_selection_dep_force_(std::unordered_set<std::string>& out) const;
     // Shard (chain_idx) for hash; 255 if unknown.
     int chain_idx_for_hash_(const std::string& hash) const;
-    bool hash_on_shard_(const std::string& hash, int from, int to) const;
-    // Resolve chainFrom/chainTo for hash; false if unknown.
-    bool shard_of_hash_(const std::string& hash, int& from_out, int& to_out) const;
-    // Deps of node sorted by chain_idx then hash (stable leave-slot order).
+    // Deps of node sorted by chain_idx then hash (stable BFS expand + gold order).
     std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
-    // Leave hop: sticky slot index into sorted_deps_.
-    std::string next_walk_dep_for_slot_(const std::string& node_hash, int slot,
-                                        const std::unordered_set<std::string>& visited) const;
-    // Rejoin hop: dep of node on shard [from→to] (caller passes reverse of leave target).
-    std::string find_dep_on_shard_(const std::string& node_hash, int from, int to,
-                                   const std::unordered_set<std::string>& visited) const;
-    void collect_walk_force_hashes_(std::unordered_set<std::string>& out) const;
-    bool dep_walk_active_() const;
 
     BlockScene& scene_;
     PolarShardLayout layout_;
@@ -180,13 +148,7 @@ private:
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
 
-    // Selection multi-hop walk (2G−1 slots).
-    std::string              walk_root_hash_;
-    std::vector<DepWalkSlot> walk_slots_;
-    bool                     walk_seeded_from_detail_ = false;
-    uint64_t                 last_walk_replay_gen_ = 0;
-    // TRACE Sobel strength on visited nodes (fade after all slots dead).
-    std::unordered_map<std::string, float> walk_visited_sobel_;
-    bool  walk_sobel_fading_ = false;
-    float walk_sobel_fade_start_sec_ = -1.f;
+    // Selection full BFS block-dep fan.
+    SelectionDepTrace sel_dep_;
+    uint64_t          last_walk_replay_gen_ = 0;
 };
