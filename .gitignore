@@ -68,6 +68,9 @@ debug.log
 *.ini
 user_prefs.json
 
+# Visual regression capture artifacts (goldens are tracked)
+tests/visual/out/
+
 # OS junk
 Thumbs.db
 Desktop.ini

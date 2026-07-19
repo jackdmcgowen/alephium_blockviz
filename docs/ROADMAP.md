@@ -29,6 +29,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | Offline **Debug / FakeChain** simulator | [network](layers/network.md) `fake/fake_chain_simulator.*`; Network panel Debug selectable |
 | Domain / detail **unit tests** | `tests/domain_tests.cpp` · `sln/blockviz_tests.vcxproj` |
 | Borderless **fullscreen** (F11 / Esc exit FS) | App `window_fullscreen.hpp`; graphics resizes only |
+| Graphics **visual regression** harness (V1) | `tests/visual/` + `run_visual_tests.ps1`; golden PNG compare |
 
 ---
 
