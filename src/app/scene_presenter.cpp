@@ -211,7 +211,7 @@ std::string ScenePresenter::next_walk_dep_for_slot_(
     const std::string& node_hash, int slot,
     const std::unordered_set<std::string>& visited) const
 {
-    // Slot s always means the s-th entry in shard-sorted deps — never "first free".
+    // Leave hop: slot s = s-th shard-sorted dep of node on the same-shard spine.
     if (node_hash.empty() || slot < 0)
         return {};
     const std::vector<std::string> sorted = sorted_deps_(node_hash);
@@ -221,6 +221,57 @@ std::string ScenePresenter::next_walk_dep_for_slot_(
     if (dep.empty() || visited.count(dep) != 0)
         return {};
     return dep;
+}
+
+bool ScenePresenter::hash_on_shard_(const std::string& hash, int from, int to) const
+{
+    if (hash.empty())
+        return false;
+    if (auto d = scene_.detail_store().get(hash))
+        return d->chainFrom == from && d->chainTo == to;
+    if (auto n = scene_.graph().get(hash))
+    {
+        return static_cast<int>(n->group_from) == from &&
+               static_cast<int>(n->group_to) == to;
+    }
+    return false;
+}
+
+std::string ScenePresenter::find_dep_on_shard_(
+    const std::string& node_hash, int from, int to,
+    const std::unordered_set<std::string>& visited) const
+{
+    // Rejoin hop: among deps of node, pick one on original shard S=[from→to].
+    if (node_hash.empty())
+        return {};
+    auto d = scene_.detail_store().get(node_hash);
+    if (!d || d->deps.empty())
+        return {};
+    // Prefer oldest (lowest timestamp) same-shard dep for history depth.
+    std::string best;
+    int64_t best_ts = 0;
+    bool have_ts = false;
+    for (const std::string& dep : d->deps)
+    {
+        if (dep.empty() || visited.count(dep) != 0)
+            continue;
+        if (!hash_on_shard_(dep, from, to))
+            continue;
+        int64_t ts = 0;
+        if (auto dd = scene_.detail_store().get(dep))
+            ts = dd->timestamp;
+        else if (auto n = scene_.graph().get(dep))
+            ts = n->timestamp_ms;
+        if (!have_ts || (ts > 0 && (best_ts <= 0 || ts < best_ts)))
+        {
+            best = dep;
+            best_ts = ts;
+            have_ts = true;
+        }
+        else if (!have_ts)
+            best = dep;
+    }
+    return best;
 }
 
 void ScenePresenter::restart_dep_walk_(
@@ -252,7 +303,21 @@ void ScenePresenter::restart_dep_walk_(
     const float stagger = st.walk_slot_stagger_sec > 0.f ? st.walk_slot_stagger_sec
                                                          : kWalkSlotStagger;
 
-    // hop0 TRACE: H → shard-sorted deps[s]; slot s sticks for the whole depth.
+    // Shard-rejoin TRACE: hop0 Leave H→D[s], then Rejoin to original shard S, …
+    int orig_from = 0;
+    int orig_to = 0;
+    if (auto root = scene_.detail_store().get(root_hash))
+    {
+        orig_from = root->chainFrom;
+        orig_to = root->chainTo;
+        walk_seeded_from_detail_ = true;
+    }
+    else if (auto n = scene_.graph().get(root_hash))
+    {
+        orig_from = static_cast<int>(n->group_from);
+        orig_to = static_cast<int>(n->group_to);
+    }
+
     std::vector<std::string> dep_roots = sorted_deps_(root_hash);
     if (!dep_roots.empty())
         walk_seeded_from_detail_ = true;
@@ -264,7 +329,10 @@ void ScenePresenter::restart_dep_walk_(
     {
         DepWalkSlot& s = walk_slots_[static_cast<size_t>(i)];
         s = DepWalkSlot{};
-        s.slot = i; // permanent: always the i-th shard-sorted dep chain
+        s.slot = i;
+        s.orig_from = orig_from;
+        s.orig_to = orig_to;
+        s.last_hop = WalkHopKind::Leave; // hop0 is leave into clique
         s.delay = stagger * static_cast<float>(i);
         s.state = WalkSlotState::Pending;
         s.state_start_sec = now;
@@ -275,7 +343,7 @@ void ScenePresenter::restart_dep_walk_(
             s.from_pos = fit->second;
 
         if (i >= static_cast<int>(dep_roots.size()) || dep_roots[static_cast<size_t>(i)].empty())
-            continue; // empty slot → die when Pending ends
+            continue;
 
         const std::string& dep0 = dep_roots[static_cast<size_t>(i)];
         s.to_hash = dep0;
@@ -411,9 +479,20 @@ void ScenePresenter::tick_dep_walk_(
             }
             s.visited.insert(s.to_hash);
             s.hops_done += 1;
-            // Sticky slot: always the s-th shard-sorted dep of the current tip.
-            const std::string next =
-                next_walk_dep_for_slot_(s.to_hash, s.slot, s.visited);
+            // Alternate Leave (clique slot s) and Rejoin (back onto original shard S).
+            std::string next;
+            if (s.last_hop == WalkHopKind::Leave)
+            {
+                // Arrived on cross-shard D[s] → rejoin original shard S.
+                next = find_dep_on_shard_(s.to_hash, s.orig_from, s.orig_to, s.visited);
+                s.last_hop = WalkHopKind::Rejoin;
+            }
+            else
+            {
+                // Arrived on S → leave again via sticky clique index s.
+                next = next_walk_dep_for_slot_(s.to_hash, s.slot, s.visited);
+                s.last_hop = WalkHopKind::Leave;
+            }
             if (next.empty())
             {
                 s.state = WalkSlotState::Dying;

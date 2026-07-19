@@ -60,9 +60,18 @@ private:
         Dead    = 4,
     };
 
+    // Shard-rejoin TRACE: Leave = H/B→cross-shard dep; Rejoin = dep→same shard S.
+    enum class WalkHopKind : uint8_t { Leave = 0, Rejoin = 1 };
+
+    // Future: GroupHistory, DirectFan — v1 is ShardRejoin only.
+    enum class TraceType : uint8_t { ShardRejoin = 0 };
+
     struct DepWalkSlot
     {
-        int           slot = 0;
+        int           slot = 0;          // sticky clique index 0..2G-2
+        int           orig_from = 0;     // original selected shard S
+        int           orig_to = 0;
+        WalkHopKind   last_hop = WalkHopKind::Leave; // hop just completed / in flight
         std::string   from_hash;
         std::string   to_hash;
         glm::vec3     from_pos{ 0.f };
@@ -142,11 +151,15 @@ private:
                         float clearance);
     // Shard (chain_idx) for hash; 255 if unknown.
     int chain_idx_for_hash_(const std::string& hash) const;
-    // Deps of node sorted by chain_idx then hash (stable slot order).
+    bool hash_on_shard_(const std::string& hash, int from, int to) const;
+    // Deps of node sorted by chain_idx then hash (stable leave-slot order).
     std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
-    // Sticky slot index into sorted_deps_; never "first available".
+    // Leave hop: sticky slot index into sorted_deps_.
     std::string next_walk_dep_for_slot_(const std::string& node_hash, int slot,
                                         const std::unordered_set<std::string>& visited) const;
+    // Rejoin hop: first dep of node that lies on original shard (from,to).
+    std::string find_dep_on_shard_(const std::string& node_hash, int from, int to,
+                                   const std::unordered_set<std::string>& visited) const;
     void collect_walk_force_hashes_(std::unordered_set<std::string>& out) const;
     bool dep_walk_active_() const;
 
