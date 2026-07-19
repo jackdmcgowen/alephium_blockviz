@@ -63,17 +63,17 @@ void MeshArena::destroy()
 
     if (tri_pipeline_ != VK_NULL_HANDLE)
     {
-        vkDestroyPipeline(device_, tri_pipeline_, nullptr);
+        destroy_pipeline(device_, tri_pipeline_);
         tri_pipeline_ = VK_NULL_HANDLE;
     }
     if (line_pipeline_ != VK_NULL_HANDLE)
     {
-        vkDestroyPipeline(device_, line_pipeline_, nullptr);
+        destroy_pipeline(device_, line_pipeline_);
         line_pipeline_ = VK_NULL_HANDLE;
     }
     if (pipeline_layout_ != VK_NULL_HANDLE)
     {
-        vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+        destroy_pipeline_layout(device_, pipeline_layout_);
         pipeline_layout_ = VK_NULL_HANDLE;
     }
 
@@ -131,15 +131,21 @@ void MeshArena::upload(const DebugDrawer& drawer)
 
 bool MeshArena::create_pipelines()
 {
+    // Shared pipeline module (PipelineType::_3D): layout + graphics PSOs.
+    // Depth test ON, depth write OFF so translucent debug meshes do not occlude
+    // each other incorrectly against cubes already written to the depth buffer.
     VkPushConstantRange push{};
     push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push.size = sizeof(glm::mat4);
 
-    VkPipelineLayoutCreateInfo layout_info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    layout_info.pushConstantRangeCount = 1;
-    layout_info.pPushConstantRanges = &push;
-    if (vkCreatePipelineLayout(device_, &layout_info, nullptr, &pipeline_layout_) != VK_SUCCESS)
+    try
+    {
+        pipeline_layout_ = create_pipeline_layout(device_, nullptr, 0, &push, 1);
+    }
+    catch (...)
+    {
         return false;
+    }
 
     std::vector<uint8_t> vert_code, frag_code;
     load_shader_source("debug_mesh_vert.spv", vert_code);
@@ -169,88 +175,47 @@ bool MeshArena::create_pipelines()
         { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(DebugVertex, color) },
     };
 
-    VkPipelineVertexInputStateCreateInfo vertex_input{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
-    vertex_input.vertexBindingDescriptionCount = 1;
-    vertex_input.pVertexBindingDescriptions = &binding;
-    vertex_input.vertexAttributeDescriptionCount = 2;
-    vertex_input.pVertexAttributeDescriptions = attribs;
-
-    VkPipelineViewportStateCreateInfo viewport_state{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
-    viewport_state.viewportCount = 1;
-    viewport_state.scissorCount = 1;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-    multisampling.rasterizationSamples = samples_;
-
-    VkPipelineColorBlendAttachmentState color_blend_attachment{};
-    color_blend_attachment.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    color_blend_attachment.blendEnable = VK_TRUE;
-    color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-    color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-
-    VkPipelineColorBlendStateCreateInfo color_blending{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    color_blending.attachmentCount = 1;
-    color_blending.pAttachments = &color_blend_attachment;
-
-    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dynamic_state{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-    dynamic_state.dynamicStateCount = 2;
-    dynamic_state.pDynamicStates = dynamic_states;
-
-    VkPipelineRenderingCreateInfo rendering_info{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    rendering_info.colorAttachmentCount = 1;
-    rendering_info.pColorAttachmentFormats = &color_format_;
-    rendering_info.depthAttachmentFormat = depth_format_;
-
-    // Triangles (arrows, barrier planes): test against cube depth but do not write —
-    // translucent planes must not hide later arrows or wash out geometry behind them.
-    // Lines: same depth test; no write so outlines stay compatible with translucent fills.
-    auto make_pipe = [&](VkPrimitiveTopology topo, VkCullModeFlags cull, VkBool32 depth_write,
-                         VkPipeline* out) -> bool {
-        VkPipelineInputAssemblyStateCreateInfo input_assembly{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-        input_assembly.topology = topo;
-
-        VkPipelineRasterizationStateCreateInfo rasterizer{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = cull;
-        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkPipelineDepthStencilStateCreateInfo depth_stencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-        depth_stencil.depthTestEnable = VK_TRUE;
-        depth_stencil.depthWriteEnable = depth_write;
-        depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-        VkGraphicsPipelineCreateInfo pipeline_info{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-        pipeline_info.pNext = &rendering_info;
-        pipeline_info.stageCount = 2;
-        pipeline_info.pStages = stages;
-        pipeline_info.pVertexInputState = &vertex_input;
-        pipeline_info.pInputAssemblyState = &input_assembly;
-        pipeline_info.pViewportState = &viewport_state;
-        pipeline_info.pRasterizationState = &rasterizer;
-        pipeline_info.pMultisampleState = &multisampling;
-        pipeline_info.pDepthStencilState = &depth_stencil;
-        pipeline_info.pColorBlendState = &color_blending;
-        pipeline_info.pDynamicState = &dynamic_state;
-        pipeline_info.layout = pipeline_layout_;
-        pipeline_info.renderPass = VK_NULL_HANDLE;
-
-        return vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, out) == VK_SUCCESS;
+    auto make_graphics = [&](VkPrimitiveTopology topo, VkCullModeFlags cull,
+                             VkPipeline* out) -> bool {
+        GraphicsPipelineCreateInfo ginfo{};
+        ginfo.layout = pipeline_layout_;
+        ginfo.stages = stages;
+        ginfo.stage_count = 2;
+        ginfo.bindings = &binding;
+        ginfo.binding_count = 1;
+        ginfo.attributes = attribs;
+        ginfo.attribute_count = 2;
+        ginfo.topology = topo;
+        ginfo.cull_mode = cull;
+        ginfo.front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        ginfo.depth_test = true;
+        ginfo.depth_write = false;
+        ginfo.depth_compare = VK_COMPARE_OP_LESS_OR_EQUAL;
+        ginfo.blend_mode = PipelineBlendMode::Alpha;
+        ginfo.samples = samples_;
+        ginfo.color_format = color_format_;
+        ginfo.depth_format = depth_format_;
+        ginfo.color_attachment_count = 1;
+        ginfo.dynamic_viewport_scissor = true;
+        try
+        {
+            *out = create_graphics_pipeline(device_, ginfo);
+            return *out != VK_NULL_HANDLE;
+        }
+        catch (...)
+        {
+            *out = VK_NULL_HANDLE;
+            return false;
+        }
     };
 
     const bool ok_tri =
-        make_pipe(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_CULL_MODE_BACK_BIT, VK_FALSE, &tri_pipeline_);
+        make_graphics(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_CULL_MODE_BACK_BIT, &tri_pipeline_);
     const bool ok_line =
-        make_pipe(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_CULL_MODE_NONE, VK_FALSE, &line_pipeline_);
+        make_graphics(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_CULL_MODE_NONE, &line_pipeline_);
 
-    vkDestroyShaderModule(device_, vert_module, nullptr);
-    vkDestroyShaderModule(device_, frag_module, nullptr);
+    destroy_shader_module(device_, vert_module);
+    destroy_shader_module(device_, frag_module);
 
     return ok_tri && ok_line;
 }

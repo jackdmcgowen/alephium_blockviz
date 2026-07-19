@@ -218,17 +218,17 @@ VkPipeline create_pipeline(VkDevice device, const PipelineCreateInfo& info)
     if (device == VK_NULL_HANDLE || info.layout == VK_NULL_HANDLE)
         throw std::runtime_error("create_pipeline: invalid device/layout");
 
-    if (info.kind == PipelineKind::_3D)
+    if (info.type == PipelineType::_3D)
     {
         if (!info.graphics)
-            throw std::runtime_error("create_pipeline: Graphics3D requires graphics info");
+            throw std::runtime_error("create_pipeline: _3D requires graphics info");
         GraphicsPipelineCreateInfo g = *info.graphics;
         if (g.layout == VK_NULL_HANDLE)
             g.layout = info.layout;
         return create_graphics_pipeline_impl(device, g);
     }
 
-    if (info.kind == PipelineKind::CMP)
+    if (info.type == PipelineType::CMP)
     {
         if (info.compute_module != VK_NULL_HANDLE)
         {
@@ -257,13 +257,13 @@ VkPipeline create_pipeline(VkDevice device, const PipelineCreateInfo& info)
         return pipeline;
     }
 
-    throw std::runtime_error("create_pipeline: unknown PipelineKind");
+    throw std::runtime_error("create_pipeline: unknown PipelineType");
 }
 
 VkPipeline create_graphics_pipeline(VkDevice device, const GraphicsPipelineCreateInfo& info)
 {
     PipelineCreateInfo pci{};
-    pci.kind = PipelineKind::_3D;
+    pci.type = PipelineType::_3D;
     pci.layout = info.layout;
     pci.graphics = &info;
     return create_pipeline(device, pci);
@@ -273,7 +273,7 @@ VkPipeline create_compute_pipeline_from_module(VkDevice device, VkPipelineLayout
                                                VkShaderModule module, const char* entry)
 {
     PipelineCreateInfo pci{};
-    pci.kind = PipelineKind::CMP;
+    pci.type = PipelineType::CMP;
     pci.layout = layout;
     pci.compute_module = module;
     pci.compute_entry = entry ? entry : "main";
@@ -284,7 +284,7 @@ VkPipeline create_compute_pipeline(VkDevice device, VkPipelineLayout layout,
                                    const char* shader_spv_path, const char* entry)
 {
     PipelineCreateInfo pci{};
-    pci.kind = PipelineKind::CMP;
+    pci.type = PipelineType::CMP;
     pci.layout = layout;
     pci.compute_spv_path = shader_spv_path;
     pci.compute_entry = entry ? entry : "main";

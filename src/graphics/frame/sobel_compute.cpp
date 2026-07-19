@@ -138,7 +138,7 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
     compute_layout_ = create_pipeline_layout(device, &compute_set_layout_, 1, &pcr, 1);
 
     PipelineCreateInfo pci{};
-    pci.kind = PipelineKind::CMP;
+    pci.type = PipelineType::CMP;
     pci.layout = compute_layout_;
     pci.compute_spv_path = "sobel.comp.spv";
     pci.compute_entry = "main";

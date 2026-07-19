@@ -99,8 +99,8 @@ void create_shader_module(VkDevice device, VkShaderModule &shaderModule, std::ve
 void destroy_shader_module(VkDevice device, VkShaderModule shaderModule);
 
   //pipeline.cpp — unified _3D (raster) + CMP (compute) pipeline helpers
-// PipelineKind is the PSO type (not the submit queue family; see QueueType).
-enum class PipelineKind : uint8_t
+// PipelineType is the PSO type (not the submit queue family; see QueueType).
+enum class PipelineType : uint8_t
 {
     _3D = 0, // graphics / dynamic rendering (typically QueueType::_3D CBs)
     CMP = 1, // compute dispatch (typically QueueType::CMP CBs)
@@ -178,16 +178,16 @@ struct GraphicsPipelineCreateInfo
     bool dynamic_primitive_topology = false;
 };
 
-// Unified create: kind selects graphics vs compute path. Throws on failure.
+// Unified create: type selects graphics vs compute path. Throws on failure.
 struct PipelineCreateInfo
 {
-    PipelineKind kind = PipelineKind::_3D;
+    PipelineType type = PipelineType::_3D;
     VkPipelineLayout layout = VK_NULL_HANDLE;
 
-    // PipelineKind::_3D — filled graphics create info (layout may be redundant).
+    // PipelineType::_3D — filled graphics create info (layout may be redundant).
     const GraphicsPipelineCreateInfo* graphics = nullptr;
 
-    // PipelineKind::CMP — either module or SPV path (path loads+destroys module).
+    // PipelineType::CMP — either module or SPV path (path loads+destroys module).
     VkShaderModule compute_module = VK_NULL_HANDLE;
     const char*    compute_spv_path = nullptr;
     const char*    compute_entry    = "main";
