@@ -16,6 +16,7 @@
 // Presentation (solid/green/cyan/orange/gold) lives in ScenePresenter — not here.
 #include "network/alephium/block_fetch_pool.hpp"
 #include "network/alephium/main_chain_cache.hpp"
+#include "network/alephium/segment_disk_cache.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 
@@ -55,6 +56,8 @@ public:
     void full_reset();
 
     void set_fetch_pool(BlockFetchPool* pool) { fetch_pool_ = pool; }
+    // Domain id for disk cache (mainnet/testnet); Debug disables cache.
+    void set_disk_cache_domain(int domain);
 
     void on_start();
     // Publish loading/activity HUD into BlockScene (call after poll/drain).
@@ -115,6 +118,9 @@ private:
     void enqueue_uncles_from_block_(const AlphBlock& alph);
     void label_tips_needing_reflood_();
     void refresh_lookback_floors_();
+    // Disk cache: load recent verified segments; persist closed polled k>=1 windows.
+    void bootstrap_disk_cache_();
+    void maybe_persist_verified_segments_();
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     // Extra older history unlocked by camera Z, in milliseconds (time, not heights).
@@ -308,6 +314,10 @@ private:
     // Load-once: chunk from_ms successfully admitted (not mere HTTP attempt).
     // Re-GET only after fail/prune invalidation, or live tip force_newest.
     std::unordered_set<int64_t> history_slots_fetched_;
+    // Verified segment disk cache (per domain); bootstrap + persist closed windows.
+    SegmentDiskCache disk_cache_;
+    bool disk_cache_bootstrapped_ = false;
+    std::unordered_set<int> disk_cache_saved_g_; // G_seg already written this session
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
     // Deferred non-interval results when interval budget is preferred.

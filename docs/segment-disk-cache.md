@@ -1,6 +1,6 @@
 # Segment disk cache (design)
 
-**Status:** design on `feature/segment-disk-cache` — not implemented.  
+**Status:** **P1/P2 in progress** on `feature/segment-disk-cache` (`segment_disk_cache.*` + adapter bootstrap/persist).  
 **Goal:** Bootstrap recent sessions within bounded disk/time by caching **verified** timeline segments and replaying them before network fill.
 
 ## Intent

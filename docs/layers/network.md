@@ -29,6 +29,7 @@ Network owns curl lifecycle, the poller thread, REST helpers (`commands.c`), and
 | `alephium/main_chain_cache.*` | `is_main` cache + hot-zone priority helpers |
 | `alephium/block_fetch_pool.*` | Concurrent hash fetches |
 | `alephium/alph_detail_store.*` | Full block detail + PR11 slim policy |
+| `alephium/segment_disk_cache.*` | Verified segment gzip cache under `%LOCALAPPDATA%`; bootstrap before network |
 | `fake/fake_chain_simulator.*` | Offline Debug domain: synthetic 16-lane growth + confirms |
 
 **Factory:** `create_network_system(BlockScene&, IEngine&)` / `destroy_network_system` (declared in `engine/engine.hpp`).

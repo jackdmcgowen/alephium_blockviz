@@ -110,6 +110,8 @@ void AlephiumAdapter::reset_stats()
     history_slots_fetched_.clear();
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
+    disk_cache_bootstrapped_ = false;
+    disk_cache_saved_g_.clear();
     phase_ = Phase::BootstrapPoll;
     bootstrap_poll_done_ = false;
     clear_bfs_state_();
@@ -489,6 +491,11 @@ void AlephiumAdapter::propagate_main_from_confirmed_deps_(const std::string& con
     }
 }
 
+void AlephiumAdapter::set_disk_cache_domain(int domain)
+{
+    disk_cache_.set_domain(SegmentDiskCache::domain_key_from_int(domain));
+}
+
 void AlephiumAdapter::on_start()
 {
     main_chain_cache_.refresh_tips();
@@ -502,8 +509,122 @@ void AlephiumAdapter::on_start()
     genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     last_segment_full_mask_ = 0;
     cache_pressure_level_ = 0;
+    disk_cache_bootstrapped_ = false;
+    disk_cache_saved_g_.clear();
     publish_trace_status_();
+    // Prefer disk before first network poll for recent verified history.
+    bootstrap_disk_cache_();
     std::printf("[adapter] on_start phase=BootstrapPoll (lookback window poll + time index)\n");
+}
+
+void AlephiumAdapter::bootstrap_disk_cache_()
+{
+    if (disk_cache_bootstrapped_ || !disk_cache_.enabled())
+    {
+        disk_cache_bootstrapped_ = true;
+        return;
+    }
+    disk_cache_bootstrapped_ = true;
+
+    const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    int64_t genesis = scene_.genesis_ms() > 0 ? scene_.genesis_ms()
+                                              : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const int64_t w = window_ms_();
+    int g_live = 0;
+    if (w > 0 && now_ms > genesis)
+        g_live = static_cast<int>((now_ms - genesis) / w);
+
+    std::vector<SegmentDiskCache::CachedBlock> blocks;
+    const auto lr =
+        disk_cache_.load_recent(g_live, SegmentDiskCache::kStartupLoadMax, blocks);
+    if (lr.blocks_loaded <= 0)
+        return;
+
+    if (lr.genesis_ms > 0)
+    {
+        genesis_ms_ = lr.genesis_ms;
+        genesis_resolved_ = true;
+        scene_.set_genesis_ms(genesis_ms_);
+    }
+
+    int admitted = 0;
+    int confirmed = 0;
+    for (const auto& cb : blocks)
+    {
+        if (cb.block.hash.empty())
+            continue;
+        if (scene_.add_block(cb.block))
+            ++admitted;
+        else
+            ++admitted; // already present still counts as bootstrap
+        if (cb.confirmed)
+        {
+            scene_.mark_confirmed(cb.block.hash);
+            ++confirmed;
+        }
+    }
+    for (int64_t key : lr.chunk_keys)
+        history_slots_fetched_.insert(key);
+
+    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d confirmed=%d chunks=%zu\n",
+                lr.segments_loaded, lr.blocks_loaded, confirmed, lr.chunk_keys.size());
+    (void)admitted;
+}
+
+void AlephiumAdapter::maybe_persist_verified_segments_()
+{
+    if (!disk_cache_.enabled())
+        return;
+    if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
+        return;
+
+    // Collect closed polled windows (lookback k >= 1) not yet saved this session.
+    for (const LookbackWindowSlot& slot : lookback_windows_)
+    {
+        if (!slot.polled || slot.index < 1)
+            continue;
+        if (slot.to_ms <= slot.from_ms || slot.global_index < 0)
+            continue;
+        const int G = slot.global_index;
+        if (disk_cache_saved_g_.count(G) != 0)
+            continue;
+
+        // Prefer BFS having run at least once after fill (session gen > 0).
+        if (bfs_generation_ < 1 && phase_ != Phase::Steady)
+            continue;
+
+        std::vector<SegmentDiskCache::CachedBlock> blocks;
+        const auto nodes = scene_.nodes_snapshot();
+        blocks.reserve(256);
+        for (const GraphNode& n : nodes)
+        {
+            if (n.timestamp_ms < slot.from_ms || n.timestamp_ms >= slot.to_ms)
+                continue;
+            SegmentDiskCache::CachedBlock cb;
+            if (auto d = scene_.detail_store().get(n.id))
+                cb.block = *d;
+            else
+            {
+                cb.block.hash = n.id;
+                cb.block.height = static_cast<int>(n.height);
+                cb.block.timestamp = n.timestamp_ms;
+                cb.block.chainFrom = static_cast<uint8_t>(n.group_from);
+                cb.block.chainTo = static_cast<uint8_t>(n.group_to);
+            }
+            if (cb.block.hash.empty())
+                continue;
+            {
+                std::lock_guard<std::mutex> lock(scene_.mutex());
+                cb.confirmed = scene_.is_confirmed_locked(cb.block.hash);
+            }
+            blocks.push_back(std::move(cb));
+        }
+        if (blocks.empty())
+            continue;
+
+        if (disk_cache_.save_segment(G, slot.from_ms, slot.to_ms, genesis_ms_, blocks))
+            disk_cache_saved_g_.insert(G);
+    }
 }
 
 void AlephiumAdapter::refresh_lookback_floors_()
@@ -1502,6 +1623,8 @@ void AlephiumAdapter::maybe_restart_bfs_on_segment_()
         return;
     }
     last_segment_full_mask_ = mask;
+    // Closed windows that just finished loading may be cacheable after prior BFS.
+    maybe_persist_verified_segments_();
     ++bfs_generation_;
     clear_bfs_state_();
     seed_bfs_phase_a_();
@@ -1593,6 +1716,7 @@ void AlephiumAdapter::advance_bfs_traces_()
         {
             std::printf("[adapter] BFS confirm complete -> Steady (fills clear)\n");
             set_phase_(Phase::Steady);
+            maybe_persist_verified_segments_();
         }
         else if (all_bfs_done_() && !confirm_fills_pending_() &&
                  bfs_seed_phase_ == BfsSeedPhase::PhaseA)
@@ -1603,10 +1727,14 @@ void AlephiumAdapter::advance_bfs_traces_()
             {
                 std::printf("[adapter] BFS confirm complete (A only) -> Steady\n");
                 set_phase_(Phase::Steady);
+                maybe_persist_verified_segments_();
             }
         }
         return;
     }
+
+    // Persist closed verified windows opportunistically in Steady.
+    maybe_persist_verified_segments_();
 
     // Steady: flood-label tips that BFS already covered / frontier stable.
     for (const NodeId& tip : scene_.tip_ids())
