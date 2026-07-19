@@ -129,6 +129,8 @@ public:
 	std::vector<std::string> deps;
 	std::vector<AlphTxn> txns;
 	std::vector<std::string> uncles;
+	// Preserved across detail slim (txns payload cleared); -1 = never parsed.
+	int txn_count = -1;
 
 	uint8_t chain_idx() const { return static_cast<uint8_t>(chainFrom * ALPH_NUM_GROUPS + chainTo); }
 
@@ -140,16 +142,19 @@ public:
 		, hash()
 		, deps()
 		, txns()
-	    , uncles() {}
+	    , uncles()
+		, txn_count(-1) {}
 
 	AlphBlock(cJSON* block)
 		: chainFrom(-1)
 		, chainTo(-1)
+		, height(-1)
 		, timestamp(0)
 		, hash()
 		, deps()
 		, txns()
 		, uncles()
+		, txn_count(-1)
 	{
 		GET_OBJECT_ITEM(block, chainFrom);
 		GET_OBJECT_ITEM(block, chainTo);
@@ -184,8 +189,10 @@ public:
 			}
 
 			GET_OBJECT_ITEM(block, transactions);
-			if (transactions)
+			if (transactions && cJSON_IsArray(transactions))
 			{
+				// API array size is authoritative for billboard/UI even after slim clears txns.
+				this->txn_count = cJSON_GetArraySize(transactions);
 				cJSON* tx;
 				cJSON_ArrayForEach(tx, transactions)
 				{

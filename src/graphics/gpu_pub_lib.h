@@ -1,7 +1,8 @@
 #pragma once
 
 // Public graphics types (no Vulkan). Used by IGraphicsSystem / IEngine.
-// See docs/graphics-modularization-design.md
+// Living docs: docs/layers/graphics.md (map: docs/layers/README.md).
+// Historical modularization design: docs/graphics-modularization-design.md
 
 #include <cstddef>
 #include <cstdint>

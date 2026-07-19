@@ -56,6 +56,36 @@ struct UiSnapshot
     float       poll_interval_sec     = 8.f;
     int         net_switching         = 0;
 
+    // Timeline segments (mirror BlockScene::TimeSegment; index 0 = live).
+    static constexpr int kMaxTimeSegments = 32;
+    struct TimeSegmentUi
+    {
+        int     index           = 0;
+        int64_t from_ms         = 0;
+        int64_t to_ms           = 0;
+        float   load_ratio      = 0.f;
+        int     confirmed_full  = 0;
+        int     block_count     = 0;
+        int     expected_blocks = 0;
+    };
+    int           segment_count = 0;
+    TimeSegmentUi segments[kMaxTimeSegments]{};
+
+    // World-anchored hover billboard (ImGui projects world_pos each frame).
+    // Overlay owns fade alpha; presenter sets want_visible + content.
+    struct BlockBillboardUi
+    {
+        bool  want_visible = false;
+        char  hash[72]{};
+        float world_pos[3]{ 0.f, 0.f, 0.f }; // slightly in front of cube toward camera
+        int   height     = -1;
+        int   chain_from = -1;
+        int   chain_to   = -1;
+        int   txn_count  = -1; // -1 = unknown (never parsed); survives detail slim
+        int   is_uncle   = 0;  // 0/1 ghost uncle
+    };
+    BlockBillboardUi block_billboard{};
+
     UiSnapshot()
     {
         for (int& h : confirmed_height_by_lane)

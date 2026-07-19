@@ -3,6 +3,7 @@
 // Product engine facade (engine.lib). No Vulkan / curl.
 // BlockVizEngine registers ISystem components and lifecycle them via init/free.
 // Prefer narrow includes: engine/frame_types.hpp, engine/system.hpp when possible.
+// Living docs: docs/layers/engine.md (map: docs/layers/README.md).
 
 #include "domain/alph_block.hpp"
 #include "app/ui_snapshot.hpp"
@@ -39,8 +40,9 @@ public:
     // Store config before polymorphic init().
     virtual void configure(const NetworkSystemConfig& cfg) = 0;
 
-    // Hot-switch Mainnet/Testnet (Debug reserved). Resets scene + restarts poller.
-    // Safe to call from UI/render thread; blocks until poller restarted.
+    // Hot-switch Mainnet/Testnet/Debug. Resets scene + restarts poller or FakeChain.
+    // Safe to call from UI/render thread; blocks until backend restarted.
+    // Debug may pass empty base_url (resolved to debug://fake-chain).
     virtual bool switch_domain(int domain, const std::string& base_url) = 0;
     virtual int  domain() const = 0;
     virtual bool is_switching() const = 0;
@@ -73,6 +75,10 @@ public:
     virtual void clear_selection() = 0;
     virtual bool is_selected(const std::string& hash) const = 0;
     virtual AlphBlock copy_selected_block() const = 0;
+    // Inspector Deps list hover (empty clears); used to recolor selection arrows.
+    virtual void set_ui_dep_hover(const std::string& hash) = 0;
+    // Scene view filter: only blocks with txn_count > 1.
+    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
     virtual std::string consume_detail_refill_request() = 0;
 
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;
@@ -122,6 +128,8 @@ public:
     virtual void clear_selection() = 0;
     virtual bool is_selected(const std::string& hash) const = 0;
     virtual AlphBlock copy_selected_block() const = 0;
+    virtual void set_ui_dep_hover(const std::string& hash) = 0;
+    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
     virtual std::string consume_detail_refill_request() = 0;
 
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;

@@ -1,6 +1,7 @@
 #pragma once
 
 // Host-side scene → frame builder. Runs on the engine render thread via IFrameSource.
+// Living docs: docs/layers/app.md (map: docs/layers/README.md).
 //
 // Production BlockFlow visual model (spacing/layout unchanged — keep):
 //   solid α  — confirmed bag with all deps live

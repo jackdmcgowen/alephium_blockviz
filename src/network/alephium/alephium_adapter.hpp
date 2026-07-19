@@ -1,6 +1,7 @@
 #pragma once
 
 // Domain/network policy for Alephium BlockFlow ingest.
+// Living docs: docs/layers/network.md (presentation: docs/layers/app.md).
 //
 // Production keep list:
 //   sequential H_c frontier, free-main dep propagation, chain-walk multi-step confirm,

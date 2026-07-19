@@ -1,7 +1,8 @@
-﻿#include "network/pch.h"
+#include "network/pch.h"
 #include "network/network_system.hpp"
 
 #include "network/alephium/network_poller.hpp"
+#include "network/fake/fake_chain_simulator.hpp"
 #include "network/network_domain.hpp"
 #include "domain/alph_block.hpp"
 
@@ -22,6 +23,7 @@ public:
         : scene_(scene)
         , engine_(engine)
         , poller_(scene, engine)
+        , fake_(scene)
     {
     }
 
@@ -48,13 +50,15 @@ public:
             std::printf("[net] NetworkSystem::init: call configure() first\n");
             return;
         }
+        // Curl only needed for live domains; init always so hot-switch to mainnet works.
         if (!curl_global_ready_)
         {
             curl_global_init(CURL_GLOBAL_DEFAULT);
             curl_global_ready_ = true;
         }
         inited_ = true;
-        std::printf("[net] NetworkSystem init url=%s\n", cfg_.base_url.c_str());
+        std::printf("[net] NetworkSystem init url=%s domain=%d\n", cfg_.base_url.c_str(),
+                    domain_);
     }
 
     void free() override
@@ -78,76 +82,73 @@ public:
             return;
         }
 
-        NetworkPoller::Config net_cfg;
-        net_cfg.base_url = cfg_.base_url;
-        net_cfg.lookback_ms = cfg_.lookback_ms;
-        net_cfg.poll_interval_ms = cfg_.poll_interval_ms;
-        poller_.set_domain_meta(domain_, cfg_.base_url);
-        poller_.start(net_cfg);
+        start_backend_locked_();
         running_ = true;
-        std::printf("[net] NetworkSystem started url=%s\n", cfg_.base_url.c_str());
+        std::printf("[net] NetworkSystem started domain=%d url=%s\n", domain_,
+                    cfg_.base_url.c_str());
     }
 
     void stop() override
     {
         if (running_)
         {
-            poller_.stop();
+            stop_backend_locked_();
             running_ = false;
         }
     }
 
     bool switch_domain(int domain, const std::string& base_url) override
     {
-        if (domain == static_cast<int>(NetworkDomain::Debug))
-            return false;
-        if (base_url.empty())
+        const bool is_debug = (domain == static_cast<int>(NetworkDomain::Debug));
+        // Live domains need a URL; Debug uses synthetic endpoint.
+        if (!is_debug && base_url.empty())
             return false;
 
         std::lock_guard<std::mutex> lock(mu_);
-        if (domain == domain_ && base_url == cfg_.base_url)
+        const std::string effective_url =
+            is_debug ? std::string("debug://fake-chain") : base_url;
+
+        if (domain == domain_ && effective_url == cfg_.base_url)
             return true;
 
         switching_ = true;
-        // Publish switching HUD so UI can show status immediately.
         {
             BlockScene::NetworkHud hud = scene_.network_hud();
             hud.domain = domain;
             hud.status = static_cast<int>(NetworkStatus::Switching);
             hud.switching = 1;
-            std::snprintf(hud.base_url, sizeof(hud.base_url), "%.159s", base_url.c_str());
+            std::snprintf(hud.base_url, sizeof(hud.base_url), "%.159s", effective_url.c_str());
             scene_.set_network_hud(hud);
         }
 
         const bool was_running = running_;
         if (was_running)
         {
-            poller_.stop();
+            stop_backend_locked_();
             running_ = false;
         }
 
         engine_.clear_selection();
         scene_.reset();
 
-        cfg_.base_url = base_url;
+        cfg_.base_url = effective_url;
         cfg_.domain = domain;
         domain_ = domain;
 
-        poller_.set_domain_meta(domain_, cfg_.base_url);
-        poller_.prepare_domain_switch();
+        if (!is_debug)
+        {
+            poller_.set_domain_meta(domain_, cfg_.base_url);
+            poller_.prepare_domain_switch();
+        }
 
         if (was_running || inited_)
         {
-            NetworkPoller::Config net_cfg;
-            net_cfg.base_url = cfg_.base_url;
-            net_cfg.lookback_ms = cfg_.lookback_ms;
-            net_cfg.poll_interval_ms = cfg_.poll_interval_ms;
-            poller_.start(net_cfg);
+            start_backend_locked_();
             running_ = true;
         }
 
         switching_ = false;
-        std::printf("[net] domain switch â†’ %d url=%s\n", domain_, cfg_.base_url.c_str());
+        std::printf("[net] domain switch -> %d url=%s\n", domain_, cfg_.base_url.c_str());
         return true;
     }
 
@@ -169,9 +170,33 @@ public:
     }
 
 private:
+    // Caller holds mu_ except from start() which is single-threaded before race.
+    void start_backend_locked_()
+    {
+        if (domain_ == static_cast<int>(NetworkDomain::Debug))
+        {
+            fake_.start();
+            return;
+        }
+        NetworkPoller::Config net_cfg;
+        net_cfg.base_url = cfg_.base_url;
+        net_cfg.lookback_ms = cfg_.lookback_ms;
+        net_cfg.poll_interval_ms = cfg_.poll_interval_ms;
+        poller_.set_domain_meta(domain_, cfg_.base_url);
+        poller_.start(net_cfg);
+    }
+
+    void stop_backend_locked_()
+    {
+        if (fake_.running())
+            fake_.stop();
+        poller_.stop();
+    }
+
     BlockScene& scene_;
     IEngine& engine_;
     NetworkPoller poller_;
+    FakeChainSimulator fake_;
     NetworkSystemConfig cfg_{};
     int domain_ = 0;
     mutable std::mutex mu_;

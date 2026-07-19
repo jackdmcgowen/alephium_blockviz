@@ -86,3 +86,41 @@ void destroy_image_view(VkDevice device, VkImageView imageview)
     vkDestroyImageView(device, imageview, nullptr);
 
 }   /* destroy_image_view() */
+
+void cmd_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
+                       VkImageLayout new_layout, VkAccessFlags2 src_access,
+                       VkAccessFlags2 dst_access, VkPipelineStageFlags2 src_stage,
+                       VkPipelineStageFlags2 dst_stage, VkImageSubresourceRange range,
+                       uint32_t src_queue_family, uint32_t dst_queue_family)
+{
+    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE)
+        return;
+
+    VkImageMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+    barrier.srcStageMask = src_stage;
+    barrier.srcAccessMask = src_access;
+    barrier.dstStageMask = dst_stage;
+    barrier.dstAccessMask = dst_access;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = src_queue_family;
+    barrier.dstQueueFamilyIndex = dst_queue_family;
+    barrier.image = image;
+    barrier.subresourceRange = range;
+
+    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void cmd_image_barrier_aspect(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout,
+                              VkImageLayout new_layout, VkAccessFlags2 src_access,
+                              VkAccessFlags2 dst_access, VkPipelineStageFlags2 src_stage,
+                              VkPipelineStageFlags2 dst_stage, VkImageAspectFlags aspect,
+                              uint32_t src_queue_family, uint32_t dst_queue_family)
+{
+    const VkImageSubresourceRange range{ aspect, 0, 1, 0, 1 };
+    cmd_image_barrier(cmd, image, old_layout, new_layout, src_access, dst_access, src_stage,
+                      dst_stage, range, src_queue_family, dst_queue_family);
+}

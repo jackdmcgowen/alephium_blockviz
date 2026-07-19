@@ -159,6 +159,115 @@ void BlockflowOverlay::draw()
 
     draw_network(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
+    draw_block_billboard_(ui, ui_w, ui_h, dt_sec);
+}
+
+void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, float ui_h,
+                                             float dt_sec)
+{
+    const auto& src = ui.block_billboard;
+    const bool want = src.want_visible && src.hash[0] != '\0';
+
+    // Latch content while fading out so text does not pop empty mid-fade.
+    if (want)
+    {
+        billboard_hash_ = src.hash;
+        billboard_pos_[0] = src.world_pos[0];
+        billboard_pos_[1] = src.world_pos[1];
+        billboard_pos_[2] = src.world_pos[2];
+        billboard_height_ = src.height;
+        billboard_chain_from_ = src.chain_from;
+        billboard_chain_to_ = src.chain_to;
+        billboard_txn_count_ = src.txn_count;
+        billboard_is_uncle_ = src.is_uncle != 0;
+    }
+
+    const float target = want ? 1.f : 0.f;
+    if (target > billboard_alpha_)
+    {
+        const float rate = 1.f / std::max(kBillboardFadeInSec, 1e-3f);
+        billboard_alpha_ = std::min(1.f, billboard_alpha_ + rate * dt_sec);
+    }
+    else if (target < billboard_alpha_)
+    {
+        const float rate = 1.f / std::max(kBillboardFadeOutSec, 1e-3f);
+        billboard_alpha_ = std::max(0.f, billboard_alpha_ - rate * dt_sec);
+    }
+
+    if (billboard_alpha_ < 0.01f)
+    {
+        if (!want)
+            billboard_hash_.clear();
+        return;
+    }
+
+    const glm::vec3 world(billboard_pos_[0], billboard_pos_[1], billboard_pos_[2]);
+    const glm::mat4 vp = camera_.camera().view_proj();
+    const glm::vec4 clip = vp * glm::vec4(world, 1.f);
+    if (clip.w <= 1e-4f)
+        return;
+
+    const float inv_w = 1.f / clip.w;
+    const float ndc_x = clip.x * inv_w;
+    const float ndc_y = clip.y * inv_w;
+    // Camera up is (0,-1,0); NDC y already matches top-down screen space with ImGui.
+    const float sx = (ndc_x * 0.5f + 0.5f) * ui_w;
+    const float sy = (ndc_y * 0.5f + 0.5f) * ui_h;
+
+    if (ndc_x < -1.2f || ndc_x > 1.2f || ndc_y < -1.2f || ndc_y > 1.2f)
+        return;
+
+    // Keep label inside center scene band between rails.
+    const float rail = ui_chrome::rail_width(ui_w);
+    const float min_x = rail + 8.f;
+    const float max_x = ui_w - rail - 8.f;
+    const float min_y = 8.f;
+    const float max_y = ui_h - 8.f;
+    if (max_x <= min_x)
+        return;
+
+    const float a = billboard_alpha_;
+    ImGui::SetNextWindowPos(ImVec2(sx, sy), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.78f * a);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.f, 8.f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+
+    if (ImGui::Begin("##block_billboard", nullptr, flags))
+    {
+        // Soft clamp: if window would sit under rails, ImGui still draws; nudge after size known.
+        ImVec2 pos = ImGui::GetWindowPos();
+        ImVec2 size = ImGui::GetWindowSize();
+        float nx = std::clamp(pos.x, min_x, std::max(min_x, max_x - size.x));
+        float ny = std::clamp(pos.y, min_y, std::max(min_y, max_y - size.y));
+        if (nx != pos.x || ny != pos.y)
+            ImGui::SetWindowPos(ImVec2(nx, ny));
+
+        if (billboard_is_uncle_)
+            ImGui::TextColored(ImVec4(0.78f, 0.45f, 1.f, 1.f), "uncle");
+
+        if (billboard_height_ >= 0)
+            ImGui::Text("H  %d", billboard_height_);
+        else
+            ImGui::TextDisabled("H  --");
+
+        if (billboard_chain_from_ >= 0 && billboard_chain_to_ >= 0)
+            ImGui::Text("%d -> %d", billboard_chain_from_, billboard_chain_to_);
+        else
+            ImGui::TextDisabled("-- -> --");
+
+        if (billboard_txn_count_ >= 0)
+            ImGui::Text("%d txn%s", billboard_txn_count_,
+                        billboard_txn_count_ == 1 ? "" : "s");
+        else
+            ImGui::TextDisabled("-- txns");
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
 }
 
 void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h)
@@ -181,7 +290,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         domain_i = 0;
     if (ImGui::BeginCombo("##domain", labels[domain_i]))
     {
-        for (int i = 0; i < 2; ++i) // Mainnet + Testnet only
+        for (int i = 0; i < 3; ++i) // Mainnet + Testnet + Debug (FakeChain)
         {
             const bool selected = (domain_i == i);
             if (ImGui::Selectable(labels[i], selected))
@@ -200,13 +309,9 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
             }
             if (selected)
                 ImGui::SetItemDefaultFocus();
+            if (i == static_cast<int>(NetworkDomain::Debug) && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Offline FakeChain simulator (no HTTP)");
         }
-        // Debug: visible but disabled
-        ImGui::BeginDisabled(true);
-        ImGui::Selectable(labels[2], false);
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Simulator planned â€” not available yet");
         ImGui::EndCombo();
     }
 
@@ -256,6 +361,32 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
     ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
 
+    // Timeline segments (lookback windows) with per-segment load %.
+    if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        const int nshow =
+            std::min(ui.segment_count, UiSnapshot::kMaxTimeSegments);
+        for (int i = 0; i < nshow; ++i)
+        {
+            const auto& s = ui.segments[i];
+            const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
+            const float span_s = static_cast<float>(span_ms) * 0.001f;
+            const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
+            const char* tag = (i == 0) ? "Live" : (s.confirmed_full ? "full" : "loading");
+            ImGui::PushID(i);
+            if (i == 0)
+                ImGui::Text("[%d] Live  %.0fs", s.index, span_s);
+            else
+                ImGui::Text("[%d] -%.0fm  %.0fs", s.index, span_s * static_cast<float>(i) / 60.f,
+                            span_s);
+            ImGui::ProgressBar(ratio, ImVec2(-1.f, 0.f),
+                               s.confirmed_full ? "100%" : nullptr);
+            ImGui::TextDisabled("  %d blks · %d%% · %s", s.block_count,
+                                static_cast<int>(ratio * 100.f + 0.5f), tag);
+            ImGui::PopID();
+        }
+    }
+
     ImGui::Separator();
     ImGui::Text("Activity");
     ImGui::TextDisabled("phase: %s", network_status_label(st));
@@ -298,10 +429,15 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::TreePop();
     }
 
-    // Former bottom "Blockflow" toolbar â€” collapsible under Network.
+    // Former bottom "Blockflow" toolbar — collapsible under Network.
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
+            engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
         const float bps = ui.total_blocks / (0.001f * elapsed_ms);
@@ -418,6 +554,8 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
 {
     const float rail_w = ui_chrome::rail_width(ui_w);
     g_explorer_host = network_domain_explorer_host(domain_);
+    // Cleared unless a Deps row is hovered this frame (recolors selection arrows).
+    std::string dep_hover_this_frame;
 
     // Prefer live selection detail if feed click updated selection this frame
     AlphBlock inspector = ui.selected_detail;
@@ -465,12 +603,17 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             ImGui::TextDisabled("time %s", tbuf);
         }
 
-        ImGui::TextDisabled("%d tx Â· %d deps Â· %d uncles",
-                            static_cast<int>(inspector.txns.size()),
-                            static_cast<int>(inspector.deps.size()),
-                            static_cast<int>(inspector.uncles.size()));
+        {
+            const int tx_n = (inspector.txn_count >= 0)
+                                 ? inspector.txn_count
+                                 : static_cast<int>(inspector.txns.size());
+            ImGui::TextDisabled("%d tx · %d deps · %d uncles",
+                                tx_n,
+                                static_cast<int>(inspector.deps.size()),
+                                static_cast<int>(inspector.uncles.size()));
+        }
 
-        // â”€â”€ Dependencies (collapsed by default) â”€â”€
+        // --- Dependencies: hover recolors 3D arrow; click selects + looks (no explorer) ---
         if (!inspector.deps.empty() &&
             ImGui::TreeNodeEx("##deps", ImGuiTreeNodeFlags_SpanAvailWidth,
                               "Deps (%d)", static_cast<int>(inspector.deps.size())))
@@ -480,11 +623,15 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             {
                 ImGui::PushID(di++);
                 short_id(dep, id_buf, sizeof(id_buf));
-                explorer_url(url, sizeof(url), "blocks", dep);
                 ImGui::Bullet();
-                ImGui::TextLinkOpenURL(dep.empty() ? "##dep" : id_buf, url);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", dep.c_str());
+                if (!dep.empty() &&
+                    ImGui::Selectable(id_buf, false, ImGuiSelectableFlags_DontClosePopups))
+                    engine_.set_selection(dep);
+                if (ImGui::IsItemHovered() && !dep.empty())
+                {
+                    dep_hover_this_frame = dep;
+                    ImGui::SetTooltip("%s\n(click to select / look at)", dep.c_str());
+                }
                 ImGui::PopID();
             }
             ImGui::TreePop();
@@ -589,5 +736,6 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");
     }
+    engine_.set_ui_dep_hover(dep_hover_this_frame);
     ImGui::End();
 }

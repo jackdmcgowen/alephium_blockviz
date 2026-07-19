@@ -1,14 +1,18 @@
 # Design: Latest BlockFlow Visualization (Confirmed vs Unconfirmed Tips)
 
+> **Status: HISTORICAL (landed & evolved).** Original PR1–PR4 (scene confirmed set, green arrows, multi-tip Sobel, HUD) shipped and then grew (frontier `H_c`, confirm walks, cyan/orange incompletes, free-main propagation).  
+> **Living docs:** confirmation dual-write & phases → [`docs/layers/network.md`](layers/network.md); presentation colors → [`docs/layers/app.md`](layers/app.md); Sobel GPU path → [`docs/layers/graphics.md`](layers/graphics.md).  
+> Paths in this draft (`src/adapters/…`, `VulkanEngine`) predate `src/network/alephium/` and `GraphicsSystem`.
+
 | Field | Value |
 |-------|--------|
 | **Document** | Latest BlockFlow tip confirmation visualization |
 | **Author** | _(owner)_ |
 | **Date** | 2026-07-12 |
-| **Status** | Draft (rev 2 — review issues addressed) |
+| **Status** | **Historical (landed & evolved)** — was Draft rev 2; kept for dual-write / Sobel design rationale |
 | **Repo** | `C:\Users\JackD\OneDrive\Desktop\alephium_blockviz` |
-| **Branch baseline** | `integration/graphics-feature/01` (+ uncommitted tip-dep anim / camera work as expected stack base) |
-| **Related** | `docs/graphics-modularization-design.md`, tip-dep `DepArrowAnim` in `ScenePresenter`, async Sobel in `SobelCompute` / `VulkanEngine` |
+| **Branch baseline** | `integration/graphics-feature/01` (historical) |
+| **Related** | [layers](layers/README.md), tip-dep anim in `ScenePresenter`, Sobel in `graphics/frame/sobel_compute.*` |
 
 ---
 

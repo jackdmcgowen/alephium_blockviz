@@ -1,13 +1,18 @@
 # alephium_blockviz — Graphics Engine Modularization & Multi-Chain Architecture
 
+> **Status: HISTORICAL (landed).** Core modularization (host / domain / network / engine / graphics, detail store, slim, rename off god-class renderer) shipped.  
+> **Do not treat this file as the live backlog.** Living goals and plans:  
+> [`docs/layers/README.md`](layers/README.md) · [app](layers/app.md) · [engine](layers/engine.md) · [graphics](layers/graphics.md) · [network](layers/network.md).  
+> Residual items from the old PR plan map roughly to: FakeChain/Debug → **network** (+ app UX); config polish → **app**; further PSO modularization → **graphics**.
+
 | Field | Value |
 |-------|--------|
 | **Document** | Target architecture & incremental modularization plan |
 | **Author** | _(owner)_ |
 | **Date** | 2026-07-09 |
-| **Status** | Draft (rev 2 — review issues addressed) |
+| **Status** | **Historical (landed)** — was Draft rev 2; kept for design rationale |
 | **Repo** | `C:\Users\JackD\OneDrive\Desktop\alephium_blockviz` |
-| **Solution** | `alephium_visualizer.sln` (app: `alephium_visualizer`, static lib: `graphics`) |
+| **Solution** | `alephium_visualizer.sln` (app: `alephium_visualizer`, libs: `graphics`, `blockviz_engine`, `network`) |
 
 ---
 

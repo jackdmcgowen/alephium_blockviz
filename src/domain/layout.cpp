@@ -108,8 +108,18 @@ LayoutResult PolarShardLayout::build(const std::vector<GraphNode>& nodes, const 
                 placed.lane = static_cast<uint8_t>(shardId);
                 placed.height = static_cast<int>(node.height);
                 placed.timestamp_ms = ts;
-                placed.pos = glm::vec3(radius * std::cos(angle), radius * std::sin(angle), z);
+                placed.txn_count = node.txn_count;
+                placed.is_uncle = (node.role == BlockRole::Uncle);
+                // Slight extra radial ring for uncles so they sit outside main cubes.
+                const float r = placed.is_uncle ? (radius + 3.0f) : radius;
+                placed.pos = glm::vec3(r * std::cos(angle), r * std::sin(angle), z);
                 placed.color = palette_.color_for(static_cast<uint32_t>(shardId));
+                if (placed.is_uncle)
+                {
+                    // Violet tint for ghost uncles (lost main-chain race).
+                    const glm::vec3 uncle_tint(0.72f, 0.28f, 0.95f);
+                    placed.color = glm::mix(placed.color, uncle_tint, 0.72f);
+                }
 
                 out.positions[placed.hash] = placed.pos;
                 out.lanes[placed.hash] = placed.lane;

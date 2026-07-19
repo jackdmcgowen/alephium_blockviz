@@ -177,6 +177,61 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.stats_seed_q = static_cast<int>(seed_q_.size());
     hud.last_poll_ms = last_poll_wall_ms_;
     hud.poll_interval_sec = static_cast<float>(cfg_.poll_interval_ms) * 0.001f;
+
+    // Timeline segments: one per lookback window with load % / full flag.
+    {
+        const auto nodes = scene_.nodes_snapshot();
+        const int nwin = static_cast<int>(lookback_windows_.size());
+        const int nseg = std::min(nwin, BlockScene::kMaxTimeSegments);
+        hud.segment_count = nseg;
+        const bool fills_pending = !pending_fill_parents_.empty();
+        for (int i = 0; i < nseg; ++i)
+        {
+            const LookbackWindowSlot& w = lookback_windows_[static_cast<size_t>(i)];
+            BlockScene::TimeSegment& s = hud.segments[i];
+            s.index = w.index;
+            s.from_ms = w.from_ms;
+            s.to_ms = w.to_ms;
+            s.block_count = 0;
+            for (const auto& n : nodes)
+            {
+                if (n.timestamp_ms <= 0)
+                    continue;
+                if (n.timestamp_ms >= w.from_ms && n.timestamp_ms < w.to_ms)
+                    ++s.block_count;
+            }
+            const int64_t span_ms = std::max<int64_t>(1, w.to_ms - w.from_ms);
+            const float span_sec = static_cast<float>(span_ms) * 0.001f;
+            // Soft estimate: ~half of 16 chains at 8s block time over the window.
+            s.expected_blocks = std::max(
+                1, static_cast<int>(span_sec / static_cast<float>(ALPH_TARGET_BLOCK_SECONDS) *
+                                    static_cast<float>(ALPH_NUM_GROUPS * ALPH_NUM_GROUPS) * 0.5f));
+            float ratio = static_cast<float>(s.block_count) /
+                          static_cast<float>(std::max(1, s.expected_blocks));
+            if (w.polled)
+                ratio = std::max(ratio, 0.15f);
+            s.load_ratio = std::clamp(ratio, 0.f, 1.f);
+            // Live (index 0): never forced full while still the tip window.
+            // Older: full when polled, density ok, no confirm-fills pending.
+            if (i == 0)
+            {
+                s.confirmed_full = 0;
+                if (fills_pending)
+                    s.load_ratio = std::min(s.load_ratio, 0.95f);
+            }
+            else
+            {
+                const bool dense_enough = s.block_count >= (s.expected_blocks * 85) / 100;
+                s.confirmed_full =
+                    (w.polled && dense_enough && !fills_pending) ? 1 : 0;
+                if (s.confirmed_full)
+                    s.load_ratio = 1.f;
+                else if (fills_pending)
+                    s.load_ratio = std::min(s.load_ratio, 0.95f);
+            }
+        }
+    }
+
     scene_.set_network_hud(hud);
 }
 
@@ -1302,11 +1357,15 @@ int AlephiumAdapter::admit_blocks_with_events_(cJSON* obj, int* seen_out, int* a
 
                 if (proven_not_main_.count(block_hash))
                 {
+                    // Keep ghost uncles for visualization (distinct color); not confirm tips.
+                    if (scene_.add_block(block))
+                        ++added;
                     if (scene_.graph().contains(block_hash))
+                        scene_.mark_uncle(block_hash);
                     {
-                        scene_.remove_block(block_hash);
-                        ++stats_uncles_removed_;
-                        ++stats_removed_;
+                        AlphBlock alph(block);
+                        if (!alph.hash.empty())
+                            enqueue_uncles_from_block_(alph);
                     }
                     continue;
                 }
@@ -1714,17 +1773,11 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
     if (uncle_hash.empty())
         return;
 
-    // Already proven not-main: if it later appears in the live pool, remove it.
+    // Already proven not-main: keep in pool as uncle (viz), never as main tip.
     if (proven_not_main_.count(uncle_hash))
     {
         if (scene_.graph().contains(uncle_hash))
-        {
-            adapter_vlog("[adapter] uncle previously not-main now live %s â€” remove\n",
-                        uncle_hash.c_str());
-            scene_.remove_block(uncle_hash);
-            ++stats_uncles_removed_;
-            ++stats_removed_;
-        }
+            scene_.mark_uncle(uncle_hash);
         return;
     }
 
@@ -1779,34 +1832,42 @@ void AlephiumAdapter::verify_uncle_(const std::string& uncle_hash, int parent_fr
         return;
     }
 
-    // Not on main chain.
+    // Not on main chain — keep as uncle for viz (do not remove from pool).
     proven_not_main_.insert(uncle_hash);
     if (node)
     {
-        // Remove from live pool (graph + detail), independent of render/cull.
         if (behind_tip)
-            adapter_vlog("[adapter] uncle orphaned (not main, h=%d < tip %d) %s â€” remove\n",
+            adapter_vlog("[adapter] uncle orphaned (not main, h=%d < tip %d) %s — mark uncle\n",
                         height, tip_h, uncle_hash.c_str());
         else
-            adapter_vlog("[adapter] uncle NOT main %s â€” remove from pool\n",
+            adapter_vlog("[adapter] uncle NOT main %s — mark uncle (keep draw)\n",
                         uncle_hash.c_str());
-        scene_.remove_block(uncle_hash);
+        scene_.mark_uncle(uncle_hash);
+        // stats_uncles_removed_ kept as historical name; count "classified as uncle".
         ++stats_uncles_removed_;
-        ++stats_removed_;
     }
-    // Not in pool: remember not-main so a later admit is dropped immediately.
 }
 
 void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 {
-    adapter_vlog("[adapter] DAG seed NOT main %s [%d->%d] h=%d â€” remove\n",
+    proven_not_main_.insert(job.hash);
+    // Only keep as uncle if it was listed as a ghost uncle (queued) or already marked.
+    if ((uncle_queued_.count(job.hash) || scene_.is_uncle(job.hash)) &&
+        scene_.graph().contains(job.hash))
+    {
+        adapter_vlog("[adapter] DAG seed NOT main %s [%d->%d] h=%d — mark uncle\n",
+                    job.hash.c_str(), job.from, job.to, job.height);
+        scene_.mark_uncle(job.hash);
+        ++stats_uncles_removed_;
+        return;
+    }
+    adapter_vlog("[adapter] DAG seed NOT main %s [%d->%d] h=%d — remove\n",
                 job.hash.c_str(), job.from, job.to, job.height);
     const bool reselect = engine_.is_selected(job.hash);
     scene_.remove_block(job.hash);
     if (reselect)
         engine_.clear_selection();
     ++stats_removed_;
-    proven_not_main_.insert(job.hash);
 
     cJSON* arr = get_blockflow_hashes(job.from, job.to, job.height);
     if (!arr || !cJSON_IsArray(arr))

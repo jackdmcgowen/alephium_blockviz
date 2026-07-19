@@ -1,7 +1,7 @@
 #pragma once
 
-// Network domain selection (mainnet / testnet / debug stub).
-// Debug is reserved for a future offline simulator — not selectable yet.
+// Network domain selection (mainnet / testnet / offline Debug FakeChain).
+// Living docs: docs/layers/network.md (map: docs/layers/README.md).
 
 #include <cstdint>
 #include <cstring>
@@ -31,7 +31,7 @@ inline constexpr const char* network_domain_default_url(NetworkDomain d)
     {
     case NetworkDomain::Mainnet: return "https://node.mainnet.alephium.org";
     case NetworkDomain::Testnet: return "https://node.testnet.alephium.org";
-    case NetworkDomain::Debug:   return "";
+    case NetworkDomain::Debug:   return "debug://fake-chain";
     }
     return "https://node.mainnet.alephium.org";
 }
@@ -63,7 +63,7 @@ inline NetworkDomain network_domain_from_url(const char* url)
 inline std::string network_domain_resolve_url(NetworkDomain d, const char* const* urls, int count)
 {
     if (d == NetworkDomain::Debug)
-        return {};
+        return network_domain_default_url(NetworkDomain::Debug);
     const char* token = (d == NetworkDomain::Testnet) ? "testnet" : "mainnet";
     if (urls)
     {

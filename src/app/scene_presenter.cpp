@@ -2,6 +2,7 @@
 #include "app/scene_presenter.hpp"
 
 #include "domain/alph_block.hpp"
+#include "graphics/camera.hpp"
 #include "graphics/debug/debug_drawer.h"
 
 #include <algorithm>
@@ -18,12 +19,20 @@ namespace
 // World units per second of block timestamp (matches camera scroll_z units).
 // Keep spacing: do not change meters_per_second or base_radius.
 float meters_per_second = 1.0f;
+constexpr float kLayoutBaseRadius = 20.0f;
 
-const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child â†’ tip
-const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip â†’ blockDeps
+const glm::vec4 kCyanArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // frontier-child → tip
+const glm::vec4 kGreenArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // frontier tip → blockDeps
 const glm::vec4 kDeathArrowColor(1.0f, 0.12f, 0.10f, 0.95f);
 const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
 const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
+const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
+
+// Shared helper: layout, planes, and segment cull all use this Z mapping.
+inline float ts_to_z(int64_t ts_ms, int64_t origin_ms, float mps)
+{
+    return -static_cast<float>(ts_ms - origin_ms) * 0.001f * mps;
+}
 
 bool inset_segment(const glm::vec3& from, const glm::vec3& to, float clearance,
                    glm::vec3& from_out, glm::vec3& to_out)
@@ -421,12 +430,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     // Spacing unchanged: base_radius=20, meters_per_second=1, 16 lanes.
     LayoutParams layout_params;
     layout_params.meters_per_second = meters_per_second;
-    layout_params.base_radius = 20.0f;
+    layout_params.base_radius = kLayoutBaseRadius;
     layout_params.lane_count = 16;
     layout_params.timeline_origin_ms = timeline_origin_ms;
 
     LayoutResult layout = layout_.build(graph_nodes, layout_params);
     const auto& block_positions = layout.positions;
+
+    // Network HUD (segments) — already under scene mutex.
+    const BlockScene::NetworkHud hud = scene_.network_hud_locked();
 
     std::unordered_set<std::string> live_nodes;
     live_nodes.reserve(graph_nodes.size());
@@ -461,6 +473,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
     if (green_display.empty())
         green_display = frontier_domain;
+    // Uncles must never be green tips.
+    for (auto it = green_display.begin(); it != green_display.end(); )
+    {
+        if (scene_.is_uncle_locked(*it))
+            it = green_display.erase(it);
+        else
+            ++it;
+    }
 
     int hc_by_lane[BlockScene::kLaneCount];
     scene_.copy_confirmed_heights_locked(hc_by_lane);
@@ -471,7 +491,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     {
         if (n.id.empty() || live_nodes.count(n.id) == 0)
             continue;
-        if (scene_.is_confirmed_locked(n.id))
+        if (scene_.is_confirmed_locked(n.id) || scene_.is_uncle_locked(n.id) ||
+            n.role == BlockRole::Uncle)
             continue;
         if (n.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
             continue;
@@ -542,6 +563,114 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     constexpr float kUnconfirmedAlpha = 0.38f;
     const float scale = kDefaultBlockScale;
 
+    // ------------------------------------------------------------------
+    // Hierarchical cull: at most the newest 4 segments, then frustum slabs
+    // → blocks. Hard bound keeps instance work in a fixed lookback range.
+    // ------------------------------------------------------------------
+    constexpr int kMaxVisibleTimeSegments = 4;
+    const int nseg = std::clamp(hud.segment_count, 0, BlockScene::kMaxTimeSegments);
+    const int n_eligible = std::min(nseg, kMaxVisibleTimeSegments);
+    const float eye_z = scene_.camera_scroll_z();
+    const float R_cull = kLayoutBaseRadius * 1.35f;
+    float seg_width_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * meters_per_second;
+    if (nseg > 0)
+    {
+        const int64_t span_ms =
+            std::max<int64_t>(1, hud.segments[0].to_ms - hud.segments[0].from_ms);
+        seg_width_z = static_cast<float>(span_ms) * 0.001f * meters_per_second;
+    }
+
+    bool seg_visible[BlockScene::kMaxTimeSegments]{};
+    float vis_z_lo = 0.f;
+    float vis_z_hi = 0.f;
+    bool  have_vis_z = false;
+    int   visible_seg_count = 0;
+
+    auto mark_vis_z = [&](float z0, float z1) {
+        const float lo = std::min(z0, z1);
+        const float hi = std::max(z0, z1);
+        if (!have_vis_z)
+        {
+            vis_z_lo = lo;
+            vis_z_hi = hi;
+            have_vis_z = true;
+        }
+        else
+        {
+            vis_z_lo = std::min(vis_z_lo, lo);
+            vis_z_hi = std::max(vis_z_hi, hi);
+        }
+    };
+
+    if (n_eligible > 0)
+    {
+        // Index 0 = live (newest). Only i in [0, n_eligible) may draw.
+        for (int i = 0; i < n_eligible; ++i)
+        {
+            const auto& s = hud.segments[i];
+            if (s.from_ms <= 0 && s.to_ms <= 0)
+                continue;
+            const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
+            const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
+            const float z_lo   = std::min(z_from, z_to);
+            const float z_hi   = std::max(z_from, z_to);
+            const glm::vec3 center(0.f, 0.f, 0.5f * (z_lo + z_hi));
+            const glm::vec3 half(R_cull, R_cull, 0.5f * (z_hi - z_lo) + 2.f);
+            if (in.frustum && !in.frustum->intersects_aabb(center, half))
+                continue;
+            seg_visible[i] = true;
+            ++visible_seg_count;
+            mark_vis_z(z_lo, z_hi);
+        }
+        // Safety: if frustum culled all eligible, keep nearest among last 4.
+        if (visible_seg_count == 0)
+        {
+            int best = 0;
+            float best_d = 1e30f;
+            for (int i = 0; i < n_eligible; ++i)
+            {
+                const auto& s = hud.segments[i];
+                const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
+                const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
+                const float mid    = 0.5f * (z_from + z_to);
+                const float d      = std::abs(mid - eye_z);
+                if (d < best_d)
+                {
+                    best_d = d;
+                    best = i;
+                }
+            }
+            seg_visible[best] = true;
+            visible_seg_count = 1;
+            const auto& s = hud.segments[best];
+            mark_vis_z(ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second),
+                       ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second));
+        }
+    }
+
+    auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
+        if (n_eligible <= 0)
+            return true; // no segment model yet → draw all (legacy path)
+        if (ts_ms <= 0)
+            return true;
+        for (int i = 0; i < n_eligible; ++i)
+        {
+            if (!seg_visible[i])
+                continue;
+            const auto& s = hud.segments[i];
+            if (ts_ms >= s.from_ms && ts_ms < s.to_ms)
+                return true;
+        }
+        return false;
+    };
+
+    auto passes_txn_filter = [&](const PlacedBlock& placed) -> bool {
+        if (!in.filter_txn_gt_1)
+            return true;
+        // Strict: only known multi-tx blocks (unknown -1 is hidden).
+        return placed.txn_count > 1;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -555,7 +684,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
             color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-        const float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+        float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+        if (placed.is_uncle || scene_.is_uncle_locked(placed.hash))
+            alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
@@ -564,23 +695,70 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     std::unordered_set<std::string> drawn;
     for (const PlacedBlock& placed : layout.placements)
     {
+        if (!block_in_visible_segment(placed.timestamp_ms))
+            continue;
+        if (!passes_txn_filter(placed))
+            continue;
         if (push_instance(placed, /*force=*/false))
             drawn.insert(placed.hash);
     }
 
-    // Force-draw highlight roles so Sobel can resolve them.
+    // Force-draw highlight roles so Sobel can resolve them — only if segment
+    // is in the draw set (or selection/hover, always).
     for (const PlacedBlock& placed : layout.placements)
     {
         if (drawn.count(placed.hash))
             continue;
-        const bool force = missing_dep[placed.hash] ||
-                           scene_.is_confirmed_locked(placed.hash) ||
+        const bool is_sel =
+            (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
+            (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
+        if (!is_sel && !block_in_visible_segment(placed.timestamp_ms))
+            continue;
+        // Multi-tx filter: still force selected/hovered; other force roles must pass filter.
+        if (!is_sel && !passes_txn_filter(placed))
+            continue;
+        const bool force = is_sel || missing_dep[placed.hash] ||
                            green_display.count(placed.hash) ||
                            cyan_owners.count(placed.hash);
         if (!force)
             continue;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
+    }
+
+    // Dynamic near/far from visible segment Z span (+ lateral pad).
+    {
+        constexpr float kHardFarCap = 20000.f;
+        constexpr float kMinNear    = 0.5f;
+        float near_z = Camera::kDefaultNearZ;
+        float far_z  = Camera::kDefaultFarZ;
+        if (have_vis_z)
+        {
+            const float z_dist =
+                std::max(std::abs(vis_z_hi - eye_z), std::abs(vis_z_lo - eye_z));
+            const float lat_pad = R_cull + 40.f;
+            const float pad     = std::max(seg_width_z * 0.35f, 40.f);
+            near_z = kMinNear;
+            far_z  = std::min(kHardFarCap, std::max(near_z + 50.f, z_dist + lat_pad + pad));
+        }
+        else if (!layout.placements.empty())
+        {
+            // Fallback: span of all placements.
+            float z_lo = layout.placements[0].pos.z;
+            float z_hi = z_lo;
+            for (const PlacedBlock& p : layout.placements)
+            {
+                z_lo = std::min(z_lo, p.pos.z);
+                z_hi = std::max(z_hi, p.pos.z);
+            }
+            const float z_dist =
+                std::max(std::abs(z_hi - eye_z), std::abs(z_lo - eye_z));
+            near_z = kMinNear;
+            far_z  = std::min(kHardFarCap, std::max(near_z + 50.f, z_dist + R_cull + 80.f));
+        }
+        out.has_clip_suggestion = true;
+        out.suggested_near_z    = near_z;
+        out.suggested_far_z     = far_z;
     }
 
     for (const DyingBlock& db : dying_blocks_)
@@ -665,6 +843,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const glm::vec4 kMissingOutline(0.75f, 0.75f, 0.8f, 0.9f);
         const float ghost_half = 1.0f;
 
+        // Placement colors for dep-hover recolor (inspector Deps row).
+        std::unordered_map<std::string, glm::vec3> placement_color;
+        placement_color.reserve(layout.placements.size());
+        for (const PlacedBlock& p : layout.placements)
+            placement_color[p.hash] = p.color;
+
         auto draw_selection_deps = [&](const AlphBlock& block) {
             auto listing_it = block_positions.find(block.hash);
             if (listing_it == block_positions.end())
@@ -673,14 +857,31 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const int parent_lane = block.chain_idx();
             int missing_i = 0;
             int stagger_i = 0;
+            const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
 
             for (const std::string& dep_hash : block.deps)
             {
                 auto dep_it = block_positions.find(dep_hash);
                 if (dep_it != block_positions.end())
                 {
+                    const bool focus =
+                        any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                    glm::vec4 arrow_col = kSelectionArrowColor;
+                    if (focus)
+                    {
+                        auto cit = placement_color.find(dep_hash);
+                        const glm::vec3 c = (cit != placement_color.end())
+                                                ? cit->second
+                                                : glm::vec3(arrow_col);
+                        arrow_col = glm::vec4(c, 1.f);
+                    }
+                    else if (any_ui_dep_hover)
+                    {
+                        // Dim non-focused selection edges while inspecting one dep.
+                        arrow_col.a = 0.35f;
+                    }
                     add_eph_arrow('s', block.hash, dep_hash, listing_pos, dep_it->second,
-                                  kSelectionArrowColor, 1.15f, stagger_i++);
+                                  arrow_col, focus ? 1.28f : 1.15f, stagger_i++);
                     continue;
                 }
 
@@ -695,8 +896,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     radius * std::sin(angle),
                     listing_pos.z + meters_per_second *
                                         static_cast<float>(ALPH_TARGET_BLOCK_SECONDS));
-                debug->add_wire_box(ghost, ghost_half, kMissingOutline);
-                debug->add_line(listing_pos, ghost, kMissingOutline);
+                const bool focus_missing =
+                    any_ui_dep_hover && dep_hash == in.ui_dep_hover_hash;
+                const glm::vec4 ghost_col =
+                    focus_missing ? glm::vec4(1.f, 0.55f, 0.2f, 0.95f) : kMissingOutline;
+                debug->add_wire_box(ghost, ghost_half, ghost_col);
+                debug->add_line(listing_pos, ghost, ghost_col);
                 ++missing_i;
             }
         };
@@ -736,12 +941,109 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             else
                 ++it;
         }
+
+        // Barrier planes last: alpha-blend over blocks/arrows (debug depth write is off).
+        if (n_eligible > 0)
+        {
+            const float plane_half = kLayoutBaseRadius * 8.f;
+            float boundary_z[kMaxVisibleTimeSegments * 2 + 2]{};
+            int nbound = 0;
+            auto push_bound_z = [&](float z) {
+                for (int i = 0; i < nbound; ++i)
+                    if (std::abs(boundary_z[i] - z) < 0.25f)
+                        return;
+                if (nbound < static_cast<int>(sizeof(boundary_z) / sizeof(boundary_z[0])))
+                    boundary_z[nbound++] = z;
+            };
+            for (int i = 0; i < n_eligible; ++i)
+            {
+                if (!seg_visible[i] && n_eligible > 1)
+                    continue;
+                const auto& s = hud.segments[i];
+                push_bound_z(ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second));
+                push_bound_z(ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second));
+            }
+            for (int i = 0; i < nbound; ++i)
+                debug->add_z_plane_quad(boundary_z[i], plane_half, kBarrierPlaneColor);
+        }
     }
 
     out.ui.total_blocks = scene_.total_blocks();
     out.ui.selected_hash = in.selected_hash;
     out.ui.selected_detail = in.selected_detail;
     scene_.get_trace_status_locked(&out.ui.trace_phase, &out.ui.trace_offset);
+
+    // Hover billboard: content + world anchor (overlay fades / projects).
+    // Policy A: suppress while hovered == selected (inspector owns the block).
+    {
+        auto& bb = out.ui.block_billboard;
+        bb = UiSnapshot::BlockBillboardUi{};
+        const bool hover_ok = !in.hovered_hash.empty() &&
+                              (in.selected_hash.empty() || in.hovered_hash != in.selected_hash);
+        if (hover_ok)
+        {
+            auto pit = block_positions.find(in.hovered_hash);
+            if (pit != block_positions.end())
+            {
+                const glm::vec3 block_pos = pit->second;
+                glm::vec3 eye = in.has_camera_eye
+                                    ? in.camera_eye
+                                    : glm::vec3(0.f, 0.f, scene_.camera_scroll_z());
+                glm::vec3 to_cam = eye - block_pos;
+                const float len = glm::length(to_cam);
+                if (len > 1e-4f)
+                    to_cam /= len;
+                else
+                    to_cam = glm::vec3(0.f, 0.f, 1.f);
+                constexpr float kBillboardOffset = 2.5f;
+                const glm::vec3 world = block_pos + to_cam * kBillboardOffset;
+
+                bb.want_visible = true;
+                std::snprintf(bb.hash, sizeof(bb.hash), "%s", in.hovered_hash.c_str());
+                bb.world_pos[0] = world.x;
+                bb.world_pos[1] = world.y;
+                bb.world_pos[2] = world.z;
+
+                // Prefer placement height/lane/txn_count; fall back to detail store.
+                int height = -1;
+                int chain_from = -1;
+                int chain_to = -1;
+                int txn_count = -1;
+                bool is_uncle = scene_.is_uncle_locked(in.hovered_hash);
+                for (const PlacedBlock& p : layout.placements)
+                {
+                    if (p.hash != in.hovered_hash)
+                        continue;
+                    height = p.height;
+                    chain_from = static_cast<int>(p.lane / ALPH_NUM_GROUPS);
+                    chain_to = static_cast<int>(p.lane % ALPH_NUM_GROUPS);
+                    txn_count = p.txn_count;
+                    is_uncle = is_uncle || p.is_uncle;
+                    break;
+                }
+                if (auto d = scene_.detail_store().get(in.hovered_hash))
+                {
+                    if (height < 0)
+                        height = d->height;
+                    if (chain_from < 0)
+                    {
+                        chain_from = d->chainFrom;
+                        chain_to = d->chainTo;
+                    }
+                    // Prefer preserved parse-time count (survives slim); not txns.size().
+                    if (d->txn_count >= 0)
+                        txn_count = d->txn_count;
+                    else if (txn_count < 0 && !d->txns.empty())
+                        txn_count = static_cast<int>(d->txns.size());
+                }
+                bb.height = height;
+                bb.chain_from = chain_from;
+                bb.chain_to = chain_to;
+                bb.txn_count = txn_count;
+                bb.is_uncle = is_uncle ? 1 : 0;
+            }
+        }
+    }
     {
         const auto tips = scene_.tip_ids();
         out.ui.tip_count = static_cast<int>(tips.size());
@@ -749,8 +1051,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         scene_.copy_confirmed_heights_locked(out.ui.confirmed_height_by_lane);
     }
     {
-        // prepare already holds scene_.mutex() â€” do not call network_hud() (re-lock = deadlock).
-        const auto hud = scene_.network_hud_locked();
+        // prepare already holds scene_.mutex() — do not call network_hud() (re-lock = deadlock).
+        // hud was captured earlier under the same lock for culling/planes.
         out.ui.net_domain = hud.domain;
         out.ui.net_status = hud.status;
         std::snprintf(out.ui.net_base_url, sizeof(out.ui.net_base_url), "%s", hud.base_url);
@@ -767,6 +1069,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.last_poll_ms = hud.last_poll_ms;
         out.ui.poll_interval_sec = hud.poll_interval_sec;
         out.ui.net_switching = hud.switching;
+        out.ui.segment_count =
+            std::clamp(hud.segment_count, 0, UiSnapshot::kMaxTimeSegments);
+        for (int i = 0; i < out.ui.segment_count; ++i)
+        {
+            const auto& s = hud.segments[i];
+            auto& d = out.ui.segments[i];
+            d.index = s.index;
+            d.from_ms = s.from_ms;
+            d.to_ms = s.to_ms;
+            d.load_ratio = s.load_ratio;
+            d.confirmed_full = s.confirmed_full;
+            d.block_count = s.block_count;
+            d.expected_blocks = s.expected_blocks;
+        }
     }
     for (const RecentFeedItem& b : scene_.feed())
     {

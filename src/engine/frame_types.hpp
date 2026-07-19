@@ -19,9 +19,15 @@ struct FrameSourceInput
 {
     std::string selected_hash;
     std::string hovered_hash;
+    // Inspector Deps row hover (not 3D pick); recolors selection→dep arrow.
+    std::string ui_dep_hover_hash;
     AlphBlock   selected_detail;
     const Frustum* frustum = nullptr;
     glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };
+    glm::vec3 camera_eye{ 0.f, 0.f, 0.f };
+    bool      has_camera_eye = false;
+    // When true, only draw placements with txn_count > 1 (selection/hover always drawn).
+    bool      filter_txn_gt_1 = false;
 };
 
 struct FrameSourceOutput
@@ -35,6 +41,11 @@ struct FrameSourceOutput
     std::vector<std::string> confirmed_tip_hashes;
     std::vector<std::string> cyan_frontier_hashes;
     std::vector<std::string> incomplete_hashes;
+
+    // Dynamic camera clip from visible segment span (applied after prepare for UBO).
+    bool  has_clip_suggestion = false;
+    float suggested_near_z    = 1.f;
+    float suggested_far_z     = 5000.f;
 };
 
 class IFrameSource

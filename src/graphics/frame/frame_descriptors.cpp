@@ -1,5 +1,6 @@
 ﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_descriptors.hpp"
+#include "gpu_prv_lib.h"
 
 #include <stdexcept>
 
@@ -8,62 +9,37 @@ void FrameDescriptors::create(const FrameDescriptorsCreateInfo& info)
     if (!info.device || !info.ubo_buffer || info.ubo_range == 0)
         throw std::runtime_error("FrameDescriptors::create: invalid args");
 
-    VkDescriptorSetLayoutBinding ubo_binding{};
-    ubo_binding.binding = 0;
-    ubo_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_binding.descriptorCount = 1;
-    ubo_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    destroy(info.device);
 
-    VkDescriptorSetLayoutCreateInfo layout_info{};
-    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = 1;
-    layout_info.pBindings = &ubo_binding;
-
-    if (vkCreateDescriptorSetLayout(info.device, &layout_info, nullptr, &layout_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create descriptor set layout");
+    const DescriptorBinding ubo_bind{
+        0,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        1,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    layout_ = create_descriptor_set_layout(info.device, &ubo_bind, 1);
 
     const uint32_t sampler_count =
         info.combined_image_sampler_count > 0 ? info.combined_image_sampler_count : 1;
-
-    VkDescriptorPoolSize pool_sizes[] = {
+    const VkDescriptorPoolSize pool_sizes[] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampler_count },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
     };
+    const uint32_t max_sets = info.max_sets > 0 ? info.max_sets : 2;
+    pool_ = create_descriptor_pool(info.device, max_sets, pool_sizes, 2);
 
-    VkDescriptorPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.poolSizeCount = 2;
-    pool_info.pPoolSizes = pool_sizes;
-    pool_info.maxSets = info.max_sets > 0 ? info.max_sets : 2;
-    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    if (!allocate_descriptor_sets(info.device, pool_, &layout_, 1, &set_))
+        throw std::runtime_error("FrameDescriptors: allocate set failed");
 
-    if (vkCreateDescriptorPool(info.device, &pool_info, nullptr, &pool_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create descriptor pool");
-
-    VkDescriptorSetAllocateInfo alloc_info{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorPool = pool_;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.pSetLayouts = &layout_;
-
-    if (vkAllocateDescriptorSets(info.device, &alloc_info, &set_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate descriptor sets");
-
-    VkDescriptorBufferInfo buffer_info{};
-    buffer_info.buffer = info.ubo_buffer;
-    buffer_info.offset = 0;
-    buffer_info.range = info.ubo_range;
-
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set_;
-    write.dstBinding = 0;
-    write.dstArrayElement = 0;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &buffer_info;
-
-    vkUpdateDescriptorSets(info.device, 1, &write, 0, nullptr);
+    const DescriptorBufferWrite bw{
+        set_,
+        0,
+        info.ubo_buffer,
+        0,
+        info.ubo_range,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    };
+    write_descriptor_buffers(info.device, &bw, 1);
 }
 
 void FrameDescriptors::destroy(VkDevice device)
@@ -76,12 +52,12 @@ void FrameDescriptors::destroy(VkDevice device)
 
     if (pool_ != VK_NULL_HANDLE)
     {
-        vkDestroyDescriptorPool(device, pool_, nullptr);
+        destroy_descriptor_pool(device, pool_);
         pool_ = VK_NULL_HANDLE;
     }
     if (layout_ != VK_NULL_HANDLE)
     {
-        vkDestroyDescriptorSetLayout(device, layout_, nullptr);
+        destroy_descriptor_set_layout(device, layout_);
         layout_ = VK_NULL_HANDLE;
     }
 }

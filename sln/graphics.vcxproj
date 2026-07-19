@@ -117,10 +117,10 @@
     <ClCompile Include="..\src\graphics\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
     <ClCompile Include="..\src\graphics\camera.cpp" />
-    <ClCompile Include="..\src\graphics\compute.cpp" />
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp" />
     <ClCompile Include="..\src\graphics\mesh_arena.cpp" />
     <ClCompile Include="..\src\graphics\device.cpp" />
+    <ClCompile Include="..\src\graphics\descriptor.cpp" />
     <ClCompile Include="..\src\graphics\engine_requirements.cpp" />
     <ClCompile Include="..\src\graphics\image.cpp" />
     <ClCompile Include="..\src\graphics\instance.cpp" />
@@ -136,6 +136,11 @@
     <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp" />
+    <ClCompile Include="..\src\graphics\frame\selection_state.cpp" />
+    <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp" />
+    <ClCompile Include="..\src\graphics\frame\async_sobel_submit.cpp" />
+    <ClCompile Include="..\src\graphics\frame\frame_loop.cpp" />
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
     <ClCompile Include="..\src\graphics\frame\picker.cpp" />
     <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp" />

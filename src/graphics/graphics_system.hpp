@@ -3,7 +3,14 @@
 
 // Internal to graphics.lib only (create_graphics_system returns IGraphicsSystem*).
 // Host/app code must not include this header — keeps Vulkan out of product TUs.
-// Future: full PIMPL (Impl in .cpp) if external includes become necessary.
+//
+// Method bodies are split across TUs (still GraphicsSystem::):
+//   graphics_system.cpp     — lifecycle, init/resize, create_*, record_command_buffer
+//   frame/frame_loop.cpp    — render_loop / render
+//   frame/async_sobel_submit.cpp — submit_frame_with_async_sobel
+//   frame/gpu_frame_publish.cpp  — publish_frame / apply_published_frame
+//   frame/selection_state.cpp    — selection, hover, multi-tx filter, detail refill
+// See docs/layers/graphics.md (living module map).
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -72,6 +79,8 @@ public:
     void clear_selection() override;
     bool is_selected(const std::string& hash) const override;
     AlphBlock copy_selected_block() const override;
+    void set_ui_dep_hover(const std::string& hash) override;
+    void set_scene_filter_multi_tx(bool enabled) override;
     std::string consume_detail_refill_request() override;
     void publish_ui_snapshot(UiSnapshot snap) override;
     UiSnapshot copy_ui_snapshot() const override;
@@ -156,6 +165,8 @@ private:
     std::string selected_hash_;
     AlphBlock   selected_block;
     std::string hovered_hash_;
+    std::string ui_dep_hover_hash_; // inspector Deps row hover
+    bool        filter_multi_tx_ = false; // scene: txn_count > 1 only
     float     last_frame_dt_sec_ = 1.f / 60.f;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0;
