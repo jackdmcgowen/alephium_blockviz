@@ -118,9 +118,12 @@ private:
     void enqueue_uncles_from_block_(const AlphBlock& alph);
     void label_tips_needing_reflood_();
     void refresh_lookback_floors_();
-    // Disk cache: load recent verified segments; persist closed polled k>=1 windows.
+    // Disk cache: whole G_seg units replace network interval fills.
     void bootstrap_disk_cache_();
     void maybe_persist_verified_segments_();
+    bool try_fill_window_from_disk_(int lookback_k);
+    void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
+                                          int64_t to_ms);
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     // Extra older history unlocked by camera Z, in milliseconds (time, not heights).
@@ -318,7 +321,9 @@ private:
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;
     int  disk_cache_bootstrap_blocks_ = 0;
-    std::unordered_set<int> disk_cache_saved_g_; // G_seg already written this session
+    std::unordered_set<int> disk_segment_admitted_; // G fully admitted (disk or just saved)
+    std::unordered_map<int, int> disk_cache_saved_count_; // G → last saved block count
+    int64_t disk_cache_last_live_save_ms_ = 0;
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
     // Deferred non-interval results when interval budget is preferred.

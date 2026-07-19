@@ -112,7 +112,9 @@ void AlephiumAdapter::reset_stats()
     live_catchup_active_ = false;
     disk_cache_bootstrapped_ = false;
     disk_cache_bootstrap_blocks_ = 0;
-    disk_cache_saved_g_.clear();
+    disk_segment_admitted_.clear();
+    disk_cache_saved_count_.clear();
+    disk_cache_last_live_save_ms_ = 0;
     phase_ = Phase::BootstrapPoll;
     bootstrap_poll_done_ = false;
     clear_bfs_state_();
@@ -212,7 +214,8 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.browse_mode = (cam >= 1) ? 1 : (live_catchup_active_ ? 2 : 0);
     {
         const auto cs = disk_cache_.stats();
-        hud.disk_cache_segments = cs.segments;
+        hud.disk_cache_segments = cs.complete_segments > 0 ? cs.complete_segments
+                                                           : cs.segments;
         hud.disk_cache_mb =
             static_cast<int>((cs.bytes + 1024 * 1024 - 1) / (1024 * 1024));
         hud.disk_cache_boot_blocks = disk_cache_bootstrap_blocks_;
@@ -518,11 +521,82 @@ void AlephiumAdapter::on_start()
     last_segment_full_mask_ = 0;
     cache_pressure_level_ = 0;
     disk_cache_bootstrapped_ = false;
-    disk_cache_saved_g_.clear();
+    disk_segment_admitted_.clear();
+    disk_cache_saved_count_.clear();
+    disk_cache_last_live_save_ms_ = 0;
     publish_trace_status_();
-    // Prefer disk before first network poll for recent verified history.
+    // Prefer disk before first network poll for recent complete segments.
     bootstrap_disk_cache_();
     std::printf("[adapter] on_start phase=BootstrapPoll (lookback window poll + time index)\n");
+}
+
+void AlephiumAdapter::mark_window_complete_from_cache_(int lookback_k, int g_seg,
+                                                      int64_t from_ms, int64_t to_ms)
+{
+    if (lookback_k < 0)
+        return;
+    while (static_cast<int>(lookback_windows_.size()) <= lookback_k)
+    {
+        LookbackWindowSlot s;
+        s.index = static_cast<int>(lookback_windows_.size());
+        lookback_windows_.push_back(s);
+    }
+    LookbackWindowSlot& slot = lookback_windows_[static_cast<size_t>(lookback_k)];
+    slot.index = lookback_k;
+    slot.global_index = g_seg;
+    if (from_ms > 0 && to_ms > from_ms)
+    {
+        slot.from_ms = from_ms;
+        slot.to_ms = to_ms;
+        slot.epoch_to_ms = to_ms;
+    }
+    for (int64_t key : SegmentDiskCache::chunk_keys_for_window(slot.from_ms, slot.to_ms))
+        history_slots_fetched_.insert(key);
+    slot.pending_from_ms = 0;
+    slot.next_fill_to_ms = slot.from_ms;
+    recompute_window_chunk_stats_(lookback_k);
+    slot.polled = true;
+    disk_segment_admitted_.insert(g_seg);
+}
+
+bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
+{
+    if (!disk_cache_.enabled() || lookback_k < 0)
+        return false;
+    const int G = lookback_to_global_(lookback_k);
+    if (G < 0)
+        return false;
+
+    if (disk_segment_admitted_.count(G) != 0)
+    {
+        // Already admitted this session — mark window complete, skip HTTP body.
+        int64_t from_ms = 0, to_ms = 0;
+        bounds_for_global_(G, from_ms, to_ms);
+        mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms);
+        return true;
+    }
+    if (!disk_cache_.has_segment(G))
+        return false;
+
+    std::vector<SegmentDiskCache::CachedBlock> blocks;
+    int64_t from_ms = 0, to_ms = 0;
+    if (!disk_cache_.load_segment(G, blocks, from_ms, to_ms))
+        return false;
+
+    int admitted = 0;
+    for (const auto& cb : blocks)
+    {
+        if (cb.block.hash.empty())
+            continue;
+        scene_.add_block(cb.block);
+        ++admitted;
+        if (cb.confirmed)
+            scene_.mark_confirmed(cb.block.hash);
+    }
+    mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms);
+    std::printf("[disk-cache] fill G=%d k=%d blocks=%d (skip network)\n", G, lookback_k,
+                admitted);
+    return admitted > 0 || !blocks.empty();
 }
 
 void AlephiumAdapter::bootstrap_disk_cache_()
@@ -546,9 +620,15 @@ void AlephiumAdapter::bootstrap_disk_cache_()
     if (w > 0 && now_ms > genesis)
         g_live = static_cast<int>((now_ms - genesis) / w);
 
-    std::vector<SegmentDiskCache::CachedBlock> blocks;
+    std::vector<SegmentDiskCache::CachedBlock> all;
     const auto lr =
-        disk_cache_.load_recent(g_live, SegmentDiskCache::kStartupLoadMax, blocks);
+        disk_cache_.load_recent(g_live, SegmentDiskCache::kStartupLoadMax, all);
+    if (lr.genesis_ms > 0)
+    {
+        genesis_ms_ = lr.genesis_ms;
+        genesis_resolved_ = true;
+        scene_.set_genesis_ms(genesis_ms_);
+    }
     if (lr.blocks_loaded <= 0)
     {
         std::printf("[adapter] disk-cache bootstrap empty domain=%s path=%s\n",
@@ -556,82 +636,88 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         return;
     }
 
-    if (lr.genesis_ms > 0)
-    {
-        genesis_ms_ = lr.genesis_ms;
-        genesis_resolved_ = true;
-        scene_.set_genesis_ms(genesis_ms_);
-    }
-
-    int admitted = 0;
-    int confirmed = 0;
-    for (const auto& cb : blocks)
+    for (const auto& cb : all)
     {
         if (cb.block.hash.empty())
             continue;
         scene_.add_block(cb.block);
-        ++admitted;
         if (cb.confirmed)
-        {
             scene_.mark_confirmed(cb.block.hash);
-            ++confirmed;
-        }
     }
     for (int64_t key : lr.chunk_keys)
         history_slots_fetched_.insert(key);
+    for (int G : lr.segment_ids)
+    {
+        disk_segment_admitted_.insert(G);
+        // Materialize lookback windows as polled so pump skips HTTP.
+        const int k = global_to_lookback_(G);
+        int64_t from_ms = 0, to_ms = 0;
+        bounds_for_global_(G, from_ms, to_ms);
+        mark_window_complete_from_cache_(k, G, from_ms, to_ms);
+    }
 
-    disk_cache_bootstrap_blocks_ = admitted;
-    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d confirmed=%d "
-                "chunks=%zu path=%s\n",
-                lr.segments_loaded, admitted, confirmed, lr.chunk_keys.size(),
-                disk_cache_.root_dir().c_str());
+    disk_cache_bootstrap_blocks_ = lr.blocks_loaded;
+    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d path=%s\n",
+                lr.segments_loaded, lr.blocks_loaded, disk_cache_.root_dir().c_str());
 }
 
 void AlephiumAdapter::maybe_persist_verified_segments_()
 {
     if (!disk_cache_.enabled())
         return;
-    // Need Steady (or just finished BFS into Steady) so windows are meaningful.
     if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
         return;
 
+    const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    const auto nodes = scene_.nodes_snapshot();
+
     for (const LookbackWindowSlot& slot : lookback_windows_)
     {
-        if (!slot.polled)
-            continue;
         if (slot.to_ms <= slot.from_ms)
             continue;
 
-        // k=0 (live): only after BFS has run once and we are in Steady (warm snapshot).
-        // k>=1: any Steady/BfsTrace with polled complete.
-        if (slot.index == 0)
+        recompute_window_chunk_stats_(slot.index);
+        const LookbackWindowSlot& s = lookback_windows_[static_cast<size_t>(slot.index)];
+
+        const int G = (s.global_index >= 0) ? s.global_index : lookback_to_global_(s.index);
+        if (G < 0)
+            continue;
+
+        // Complete = all interval chunks fetched for this window.
+        const bool complete =
+            s.chunks_total > 0 && s.chunks_done >= s.chunks_total && s.pending_from_ms == 0;
+        // Allow warm save of live window after BFS once in Steady even if not fully polled,
+        // but only as complete when polled.
+        if (s.index == 0)
         {
             if (phase_ != Phase::Steady || bfs_generation_ < 1)
                 continue;
+            // Rate-limit live re-saves.
+            if (disk_cache_last_live_save_ms_ > 0 &&
+                now_ms - disk_cache_last_live_save_ms_ < 120000 && complete)
+            {
+                // allow rewrite only if block count grew a lot
+            }
+            else if (!complete && disk_cache_last_live_save_ms_ > 0 &&
+                     now_ms - disk_cache_last_live_save_ms_ < 120000)
+                continue;
         }
-        else if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
+        else
         {
-            continue;
+            // History: require complete chunks (network-replaceable).
+            if (!complete)
+                continue;
         }
-
-        const int G = (slot.global_index >= 0) ? slot.global_index
-                                               : lookback_to_global_(slot.index);
-        if (G < 0)
-            continue;
-        if (disk_cache_saved_g_.count(G) != 0)
-            continue;
 
         std::vector<SegmentDiskCache::CachedBlock> blocks;
-        const auto nodes = scene_.nodes_snapshot();
         blocks.reserve(256);
-        // Prefer membership by global segment id when genesis known.
         for (const GraphNode& n : nodes)
         {
             bool in_win = false;
             if (genesis_resolved_ && genesis_ms_ > 0)
                 in_win = (global_segment_id_(n.timestamp_ms) == G);
             else
-                in_win = (n.timestamp_ms >= slot.from_ms && n.timestamp_ms <= slot.to_ms);
+                in_win = (n.timestamp_ms >= s.from_ms && n.timestamp_ms <= s.to_ms);
             if (!in_win)
                 continue;
             SegmentDiskCache::CachedBlock cb;
@@ -658,15 +744,36 @@ void AlephiumAdapter::maybe_persist_verified_segments_()
             blocks.push_back(std::move(cb));
         }
         if (blocks.empty())
-        {
-            std::printf("[disk-cache] skip save G=%d k=%d reason=no_blocks window=[%lld,%lld]\n",
-                        G, slot.index, static_cast<long long>(slot.from_ms),
-                        static_cast<long long>(slot.to_ms));
             continue;
-        }
 
-        if (disk_cache_.save_segment(G, slot.from_ms, slot.to_ms, genesis_ms_, blocks))
-            disk_cache_saved_g_.insert(G);
+        // Skip rewrite if same count already saved as complete.
+        const int prev = disk_cache_saved_count_.count(G) ? disk_cache_saved_count_[G] : -1;
+        if (complete && prev == static_cast<int>(blocks.size()) &&
+            disk_segment_admitted_.count(G) != 0)
+            continue;
+        // Partial live: only if we have never saved or block count grew by 25+.
+        if (!complete && prev >= 0 &&
+            static_cast<int>(blocks.size()) < prev + 25)
+            continue;
+
+        const bool save_complete = complete || (s.index == 0 && s.chunks_done >= s.chunks_total);
+        // For network replace, require complete. Live warm may save complete when polled.
+        if (!save_complete && s.index != 0)
+            continue;
+
+        // Force complete=true when chunks full; live may save complete=false only for debug
+        // — product: only write complete segments so load can replace network.
+        if (!save_complete)
+            continue;
+
+        if (disk_cache_.save_segment(G, s.from_ms, s.to_ms, genesis_ms_, blocks,
+                                     /*complete=*/true))
+        {
+            disk_cache_saved_count_[G] = static_cast<int>(blocks.size());
+            disk_segment_admitted_.insert(G);
+            if (s.index == 0)
+                disk_cache_last_live_save_ms_ = now_ms;
+        }
     }
 }
 
@@ -2128,6 +2235,17 @@ void AlephiumAdapter::ensure_lookback_window_(int index, bool allow_live_poll)
     int64_t from_ms = 0, to_ms = 0;
     bounds_for_global_(G, from_ms, to_ms);
 
+    // Whole-segment disk fill replaces network body for this G (not live tip refresh).
+    if (try_fill_window_from_disk_(index))
+    {
+        if (index == 0 && allow_live_poll)
+        {
+            // Still allow tip edge refresh later.
+            slot.want_newest_refresh = true;
+        }
+        return;
+    }
+
     if (index == 0 && !allow_live_poll)
     {
         if (slot.epoch_to_ms <= 0)
@@ -2186,6 +2304,9 @@ void AlephiumAdapter::ensure_lookback_window_(int index, bool allow_live_poll)
         slot.next_fill_to_ms = slot.to_ms;
         slot.pending_from_ms = 0;
         recompute_window_chunk_stats_(index);
+        // Retry disk after bounds frozen (bootstrap may have admitted under different k).
+        if (try_fill_window_from_disk_(index))
+            return;
         adapter_vlog("[adapter] history k=%d G=%d from=%lld to=%lld chunks=%d/%d\n",
                     index, G, static_cast<long long>(slot.from_ms),
                     static_cast<long long>(slot.to_ms), slot.chunks_done,
@@ -2195,6 +2316,8 @@ void AlephiumAdapter::ensure_lookback_window_(int index, bool allow_live_poll)
     {
         slot.global_index = G;
         recompute_window_chunk_stats_(index);
+        if (try_fill_window_from_disk_(index))
+            return;
     }
 }
 
@@ -2216,6 +2339,15 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
     LookbackWindowSlot& slot = lookback_windows_[static_cast<size_t>(window_index)];
     if (slot.to_ms <= slot.from_ms)
         return false;
+
+    // Whole complete segment on disk → admit and skip interval HTTP (except live tip force).
+    if (!force_newest)
+    {
+        if (try_fill_window_from_disk_(window_index))
+            return false;
+        if (slot.polled && disk_segment_admitted_.count(slot.global_index) != 0)
+            return false;
+    }
 
     // Wait for in-flight chunk admit before advancing (guaranteed progress).
     if (!force_newest && slot.pending_from_ms > 0)

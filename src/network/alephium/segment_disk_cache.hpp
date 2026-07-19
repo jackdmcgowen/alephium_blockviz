@@ -1,6 +1,7 @@
 #pragma once
 
-// Verified timeline-segment disk cache (bootstrap before network fill).
+// Segment-indexed disk cache: unit of storage/load is genesis segment G_seg.
+// Complete segments replace network interval loads for that G.
 // Design: docs/segment-disk-cache.md
 //
 // Layout under %LOCALAPPDATA%/AlephiumBlockViz/cache/<domain>/:
@@ -15,11 +16,11 @@
 class SegmentDiskCache
 {
 public:
-    static constexpr int     kSchemaVersion  = 1;
-    static constexpr int     kMaxSegments    = 48;                 // LRU retain
-    static constexpr int     kStartupLoadMax = 12;                 // bootstrap paint budget
-    static constexpr int64_t kChunkMs        = 60 * 1000;
-    static constexpr uint64_t kMaxDiskBytes  = 512ull * 1024 * 1024; // 512 MiB
+    static constexpr int      kSchemaVersion  = 1;
+    static constexpr int      kMaxSegments    = 48;
+    static constexpr int      kStartupLoadMax = 12;
+    static constexpr int64_t  kChunkMs        = 60 * 1000;
+    static constexpr uint64_t kMaxDiskBytes   = 512ull * 1024 * 1024;
 
     struct CachedBlock
     {
@@ -34,23 +35,25 @@ public:
         int64_t to_ms = 0;
         int64_t verified_at = 0;
         int     block_count = 0;
+        bool    complete = false; // all interval chunks present at save time
     };
 
     struct LoadResult
     {
-        int     segments_loaded = 0;
-        int     blocks_loaded = 0;
-        int64_t genesis_ms = 0;
-        bool    manifest_ok = false;
+        int         segments_loaded = 0;
+        int         blocks_loaded = 0;
+        int64_t     genesis_ms = 0;
+        bool        manifest_ok = false;
         std::string root;
-        // Chunk from_ms keys matching adapter history_slots_fetched_ convention.
         std::vector<int64_t> chunk_keys;
+        std::vector<int>     segment_ids; // G_seg loaded this call
     };
 
     struct CacheStats
     {
         bool        enabled = false;
         int         segments = 0;
+        int         complete_segments = 0;
         int64_t     bytes = 0;
         std::string root;
     };
@@ -64,20 +67,24 @@ public:
 
     std::string root_dir() const { return root_dir_(); }
 
-    // Persist a verified/warm segment. Enforces LRU + disk cap + orphan GC.
-    bool save_segment(int g_seg, int64_t from_ms, int64_t to_ms, int64_t genesis_ms,
-                      const std::vector<CachedBlock>& blocks);
+    bool has_segment(int g_seg) const;
+    // Only complete segments are loadable for network replace.
+    bool load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
+                      int64_t& to_ms) const;
+    // Newest-first G ids (complete only if complete_only).
+    std::vector<int> list_segment_ids(bool complete_only = true) const;
 
-    // Load up to max_segments most recent verified entries (by g_seg).
-    // g_live hint optional (-1 = no filter); uses manifest genesis when present.
+    // Persist whole segment by G. complete=true → safe to skip network for G.
+    bool save_segment(int g_seg, int64_t from_ms, int64_t to_ms, int64_t genesis_ms,
+                      const std::vector<CachedBlock>& blocks, bool complete);
+
+    // Bootstrap helper: load up to max complete segments (newest G first).
     LoadResult load_recent(int g_live, int max_segments,
                            std::vector<CachedBlock>& out_blocks) const;
 
     CacheStats stats() const;
 
-    // Chunk from_ms keys that cover [from_ms, to_ms) with kChunkMs (newest-first).
     static std::vector<int64_t> chunk_keys_for_window(int64_t from_ms, int64_t to_ms);
-
     static std::string domain_key_from_int(int domain);
 
 private:
@@ -99,6 +106,7 @@ private:
     void enforce_disk_budget_(std::vector<SegmentMeta>& segs, int64_t genesis_ms) const;
     uint64_t approx_disk_bytes_() const;
     std::vector<std::string> hashes_for_segment_(int g_seg) const;
+    bool find_meta_(int g_seg, SegmentMeta& out) const;
 
     static std::string block_to_json_(const CachedBlock& b);
     static bool        json_to_block_(const std::string& json, CachedBlock& out);

@@ -60,6 +60,11 @@ void SegmentDiskCache::set_domain(std::string domain_key)
         if (c == ' ' || c == '/' || c == '\\')
             c = '_';
     }
+    if (enabled())
+        std::printf("[disk-cache] domain=%s root=%s enabled=1\n", domain_key_.c_str(),
+                    root_dir_().c_str());
+    else
+        std::printf("[disk-cache] domain=%s enabled=0\n", domain_key_.c_str());
 }
 
 std::string SegmentDiskCache::domain_key_from_int(int domain)
@@ -264,6 +269,10 @@ bool SegmentDiskCache::load_manifest_(std::vector<SegmentMeta>& segs, int64_t& g
                 m.verified_at = static_cast<int64_t>(x->valuedouble);
             if (cJSON* x = cJSON_GetObjectItem(it, "block_count"))
                 m.block_count = x->valueint;
+            if (cJSON* x = cJSON_GetObjectItem(it, "complete"))
+                m.complete = cJSON_IsTrue(x) || (cJSON_IsNumber(x) && x->valueint != 0);
+            else
+                m.complete = true; // legacy entries treated as complete
             if (m.g_seg >= 0 && m.to_ms > m.from_ms)
                 segs.push_back(m);
         }
@@ -290,6 +299,7 @@ bool SegmentDiskCache::save_manifest_(const std::vector<SegmentMeta>& segs,
         cJSON_AddNumberToObject(o, "to_ms", static_cast<double>(m.to_ms));
         cJSON_AddNumberToObject(o, "verified_at", static_cast<double>(m.verified_at));
         cJSON_AddNumberToObject(o, "block_count", m.block_count);
+        cJSON_AddBoolToObject(o, "complete", m.complete ? 1 : 0);
         cJSON_AddItemToArray(arr, o);
     }
     char* printed = cJSON_PrintUnformatted(root);
@@ -417,19 +427,125 @@ SegmentDiskCache::CacheStats SegmentDiskCache::stats() const
     std::vector<SegmentMeta> segs;
     int64_t gen = 0;
     if (load_manifest_(segs, gen))
+    {
         s.segments = static_cast<int>(segs.size());
+        for (const auto& m : segs)
+            if (m.complete)
+                ++s.complete_segments;
+    }
     s.bytes = static_cast<int64_t>(approx_disk_bytes_());
     return s;
 }
 
+bool SegmentDiskCache::find_meta_(int g_seg, SegmentMeta& out) const
+{
+    std::vector<SegmentMeta> segs;
+    int64_t gen = 0;
+    if (!load_manifest_(segs, gen))
+        return false;
+    for (const SegmentMeta& m : segs)
+    {
+        if (m.g_seg == g_seg)
+        {
+            out = m;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SegmentDiskCache::has_segment(int g_seg) const
+{
+    if (!enabled() || g_seg < 0)
+        return false;
+    SegmentMeta m;
+    if (!find_meta_(g_seg, m))
+        return false;
+    return m.complete;
+}
+
+std::vector<int> SegmentDiskCache::list_segment_ids(bool complete_only) const
+{
+    std::vector<int> ids;
+    if (!enabled())
+        return ids;
+    std::vector<SegmentMeta> segs;
+    int64_t gen = 0;
+    if (!load_manifest_(segs, gen))
+        return ids;
+    std::sort(segs.begin(), segs.end(),
+              [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg > b.g_seg; });
+    for (const SegmentMeta& m : segs)
+    {
+        if (complete_only && !m.complete)
+            continue;
+        ids.push_back(m.g_seg);
+    }
+    return ids;
+}
+
+bool SegmentDiskCache::load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
+                                    int64_t& to_ms) const
+{
+    out.clear();
+    from_ms = to_ms = 0;
+    if (!enabled() || g_seg < 0)
+        return false;
+    SegmentMeta meta;
+    if (!find_meta_(g_seg, meta) || !meta.complete)
+        return false;
+    from_ms = meta.from_ms;
+    to_ms = meta.to_ms;
+
+    std::string body;
+    if (!read_text_file_(segment_path_(g_seg), body))
+    {
+        std::printf("[disk-cache] load_segment G=%d missing meta file\n", g_seg);
+        return false;
+    }
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (!root)
+        return false;
+    cJSON* hashes = cJSON_GetObjectItem(root, "hashes");
+    int got = 0;
+    if (cJSON_IsArray(hashes))
+    {
+        cJSON* h = nullptr;
+        cJSON_ArrayForEach(h, hashes)
+        {
+            if (!cJSON_IsString(h) || !h->valuestring)
+                continue;
+            std::string bj;
+            if (!read_gzip_file_(block_path_(h->valuestring), bj))
+                continue;
+            CachedBlock cb;
+            if (!json_to_block_(bj, cb))
+                continue;
+            out.push_back(std::move(cb));
+            ++got;
+        }
+    }
+    cJSON_Delete(root);
+    if (got <= 0)
+    {
+        std::printf("[disk-cache] load_segment G=%d no blocks readable\n", g_seg);
+        return false;
+    }
+    std::printf("[disk-cache] load_segment G=%d blocks=%d complete=1\n", g_seg, got);
+    return true;
+}
+
 bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
                                     int64_t genesis_ms,
-                                    const std::vector<CachedBlock>& blocks)
+                                    const std::vector<CachedBlock>& blocks, bool complete)
 {
     if (!enabled() || g_seg < 0 || to_ms <= from_ms || blocks.empty())
         return false;
     if (!ensure_dirs_())
+    {
+        std::printf("[disk-cache] ensure_dirs failed root=%s\n", root_dir_().c_str());
         return false;
+    }
 
     cJSON* seg = cJSON_CreateObject();
     if (!seg)
@@ -437,6 +553,7 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
     cJSON_AddNumberToObject(seg, "g_seg", g_seg);
     cJSON_AddNumberToObject(seg, "from_ms", static_cast<double>(from_ms));
     cJSON_AddNumberToObject(seg, "to_ms", static_cast<double>(to_ms));
+    cJSON_AddBoolToObject(seg, "complete", complete ? 1 : 0);
     cJSON_AddNumberToObject(seg, "verified_at",
                             static_cast<double>(static_cast<int64_t>(std::time(nullptr))));
     cJSON* hashes = cJSON_AddArrayToObject(seg, "hashes");
@@ -500,7 +617,7 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
     if (genesis_ms > 0)
         man_gen = genesis_ms;
 
-    // Upsert this segment.
+    // Upsert this segment (index by G only).
     bool found = false;
     for (SegmentMeta& m : segs)
     {
@@ -510,6 +627,7 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
             m.to_ms = to_ms;
             m.verified_at = static_cast<int64_t>(std::time(nullptr));
             m.block_count = written;
+            m.complete = complete;
             found = true;
             break;
         }
@@ -522,11 +640,12 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         m.to_ms = to_ms;
         m.verified_at = static_cast<int64_t>(std::time(nullptr));
         m.block_count = written;
+        m.complete = complete;
         segs.push_back(m);
     }
     enforce_disk_budget_(segs, man_gen);
-    std::printf("[disk-cache] saved segment G=%d blocks=%d domain=%s root=%s\n", g_seg, written,
-                domain_key_.c_str(), root_dir_().c_str());
+    std::printf("[disk-cache] saved G=%d blocks=%d complete=%d domain=%s root=%s\n", g_seg,
+                written, complete ? 1 : 0, domain_key_.c_str(), root_dir_().c_str());
     return true;
 }
 
@@ -563,77 +682,43 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
             effective_live = static_cast<int>((now_ms - genesis_ms) / w);
     }
 
-    std::sort(segs.begin(), segs.end(),
-              [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg > b.g_seg; });
-
-    // Most recent N by g_seg; only drop absurd future segments (clock skew).
-    std::vector<SegmentMeta> pick;
+    // Complete segments only, newest G first, then load whole segment units oldest-first.
+    std::vector<int> ids;
     for (const SegmentMeta& m : segs)
     {
+        if (!m.complete)
+            continue;
         if (effective_live >= 0 && m.g_seg > effective_live + 1)
             continue;
-        pick.push_back(m);
-        if (static_cast<int>(pick.size()) >= max_segments)
-            break;
+        ids.push_back(m.g_seg);
     }
-    // Load oldest first so graph builds tip-ward.
-    std::sort(pick.begin(), pick.end(),
-              [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg < b.g_seg; });
+    std::sort(ids.begin(), ids.end(), [](int a, int b) { return a > b; });
+    if (static_cast<int>(ids.size()) > max_segments)
+        ids.resize(static_cast<size_t>(max_segments));
+    std::sort(ids.begin(), ids.end()); // oldest first admit
 
     std::unordered_set<std::string> seen;
-    int parse_fail = 0;
-    int missing_file = 0;
-    for (const SegmentMeta& m : pick)
+    for (int G : ids)
     {
-        std::string body;
-        if (!read_text_file_(segment_path_(m.g_seg), body))
-        {
-            std::printf("[disk-cache] missing segment file G=%d\n", m.g_seg);
+        std::vector<CachedBlock> part;
+        int64_t from_ms = 0, to_ms = 0;
+        if (!load_segment(G, part, from_ms, to_ms))
             continue;
-        }
-        cJSON* root = cJSON_Parse(body.c_str());
-        if (!root)
-            continue;
-        cJSON* hashes = cJSON_GetObjectItem(root, "hashes");
-        int got = 0;
-        if (cJSON_IsArray(hashes))
+        for (auto& cb : part)
         {
-            cJSON* h = nullptr;
-            cJSON_ArrayForEach(h, hashes)
-            {
-                if (!cJSON_IsString(h) || !h->valuestring)
-                    continue;
-                const std::string hash = h->valuestring;
-                if (!seen.insert(hash).second)
-                    continue;
-                std::string bj;
-                if (!read_gzip_file_(block_path_(hash), bj))
-                {
-                    ++missing_file;
-                    continue;
-                }
-                CachedBlock cb;
-                if (!json_to_block_(bj, cb))
-                {
-                    ++parse_fail;
-                    continue;
-                }
-                out_blocks.push_back(std::move(cb));
-                ++got;
-            }
+            if (cb.block.hash.empty() || !seen.insert(cb.block.hash).second)
+                continue;
+            out_blocks.push_back(std::move(cb));
+            ++r.blocks_loaded;
         }
-        cJSON_Delete(root);
-        if (got > 0)
-        {
-            ++r.segments_loaded;
-            r.blocks_loaded += got;
-            auto keys = chunk_keys_for_window(m.from_ms, m.to_ms);
-            r.chunk_keys.insert(r.chunk_keys.end(), keys.begin(), keys.end());
-        }
+        ++r.segments_loaded;
+        r.segment_ids.push_back(G);
+        auto keys = chunk_keys_for_window(from_ms, to_ms);
+        r.chunk_keys.insert(r.chunk_keys.end(), keys.begin(), keys.end());
     }
-    std::printf("[disk-cache] load domain=%s manifest_segs=%zu pick=%zu loaded_seg=%d "
-                "blocks=%d miss=%d parse_fail=%d g_live=%d path=%s\n",
-                domain_key_.c_str(), segs.size(), pick.size(), r.segments_loaded,
-                r.blocks_loaded, missing_file, parse_fail, effective_live, r.root.c_str());
+    std::printf("[disk-cache] load_recent domain=%s complete_ids=%zu loaded_seg=%d blocks=%d "
+                "g_live=%d path=%s\n",
+                domain_key_.c_str(), ids.size(), r.segments_loaded, r.blocks_loaded,
+                effective_live, r.root.c_str());
     return r;
 }

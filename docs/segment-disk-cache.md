@@ -1,13 +1,21 @@
 # Segment disk cache (design)
 
-**Status:** **P1–P3 implemented** on `feature/segment-disk-cache`.  
-**Goal:** Bootstrap recent sessions within bounded disk/time by caching **verified** timeline segments and replaying them before network fill.
+**Status:** **Segment-unit cache** on `feature/segment-disk-cache` — index by `G_seg`, load whole segment, skip interval HTTP.  
+**Goal:** Bootstrap recent sessions; complete G-segments replace network body loads.
 
-### Debug checklist (load empty?)
+### Unit of work
 
-1. Look for `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\` after Steady.  
-2. Console: `[disk-cache] saved segment` must appear at least once (k=0 warm or k≥1).  
-3. On next launch: `[disk-cache] load … blocks=N` and `[adapter] disk-cache bootstrap`.
+| Key | `G_seg` genesis index |
+|-----|------------------------|
+| Save | Entire window blocks when **all 60s chunks** fetched (`complete=1`) |
+| Load | `load_segment(G)` → all blocks + mark window `polled` |
+| Network | `try_fill_window_from_disk_(k)` before interval GET; live tip still `force_newest` |
+
+### Debug checklist
+
+1. After Steady: `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\` + `saved G=… complete=1`.  
+2. Restart: `fill G=… (skip network)` / `bootstrap segments=…`.  
+3. Network panel: `Disk cache: N G-seg · …`.
 
 ## Intent
 
