@@ -664,6 +664,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return false;
     };
 
+    auto passes_txn_filter = [&](const PlacedBlock& placed) -> bool {
+        if (!in.filter_txn_gt_1)
+            return true;
+        // Strict: only known multi-tx blocks (unknown -1 is hidden).
+        return placed.txn_count > 1;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -690,6 +697,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     {
         if (!block_in_visible_segment(placed.timestamp_ms))
             continue;
+        if (!passes_txn_filter(placed))
+            continue;
         if (push_instance(placed, /*force=*/false))
             drawn.insert(placed.hash);
     }
@@ -704,6 +713,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
             (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
         if (!is_sel && !block_in_visible_segment(placed.timestamp_ms))
+            continue;
+        // Multi-tx filter: still force selected/hovered; other force roles must pass filter.
+        if (!is_sel && !passes_txn_filter(placed))
             continue;
         const bool force = is_sel || missing_dep[placed.hash] ||
                            green_display.count(placed.hash) ||

@@ -170,6 +170,12 @@ public:
             graphics_->set_ui_dep_hover(hash);
     }
 
+    void set_scene_filter_multi_tx(bool enabled) override
+    {
+        if (graphics_)
+            graphics_->set_scene_filter_multi_tx(enabled);
+    }
+
     std::string consume_detail_refill_request() override
     {
         return graphics_ ? graphics_->consume_detail_refill_request() : std::string{};

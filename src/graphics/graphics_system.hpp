@@ -73,6 +73,7 @@ public:
     bool is_selected(const std::string& hash) const override;
     AlphBlock copy_selected_block() const override;
     void set_ui_dep_hover(const std::string& hash) override;
+    void set_scene_filter_multi_tx(bool enabled) override;
     std::string consume_detail_refill_request() override;
     void publish_ui_snapshot(UiSnapshot snap) override;
     UiSnapshot copy_ui_snapshot() const override;
@@ -158,6 +159,7 @@ private:
     AlphBlock   selected_block;
     std::string hovered_hash_;
     std::string ui_dep_hover_hash_; // inspector Deps row hover
+    bool        filter_multi_tx_ = false; // scene: txn_count > 1 only
     float     last_frame_dt_sec_ = 1.f / 60.f;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0;

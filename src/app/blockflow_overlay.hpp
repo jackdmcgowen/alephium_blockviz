@@ -59,4 +59,7 @@ private:
     int         billboard_chain_to_   = -1;
     int         billboard_txn_count_  = -1;
     bool        billboard_is_uncle_   = false;
+
+    // Scene view: only draw blocks with txn_count > 1.
+    bool        filter_multi_tx_ = false;
 };

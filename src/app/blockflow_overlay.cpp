@@ -433,10 +433,15 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::TreePop();
     }
 
-    // Former bottom "Blockflow" toolbar â€” collapsible under Network.
+    // Former bottom "Blockflow" toolbar — collapsible under Network.
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
+            engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
         const float bps = ui.total_blocks / (0.001f * elapsed_ms);

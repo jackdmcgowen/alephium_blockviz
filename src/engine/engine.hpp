@@ -75,6 +75,8 @@ public:
     virtual AlphBlock copy_selected_block() const = 0;
     // Inspector Deps list hover (empty clears); used to recolor selection arrows.
     virtual void set_ui_dep_hover(const std::string& hash) = 0;
+    // Scene view filter: only blocks with txn_count > 1.
+    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
     virtual std::string consume_detail_refill_request() = 0;
 
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;
@@ -125,6 +127,7 @@ public:
     virtual bool is_selected(const std::string& hash) const = 0;
     virtual AlphBlock copy_selected_block() const = 0;
     virtual void set_ui_dep_hover(const std::string& hash) = 0;
+    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
     virtual std::string consume_detail_refill_request() = 0;
 
     virtual void publish_ui_snapshot(UiSnapshot snap) = 0;

@@ -420,6 +420,12 @@ void GraphicsSystem::set_ui_dep_hover(const std::string& hash)
     ui_dep_hover_hash_ = hash;
 }
 
+void GraphicsSystem::set_scene_filter_multi_tx(bool enabled)
+{
+    std::lock_guard<std::mutex> lock(selection_mutex_);
+    filter_multi_tx_ = enabled;
+}
+
 std::string GraphicsSystem::consume_detail_refill_request()
 {
     std::lock_guard<std::mutex> lock(detail_refill_mutex_);
@@ -509,6 +515,7 @@ void GraphicsSystem::render_loop()
         std::string selected_hash_local;
         std::string hovered_hash_local;
         std::string ui_dep_hover_local;
+        bool filter_multi_tx_local = false;
         AlphBlock selected_detail_local;
 
         {
@@ -516,6 +523,7 @@ void GraphicsSystem::render_loop()
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
+            filter_multi_tx_local = filter_multi_tx_;
             selected_detail_local = selected_block;
         }
 
@@ -528,6 +536,7 @@ void GraphicsSystem::render_loop()
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
+            filter_multi_tx_local = filter_multi_tx_;
             selected_detail_local = selected_block;
         }
 
@@ -547,6 +556,7 @@ void GraphicsSystem::render_loop()
             fin.selected_hash = selected_hash_local;
             fin.hovered_hash = hovered_hash_local;
             fin.ui_dep_hover_hash = ui_dep_hover_local;
+            fin.filter_txn_gt_1 = filter_multi_tx_local;
             fin.selected_detail = selected_detail_local;
             // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
             fin.instance_half_extents = glm::vec3(1.05f);

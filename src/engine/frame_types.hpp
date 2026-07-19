@@ -26,6 +26,8 @@ struct FrameSourceInput
     glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };
     glm::vec3 camera_eye{ 0.f, 0.f, 0.f };
     bool      has_camera_eye = false;
+    // When true, only draw placements with txn_count > 1 (selection/hover always drawn).
+    bool      filter_txn_gt_1 = false;
 };
 
 struct FrameSourceOutput
