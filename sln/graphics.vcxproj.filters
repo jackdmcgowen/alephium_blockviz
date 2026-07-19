@@ -50,10 +50,10 @@
     <ClCompile Include="..\src\graphics\buffer.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\buffer_manager.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\camera.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\compute.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp"><Filter>Source Files\graphics\debug</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\mesh_arena.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\device.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\descriptor.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\engine_requirements.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\image.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\instance.cpp"><Filter>Source Files\graphics</Filter></ClCompile>

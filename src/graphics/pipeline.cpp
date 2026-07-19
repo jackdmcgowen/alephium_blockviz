@@ -3,6 +3,7 @@
 
 #include <array>
 #include <stdexcept>
+#include <vector>
 
 VkPipelineLayout create_pipeline_layout(
     VkDevice device,
@@ -35,7 +36,8 @@ void destroy_pipeline(VkDevice device, VkPipeline pipeline)
         vkDestroyPipeline(device, pipeline, nullptr);
 }
 
-VkPipeline create_graphics_pipeline(VkDevice device, const GraphicsPipelineCreateInfo& info)
+static VkPipeline create_graphics_pipeline_impl(VkDevice device,
+                                                 const GraphicsPipelineCreateInfo& info)
 {
     if (device == VK_NULL_HANDLE || info.layout == VK_NULL_HANDLE || !info.stages ||
         info.stage_count == 0)
@@ -184,4 +186,107 @@ VkPipeline create_graphics_pipeline(VkDevice device, const GraphicsPipelineCreat
                                   &pipeline) != VK_SUCCESS)
         throw std::runtime_error("create_graphics_pipeline failed");
     return pipeline;
+}
+
+static VkPipeline create_compute_pipeline_from_module_impl(VkDevice device,
+                                                           VkPipelineLayout layout,
+                                                           VkShaderModule module,
+                                                           const char* entry)
+{
+    if (device == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || module == VK_NULL_HANDLE)
+        throw std::runtime_error("create_compute_pipeline_from_module: invalid args");
+
+    VkPipelineShaderStageCreateInfo stage{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = module;
+    stage.pName = entry ? entry : "main";
+
+    VkComputePipelineCreateInfo ci{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    ci.stage = stage;
+    ci.layout = layout;
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline) !=
+        VK_SUCCESS)
+        throw std::runtime_error("create_compute_pipeline_from_module failed");
+    return pipeline;
+}
+
+VkPipeline create_pipeline(VkDevice device, const PipelineCreateInfo& info)
+{
+    if (device == VK_NULL_HANDLE || info.layout == VK_NULL_HANDLE)
+        throw std::runtime_error("create_pipeline: invalid device/layout");
+
+    if (info.kind == PipelineKind::_3D)
+    {
+        if (!info.graphics)
+            throw std::runtime_error("create_pipeline: Graphics3D requires graphics info");
+        GraphicsPipelineCreateInfo g = *info.graphics;
+        if (g.layout == VK_NULL_HANDLE)
+            g.layout = info.layout;
+        return create_graphics_pipeline_impl(device, g);
+    }
+
+    if (info.kind == PipelineKind::CMP)
+    {
+        if (info.compute_module != VK_NULL_HANDLE)
+        {
+            return create_compute_pipeline_from_module_impl(
+                device, info.layout, info.compute_module, info.compute_entry);
+        }
+        if (!info.compute_spv_path)
+            throw std::runtime_error("create_pipeline: CMP needs module or spv path");
+
+        std::vector<uint8_t> code;
+        load_shader_source(info.compute_spv_path, code);
+        VkShaderModule module = VK_NULL_HANDLE;
+        create_shader_module(device, module, code);
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        try
+        {
+            pipeline = create_compute_pipeline_from_module_impl(
+                device, info.layout, module, info.compute_entry);
+        }
+        catch (...)
+        {
+            destroy_shader_module(device, module);
+            throw;
+        }
+        destroy_shader_module(device, module);
+        return pipeline;
+    }
+
+    throw std::runtime_error("create_pipeline: unknown PipelineKind");
+}
+
+VkPipeline create_graphics_pipeline(VkDevice device, const GraphicsPipelineCreateInfo& info)
+{
+    PipelineCreateInfo pci{};
+    pci.kind = PipelineKind::_3D;
+    pci.layout = info.layout;
+    pci.graphics = &info;
+    return create_pipeline(device, pci);
+}
+
+VkPipeline create_compute_pipeline_from_module(VkDevice device, VkPipelineLayout layout,
+                                               VkShaderModule module, const char* entry)
+{
+    PipelineCreateInfo pci{};
+    pci.kind = PipelineKind::CMP;
+    pci.layout = layout;
+    pci.compute_module = module;
+    pci.compute_entry = entry ? entry : "main";
+    return create_pipeline(device, pci);
+}
+
+VkPipeline create_compute_pipeline(VkDevice device, VkPipelineLayout layout,
+                                   const char* shader_spv_path, const char* entry)
+{
+    PipelineCreateInfo pci{};
+    pci.kind = PipelineKind::CMP;
+    pci.layout = layout;
+    pci.compute_spv_path = shader_spv_path;
+    pci.compute_entry = entry ? entry : "main";
+    return create_pipeline(device, pci);
 }

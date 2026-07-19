@@ -83,96 +83,50 @@ void SobelCompute::create_descriptors(VkDevice device)
         vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS)
         throw std::runtime_error("SobelCompute: samplers");
 
-    VkDescriptorSetLayoutBinding binds[2]{};
-    binds[0].binding = 0;
-    binds[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binds[0].descriptorCount = 1;
-    binds[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    binds[1].binding = 1;
-    binds[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    binds[1].descriptorCount = 1;
-    binds[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    const DescriptorBinding compute_binds[] = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT },
+    };
+    compute_set_layout_ = create_descriptor_set_layout(device, compute_binds, 2);
 
-    VkDescriptorSetLayoutCreateInfo layout_ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    layout_ci.bindingCount = 2;
-    layout_ci.pBindings = binds;
-    if (vkCreateDescriptorSetLayout(device, &layout_ci, nullptr, &compute_set_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: compute set layout");
+    const DescriptorBinding overlay_bind{
+        0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+    overlay_set_layout_ = create_descriptor_set_layout(device, &overlay_bind, 1);
 
-    VkDescriptorSetLayoutBinding ob{};
-    ob.binding = 0;
-    ob.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ob.descriptorCount = 1;
-    ob.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo olayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    olayout.bindingCount = 1;
-    olayout.pBindings = &ob;
-    if (vkCreateDescriptorSetLayout(device, &olayout, nullptr, &overlay_set_layout_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: overlay set layout");
-
-    VkDescriptorPoolSize sizes[] = {
+    const VkDescriptorPoolSize sizes[] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
     };
-    VkDescriptorPoolCreateInfo pool_ci{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    pool_ci.maxSets = 4;
-    pool_ci.poolSizeCount = 2;
-    pool_ci.pPoolSizes = sizes;
-    pool_ci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    if (vkCreateDescriptorPool(device, &pool_ci, nullptr, &descriptor_pool_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: descriptor pool");
+    descriptor_pool_ = create_descriptor_pool(device, 4, sizes, 2);
 
-    VkDescriptorSetAllocateInfo alloc{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    alloc.descriptorPool = descriptor_pool_;
-    alloc.descriptorSetCount = 1;
-    alloc.pSetLayouts = &compute_set_layout_;
-    if (vkAllocateDescriptorSets(device, &alloc, &compute_set_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: compute set");
-    alloc.pSetLayouts = &overlay_set_layout_;
-    if (vkAllocateDescriptorSets(device, &alloc, &overlay_set_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: overlay set");
+    if (!allocate_descriptor_sets(device, descriptor_pool_, &compute_set_layout_, 1,
+                                  &compute_set_) ||
+        !allocate_descriptor_sets(device, descriptor_pool_, &overlay_set_layout_, 1,
+                                  &overlay_set_))
+        throw std::runtime_error("SobelCompute: allocate descriptor sets");
 
-    // Write once at create â€” never update while CBs are pending (VUID-03047).
+    // Write once at create — never update while CBs are pending (VUID-03047).
     write_static_descriptors_();
 }
 
 void SobelCompute::write_static_descriptors_()
 {
-    VkDescriptorImageInfo depth_info{};
-    depth_info.sampler = depth_sampler_;
-    depth_info.imageView = sel_depth_view_;
-    depth_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    const DescriptorImageWrite compute_imgs[] = {
+        { compute_set_, 0, sel_depth_view_, depth_sampler_,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER },
+        { compute_set_, 1, edge_view_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL,
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE },
+    };
+    write_descriptor_images(device_, compute_imgs, 2);
 
-    VkDescriptorImageInfo edge_storage{};
-    edge_storage.imageView = edge_view_;
-    edge_storage.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkWriteDescriptorSet writes[2]{};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = compute_set_;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[0].descriptorCount = 1;
-    writes[0].pImageInfo = &depth_info;
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = compute_set_;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writes[1].descriptorCount = 1;
-    writes[1].pImageInfo = &edge_storage;
-    vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
-
-    VkDescriptorImageInfo edge_sampled{};
-    edge_sampled.sampler = edge_sampler_;
-    edge_sampled.imageView = edge_view_;
-    edge_sampled.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet ow{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    ow.dstSet = overlay_set_;
-    ow.dstBinding = 0;
-    ow.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ow.descriptorCount = 1;
-    ow.pImageInfo = &edge_sampled;
-    vkUpdateDescriptorSets(device_, 1, &ow, 0, nullptr);
+    const DescriptorImageWrite overlay_img{
+        overlay_set_, 0, edge_view_, edge_sampler_,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+    };
+    write_descriptor_images(device_, &overlay_img, 1);
 }
 
 void SobelCompute::create_compute_pipeline(VkDevice device)
@@ -181,9 +135,14 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
     pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pcr.size = sizeof(SobelPC);
 
-    compute_layout_ =
-        ::create_compute_pipeline_layout(device, &compute_set_layout_, 1, &pcr, 1);
-    pipeline_ = ::create_compute_pipeline(device, compute_layout_, "sobel.comp.spv", "main");
+    compute_layout_ = create_pipeline_layout(device, &compute_set_layout_, 1, &pcr, 1);
+
+    PipelineCreateInfo pci{};
+    pci.kind = PipelineKind::CMP;
+    pci.layout = compute_layout_;
+    pci.compute_spv_path = "sobel.comp.spv";
+    pci.compute_entry = "main";
+    pipeline_ = create_pipeline(device, pci);
 }
 
 void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
@@ -375,12 +334,20 @@ void SobelCompute::destroy(VkDevice device)
     if (pipeline_) { vkDestroyPipeline(device, pipeline_, nullptr); pipeline_ = VK_NULL_HANDLE; }
     if (compute_layout_) { vkDestroyPipelineLayout(device, compute_layout_, nullptr); compute_layout_ = VK_NULL_HANDLE; }
     if (descriptor_pool_) {
-        vkDestroyDescriptorPool(device, descriptor_pool_, nullptr);
+        destroy_descriptor_pool(device, descriptor_pool_);
         descriptor_pool_ = VK_NULL_HANDLE;
         compute_set_ = overlay_set_ = VK_NULL_HANDLE;
     }
-    if (compute_set_layout_) { vkDestroyDescriptorSetLayout(device, compute_set_layout_, nullptr); compute_set_layout_ = VK_NULL_HANDLE; }
-    if (overlay_set_layout_) { vkDestroyDescriptorSetLayout(device, overlay_set_layout_, nullptr); overlay_set_layout_ = VK_NULL_HANDLE; }
+    if (compute_set_layout_)
+    {
+        destroy_descriptor_set_layout(device, compute_set_layout_);
+        compute_set_layout_ = VK_NULL_HANDLE;
+    }
+    if (overlay_set_layout_)
+    {
+        destroy_descriptor_set_layout(device, overlay_set_layout_);
+        overlay_set_layout_ = VK_NULL_HANDLE;
+    }
     if (depth_sampler_) { vkDestroySampler(device, depth_sampler_, nullptr); depth_sampler_ = VK_NULL_HANDLE; }
     if (edge_sampler_) { vkDestroySampler(device, edge_sampler_, nullptr); edge_sampler_ = VK_NULL_HANDLE; }
     if (edge_view_) { destroy_image_view(device, edge_view_); edge_view_ = VK_NULL_HANDLE; }
