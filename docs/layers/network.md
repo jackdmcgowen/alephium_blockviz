@@ -52,11 +52,15 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
 
-**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. History **≥2** is gated until Steady and live window 0 is fully chunk-filled.
+**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. Live tip seeds / BFS still wait for Steady + live window 0 fully chunk-filled. **View/fetch ring always follows `cam_k`** (not frozen to `{0,1,2}` during tip pipeline) so paging into history past k2 still enqueues interval chunks.
 
-**Triple-buffer segment ring:** always **current + 2 ahead** `{k_eff, k_eff+1, k_eff+2}` (HUD older→newer). Prefetch hysteresis (~40% into current segment toward older) raises `k_eff` early; pump fills **ahead windows first**. Bootstrap includes index 2 ASAP. **Global index G** from genesis; windows genesis-aligned. Minimap Z-proportional to planes; page-older steps one segment and recenters toward the **right**.
+**Terminology:** **G** = number of **groups** (`ALPH_NUM_GROUPS`, 4); shards = G×G lanes; each block has **2G−1** deps. Timeline **lookback k** is tip-relative (`k=0` live tip window, higher = older). Do not confuse k with groups. Window **ms bounds** are genesis-aligned (`G_live − k`); minimap Z uses those bounds so bars match cubes/planes.
 
-**Cache:** keep graph/detail until process private memory ≈ **2 GB** (or soft node cap); no routine 2×lookback wipe. Evict oldest non-frontier under pressure.
+**Triple-buffer (sliding view/fetch):** always **`{cam_k, cam_k+1, cam_k+2}`** tip-relative, independent of tip-pipeline readiness. Load **live tip backward** only: Live mode fills k=0 then 1 then 2; History fills around camera. Never crawl from chain genesis as a fetch order. Minimap labels **genesis segment numbers** (`#G_seg`); Live prefix when tip segment is on-track.
+
+**History mode:** when `cam_k ≥ 1` (live outside the sliding window), **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget. Return to `cam_k==0` → live resync.
+
+**Cache / retention:** keep loaded blocks when the view slides away (draw cull only). Soft/hard RAM warnings; last-resort oldest-node prune near ~2 GB. Future: disk cache.
 
 **Timeline origin:** sticky session origin (not min loaded block ts) so attached camera Z does not jump when history admits.
 

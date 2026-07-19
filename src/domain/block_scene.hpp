@@ -168,6 +168,10 @@ public:
         int         switching            = 0;
         int         segment_count        = 0;
         TimeSegment segments[kMaxTimeSegments]{};
+        // Timeline graph cache pressure: 0 ok, 1 soft warn, 2 hard (may drop oldest).
+        int         cache_pressure_level = 0;
+        // 0 = Live (k0 in sliding window), 1 = History (live tip halted).
+        int         browse_mode = 0;
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;

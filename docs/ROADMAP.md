@@ -61,7 +61,8 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | 7 | Richer **dep-viz modes** (selection / frontier / LOD) | [app](layers/app.md) | Product decision first; avoid full edge soup by default |
 | 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
 | 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
-| 10 | **History depth + LOD** presentation | app · network | Network half: chunked timeline ingest done on branch; presentation LOD still open |
+| 10 | **History depth + LOD** presentation | app · network | Sliding 3-slot view + keep-all-loaded in RAM; presentation LOD still open |
+| 10b | **Disk / session block cache** | [network](layers/network.md) | Bound RAM, speed repeated runs, minimize API reloads after paging deep history |
 | 11 | **Second real chain** adapter | [network](layers/network.md) | Only after FakeChain proves multi-adapter wiring |
 | 12 | Headless / client-driven **frame test seam** | [engine](layers/engine.md) · [graphics](layers/graphics.md) | Only if automated GPU / CI tests become a goal |
 

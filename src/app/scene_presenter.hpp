@@ -38,6 +38,8 @@ private:
     static constexpr float  kDeathSec       = 0.45f;
     static constexpr float  kWalkStepSec    = 0.22f;
     static constexpr float  kConfirmBlendSec = 0.35f;
+    static constexpr float  kSegFadeInSec   = 0.28f;
+    static constexpr float  kSegFadeOutSec  = 0.32f;
 
     // Growing → Held → Dying (remove only). No unused Fading/Gone.
     enum class ArrowPhase : uint8_t { Growing, Held, Dying };
@@ -108,4 +110,7 @@ private:
     std::unordered_map<std::string, glm::vec3> prev_positions_;
     std::vector<DyingBlock> dying_blocks_;
     FrontierWalkAnim walk_by_lane_[BlockScene::kLaneCount]{};
+    // Sliding-window segment fade by lookback k (0 = live): 0..1 for enter/leave.
+    std::unordered_map<int, float> seg_fade_alpha_;
+    float last_seg_fade_sec_ = -1.f;
 };

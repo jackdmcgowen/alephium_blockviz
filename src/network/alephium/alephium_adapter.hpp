@@ -202,9 +202,9 @@ private:
     // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
     bool try_chain_walk_confirm_(const std::string& tip_hash, uint32_t lane, int height);
     void prune_detail_store();
-    // Soft-evict graph nodes older than active ring − 1 window (Steady only).
-    // Clears matching history_slots_fetched_ keys so re-visit re-fetches chunks.
-    void maybe_ring_retain_prune_();
+    // No off-ring discard. Soft/hard memory pressure warning (+ optional last-resort
+    // oldest-node prune only when over hard cap). Sliding ring is view/fetch only.
+    void maybe_memory_pressure_prune_();
 
     BlockScene& scene_;
     IEngine& engine_;
@@ -288,6 +288,8 @@ private:
     int64_t last_live_window_poll_ms_ = 0;
     int     last_cam_lookback_k_ = 0;
     bool    live_poll_deferred_ = false;
+    // 0 = ok, 1 = soft cache pressure, 2 = hard (last-resort prune may run).
+    int     cache_pressure_level_ = 0;
     // Rate-limit chunk pumps on the drain path (ms wall clock).
     int64_t last_chunk_pump_ms_ = 0;
     // Quantized chunk from_ts of interval polls already issued (dedupe).
@@ -311,7 +313,10 @@ private:
     static constexpr size_t kMaxSeedQueue = 512;
     static constexpr int kTipRefreshEveryNPolls = 3;
     static constexpr int kMaxFloodPerSeed = 256;
-    static constexpr int kMaxFetchAdmitsPerDrain = 4; // selection path only
+    static constexpr int kMaxFetchAdmitsPerDrain = 4; // hash/confirm path default
+    // Interval timeline admits: higher so history ring applies before next pump.
+    static constexpr int kIntervalAdmitsPerDrain = 24;
+    static constexpr int kHistoryIntervalAdmitsPerPoll = 32;
     static constexpr int kMaxBfsNodesPerThreadSlice = 64;
     // Sub-interval for blocks-with-events GETs (~10 chunks per 10 min segment).
     static constexpr int64_t kTimelineChunkMs = 60'000;

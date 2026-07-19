@@ -58,6 +58,13 @@ void HttpIoPool::clear_completed_intervals()
     completed_intervals_.clear();
 }
 
+void HttpIoPool::forget_completed_interval(int64_t from_ms)
+{
+    const std::string key = std::string("i:") + std::to_string(from_ms);
+    std::lock_guard<std::mutex> lock(mu_);
+    completed_intervals_.erase(key);
+}
+
 bool HttpIoPool::enqueue_block_hash(const std::string& hash)
 {
     if (hash.empty() || !running_.load(std::memory_order_relaxed))
