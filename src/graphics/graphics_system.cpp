@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <chrono>
 #include <cstring>
 #include <cmath>
 #include <ctime>
@@ -551,8 +552,11 @@ void GraphicsSystem::render_loop()
             Frustum frame_frustum{};
             if (camera_)
             {
-                // Timeline Z: live tip at "now", past bound at genesis (no Â±2000 clamp).
-                const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+                // Timeline Z: live tip at "now" with ms resolution (not time()*1000 —
+                // second steps made the attached follow jump/jitter every 1 m).
+                const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::system_clock::now().time_since_epoch())
+                                           .count();
                 int64_t origin_ms = scene_ ? scene_->timeline_origin_ms() : 0;
                 if (origin_ms <= 0)
                     origin_ms = now_ms - static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
@@ -579,6 +583,15 @@ void GraphicsSystem::render_loop()
 
             if (camera_)
             {
+                // Dynamic near/far from visible segment span (presenter suggestion).
+                // Applied after prepare so this frame's UBO matches draw-set depth;
+                // next frame's cull frustum picks up the tighter clip.
+                if (fout.has_clip_suggestion)
+                {
+                    const float n = std::max(0.5f, fout.suggested_near_z);
+                    const float f = std::max(n + 10.f, fout.suggested_far_z);
+                    camera_->set_clip(n, f);
+                }
                 if (fout.has_look_target && selected_hash_local != camera_->look_aim_hash())
                     camera_->set_look_target(fout.look_target_pos, selected_hash_local);
                 else if (selected_hash_local.empty() && camera_->look_engaged())

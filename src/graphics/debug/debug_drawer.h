@@ -42,6 +42,10 @@ public:
     // 12 cube edges only (true box outline — not triangle wireframe).
     void add_wire_box(const glm::vec3& center, float half_extent, const glm::vec4& color);
 
+    // Large double-sided quad in the XY plane at constant world Z (barrier / slab marker).
+    // half_extent is half-width in both X and Y (total span 2*half_extent).
+    void add_z_plane_quad(float z, float half_extent, const glm::vec4& color);
+
     const DebugVertex* vertices() const { return verts_.empty() ? nullptr : verts_.data(); }
     uint32_t vertex_count() const { return static_cast<uint32_t>(verts_.size()); }
     const uint32_t* indices() const { return indices_.empty() ? nullptr : indices_.data(); }

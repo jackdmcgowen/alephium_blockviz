@@ -177,6 +177,61 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.stats_seed_q = static_cast<int>(seed_q_.size());
     hud.last_poll_ms = last_poll_wall_ms_;
     hud.poll_interval_sec = static_cast<float>(cfg_.poll_interval_ms) * 0.001f;
+
+    // Timeline segments: one per lookback window with load % / full flag.
+    {
+        const auto nodes = scene_.nodes_snapshot();
+        const int nwin = static_cast<int>(lookback_windows_.size());
+        const int nseg = std::min(nwin, BlockScene::kMaxTimeSegments);
+        hud.segment_count = nseg;
+        const bool fills_pending = !pending_fill_parents_.empty();
+        for (int i = 0; i < nseg; ++i)
+        {
+            const LookbackWindowSlot& w = lookback_windows_[static_cast<size_t>(i)];
+            BlockScene::TimeSegment& s = hud.segments[i];
+            s.index = w.index;
+            s.from_ms = w.from_ms;
+            s.to_ms = w.to_ms;
+            s.block_count = 0;
+            for (const auto& n : nodes)
+            {
+                if (n.timestamp_ms <= 0)
+                    continue;
+                if (n.timestamp_ms >= w.from_ms && n.timestamp_ms < w.to_ms)
+                    ++s.block_count;
+            }
+            const int64_t span_ms = std::max<int64_t>(1, w.to_ms - w.from_ms);
+            const float span_sec = static_cast<float>(span_ms) * 0.001f;
+            // Soft estimate: ~half of 16 chains at 8s block time over the window.
+            s.expected_blocks = std::max(
+                1, static_cast<int>(span_sec / static_cast<float>(ALPH_TARGET_BLOCK_SECONDS) *
+                                    static_cast<float>(ALPH_NUM_GROUPS * ALPH_NUM_GROUPS) * 0.5f));
+            float ratio = static_cast<float>(s.block_count) /
+                          static_cast<float>(std::max(1, s.expected_blocks));
+            if (w.polled)
+                ratio = std::max(ratio, 0.15f);
+            s.load_ratio = std::clamp(ratio, 0.f, 1.f);
+            // Live (index 0): never forced full while still the tip window.
+            // Older: full when polled, density ok, no confirm-fills pending.
+            if (i == 0)
+            {
+                s.confirmed_full = 0;
+                if (fills_pending)
+                    s.load_ratio = std::min(s.load_ratio, 0.95f);
+            }
+            else
+            {
+                const bool dense_enough = s.block_count >= (s.expected_blocks * 85) / 100;
+                s.confirmed_full =
+                    (w.polled && dense_enough && !fills_pending) ? 1 : 0;
+                if (s.confirmed_full)
+                    s.load_ratio = 1.f;
+                else if (fills_pending)
+                    s.load_ratio = std::min(s.load_ratio, 0.95f);
+            }
+        }
+    }
+
     scene_.set_network_hud(hud);
 }
 

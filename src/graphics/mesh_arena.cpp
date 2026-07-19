@@ -182,11 +182,6 @@ bool MeshArena::create_pipelines()
     VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     multisampling.rasterizationSamples = samples_;
 
-    VkPipelineDepthStencilStateCreateInfo depth_stencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-    depth_stencil.depthTestEnable = VK_TRUE;
-    depth_stencil.depthWriteEnable = VK_TRUE;
-    depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
     VkPipelineColorBlendAttachmentState color_blend_attachment{};
     color_blend_attachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -212,7 +207,11 @@ bool MeshArena::create_pipelines()
     rendering_info.pColorAttachmentFormats = &color_format_;
     rendering_info.depthAttachmentFormat = depth_format_;
 
-    auto make_pipe = [&](VkPrimitiveTopology topo, VkCullModeFlags cull, VkPipeline* out) -> bool {
+    // Triangles (arrows, barrier planes): test against cube depth but do not write —
+    // translucent planes must not hide later arrows or wash out geometry behind them.
+    // Lines: same depth test; no write so outlines stay compatible with translucent fills.
+    auto make_pipe = [&](VkPrimitiveTopology topo, VkCullModeFlags cull, VkBool32 depth_write,
+                         VkPipeline* out) -> bool {
         VkPipelineInputAssemblyStateCreateInfo input_assembly{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
         input_assembly.topology = topo;
 
@@ -221,6 +220,11 @@ bool MeshArena::create_pipelines()
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = cull;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkPipelineDepthStencilStateCreateInfo depth_stencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+        depth_stencil.depthTestEnable = VK_TRUE;
+        depth_stencil.depthWriteEnable = depth_write;
+        depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
         VkGraphicsPipelineCreateInfo pipeline_info{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
         pipeline_info.pNext = &rendering_info;
@@ -240,8 +244,10 @@ bool MeshArena::create_pipelines()
         return vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, out) == VK_SUCCESS;
     };
 
-    const bool ok_tri = make_pipe(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_CULL_MODE_BACK_BIT, &tri_pipeline_);
-    const bool ok_line = make_pipe(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_CULL_MODE_NONE, &line_pipeline_);
+    const bool ok_tri =
+        make_pipe(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_CULL_MODE_BACK_BIT, VK_FALSE, &tri_pipeline_);
+    const bool ok_line =
+        make_pipe(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_CULL_MODE_NONE, VK_FALSE, &line_pipeline_);
 
     vkDestroyShaderModule(device_, vert_module, nullptr);
     vkDestroyShaderModule(device_, frag_module, nullptr);

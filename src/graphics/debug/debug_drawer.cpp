@@ -45,6 +45,28 @@ void DebugDrawer::add_wire_box(const glm::vec3& center, float half_extent, const
         add_line(p[e[0]], p[e[1]], color);
 }
 
+void DebugDrawer::add_z_plane_quad(float z, float half_extent, const glm::vec4& color)
+{
+    const float s = half_extent > 1e-4f ? half_extent : 1.f;
+    const DebugVertex v[4] = {
+        { glm::vec3(-s, -s, z), color },
+        { glm::vec3( s, -s, z), color },
+        { glm::vec3( s,  s, z), color },
+        { glm::vec3(-s,  s, z), color },
+    };
+    // Both windings — tri pipeline culls back faces.
+    static const uint32_t front[6] = { 0, 1, 2, 0, 2, 3 };
+    static const uint32_t back[6]  = { 0, 2, 1, 0, 3, 2 };
+    add_mesh(v, 4, front, 6);
+    add_mesh(v, 4, back, 6);
+    // Thin edge ring for readability at low alpha.
+    const glm::vec4 edge(color.r, color.g, color.b, std::min(1.f, color.a * 2.5f));
+    add_line(v[0].position, v[1].position, edge);
+    add_line(v[1].position, v[2].position, edge);
+    add_line(v[2].position, v[3].position, edge);
+    add_line(v[3].position, v[0].position, edge);
+}
+
 void DebugDrawer::append_tri(uint32_t i0, uint32_t i1, uint32_t i2)
 {
     indices_.push_back(i0);

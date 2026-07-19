@@ -35,6 +35,11 @@ struct FrameSourceOutput
     std::vector<std::string> confirmed_tip_hashes;
     std::vector<std::string> cyan_frontier_hashes;
     std::vector<std::string> incomplete_hashes;
+
+    // Dynamic camera clip from visible segment span (applied after prepare for UBO).
+    bool  has_clip_suggestion = false;
+    float suggested_near_z    = 1.f;
+    float suggested_far_z     = 5000.f;
 };
 
 class IFrameSource

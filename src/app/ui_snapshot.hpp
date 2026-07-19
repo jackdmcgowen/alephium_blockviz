@@ -56,6 +56,21 @@ struct UiSnapshot
     float       poll_interval_sec     = 8.f;
     int         net_switching         = 0;
 
+    // Timeline segments (mirror BlockScene::TimeSegment; index 0 = live).
+    static constexpr int kMaxTimeSegments = 32;
+    struct TimeSegmentUi
+    {
+        int     index           = 0;
+        int64_t from_ms         = 0;
+        int64_t to_ms           = 0;
+        float   load_ratio      = 0.f;
+        int     confirmed_full  = 0;
+        int     block_count     = 0;
+        int     expected_blocks = 0;
+    };
+    int           segment_count = 0;
+    TimeSegmentUi segments[kMaxTimeSegments]{};
+
     UiSnapshot()
     {
         for (int& h : confirmed_height_by_lane)

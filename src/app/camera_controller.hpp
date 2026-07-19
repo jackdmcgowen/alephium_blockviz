@@ -26,7 +26,9 @@ public:
     static constexpr float kWheelStep = 25.f;    // world units per mouse-wheel notch
     static constexpr float kLookOmega   = 12.f;
     static constexpr float kPanOmega    = 14.f;
-    static constexpr float kScrollOmega = 12.f;
+    // Scroll Z: linear approach toward target (not exp spring, not hard snap).
+    // Fast enough to track continuous live tip (~1 m/s) and smooth wheel jumps.
+    static constexpr float kScrollLinearSpeed = 120.f; // world units / second
     static constexpr float kLookSens  = 0.0045f;
     static constexpr float kPanSens   = 0.12f;
     static constexpr float kPitchMin  = -1.35f;
@@ -88,6 +90,7 @@ public:
         scroll_z_target_ = std::clamp(z, z_min_, z_max_);
     }
 
+    // Move scroll target; actual eye Z linear-approaches in update_scroll_.
     void nudge_scroll(float world_delta)
     {
         detach_timeline_();
@@ -170,12 +173,6 @@ public:
 
     const Camera& tick(float dt_sec)
     {
-        if (timeline_attached_)
-        {
-            // Stay on live tip window; spring toward live Z (live Z advances with time).
-            scroll_z_target_ = std::clamp(live_scroll_z_, z_min_, z_max_);
-        }
-
         update_look_(dt_sec);
         update_pan_(dt_sec);
         update_scroll_(dt_sec);
@@ -246,9 +243,24 @@ private:
         pan_.z = exp_smooth_(pan_.z, pan_target_.z, dt, kPanOmega);
     }
 
+    // Constant-speed linear approach: smooth continuous motion (ms-scale when
+    // live target is continuous). Avoids exp-spring lag and integer-second jumps.
+    static float linear_approach_(float current, float target, float dt, float speed)
+    {
+        const float d = target - current;
+        const float max_step = speed * std::max(dt, 0.f);
+        if (std::abs(d) <= max_step)
+            return target;
+        return current + (d > 0.f ? max_step : -max_step);
+    }
+
     void update_scroll_(float dt)
     {
-        scroll_z_ = exp_smooth_(scroll_z_, scroll_z_target_, dt, kScrollOmega);
+        if (timeline_attached_)
+            scroll_z_target_ = std::clamp(live_scroll_z_, z_min_, z_max_);
+
+        scroll_z_target_ = std::clamp(scroll_z_target_, z_min_, z_max_);
+        scroll_z_ = linear_approach_(scroll_z_, scroll_z_target_, dt, kScrollLinearSpeed);
         scroll_z_ = std::clamp(scroll_z_, z_min_, z_max_);
     }
 

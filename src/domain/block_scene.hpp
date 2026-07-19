@@ -102,6 +102,19 @@ public:
     void set_trace_status(int phase, int offset);
     void get_trace_status_locked(int* phase_out, int* offset_out) const;
 
+    // Timeline segment = lookback window [from_ms, to_ms). Index 0 = live.
+    static constexpr int kMaxTimeSegments = 32;
+    struct TimeSegment
+    {
+        int     index            = 0;
+        int64_t from_ms          = 0;
+        int64_t to_ms            = 0; // exclusive
+        float   load_ratio       = 0.f;
+        int     confirmed_full   = 0; // 0/1
+        int     block_count      = 0;
+        int     expected_blocks  = 0;
+    };
+
     // Network HUD published by adapter (copied into UiSnapshot on prepare).
     struct NetworkHud
     {
@@ -120,6 +133,8 @@ public:
         int64_t     last_poll_ms         = 0;
         float       poll_interval_sec    = 8.f;
         int         switching            = 0;
+        int         segment_count        = 0;
+        TimeSegment segments[kMaxTimeSegments]{};
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;

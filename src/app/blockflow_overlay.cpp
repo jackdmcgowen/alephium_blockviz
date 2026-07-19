@@ -256,6 +256,32 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
     ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
 
+    // Timeline segments (lookback windows) with per-segment load %.
+    if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        const int nshow =
+            std::min(ui.segment_count, UiSnapshot::kMaxTimeSegments);
+        for (int i = 0; i < nshow; ++i)
+        {
+            const auto& s = ui.segments[i];
+            const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
+            const float span_s = static_cast<float>(span_ms) * 0.001f;
+            const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
+            const char* tag = (i == 0) ? "Live" : (s.confirmed_full ? "full" : "loading");
+            ImGui::PushID(i);
+            if (i == 0)
+                ImGui::Text("[%d] Live  %.0fs", s.index, span_s);
+            else
+                ImGui::Text("[%d] -%.0fm  %.0fs", s.index, span_s * static_cast<float>(i) / 60.f,
+                            span_s);
+            ImGui::ProgressBar(ratio, ImVec2(-1.f, 0.f),
+                               s.confirmed_full ? "100%" : nullptr);
+            ImGui::TextDisabled("  %d blks · %d%% · %s", s.block_count,
+                                static_cast<int>(ratio * 100.f + 0.5f), tag);
+            ImGui::PopID();
+        }
+    }
+
     ImGui::Separator();
     ImGui::Text("Activity");
     ImGui::TextDisabled("phase: %s", network_status_label(st));
