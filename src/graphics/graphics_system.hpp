@@ -6,10 +6,10 @@
 //
 // Method bodies are split across TUs (still GraphicsSystem::):
 //   graphics_system.cpp     — lifecycle, init/resize, create_*, record_command_buffer
-//   frame/frame_loop.cpp    — render_loop / render
-//   frame/async_sobel_submit.cpp — submit_frame_with_async_sobel
+//   frame/frame_loop.cpp    — render_loop / render (builds SobelFrameRequest)
 //   frame/gpu_frame_publish.cpp  — publish_frame / apply_published_frame
 //   frame/selection_state.cpp    — selection, hover, multi-tx filter, detail refill
+// Sobel: pipelines/sobel_pipeline.* + frame/sobel_async_pass.* (not GS methods)
 // See docs/layers/graphics.md (living module map).
 
 #include <vulkan/vulkan.h>
@@ -36,7 +36,9 @@
 #include "graphics/frame/picker.hpp"
 #include "graphics/pipelines/cube_pipeline.hpp"
 #include "graphics/pipelines/picker_pipeline.hpp"
-#include "graphics/frame/sobel_compute.hpp"
+#include "graphics/pipelines/sobel_pipeline.hpp"
+#include "graphics/frame/sobel_async_pass.hpp"
+#include "graphics/frame/sobel_types.hpp"
 #include "graphics/frame/swapchain_targets.hpp"
 #include "graphics/frame/vertex_types.hpp"
 #include "graphics/buffer_manager.hpp"
@@ -130,13 +132,11 @@ private:
     PickerPipeline picker_pipe_;
     FrameResources frame_resources_;
     Picker picker_;
-    SobelCompute sobel_;
+    SobelPipeline  sobel_pipe_;
+    SobelAsyncPass sobel_async_;
 
     VkCommandPool commandPool = VK_NULL_HANDLE;       // _3D family
     VkCommandPool computeCommandPool = VK_NULL_HANDLE; // CMP family
-    // Serializes async Sobel so shared sel_depth/edge are not rewritten mid-flight (VUID-09600).
-    VkFence sobel_done_fence_ = VK_NULL_HANDLE;
-    bool    sobel_fence_in_flight_ = false;
     FrameSync frame_sync_;
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
@@ -198,30 +198,6 @@ private:
     // when defer_present: leave color as attachment for async Sobel overlay
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
-
-    // Multi-layer async Sobel: each layer = depth redraw + compute + colored overlay.
-    // Layers paint additively (LOAD); gold is exclusive when selection is active.
-    struct SobelFrameRequest
-    {
-        enum class Mode {
-            SelectionGold,
-            ConfirmedTipsGreen,
-            CyanFrontier, // unconfirmed children of domain frontier
-            IncompleteTraceOrange
-        };
-        struct Layer
-        {
-            Mode mode = Mode::SelectionGold;
-            std::vector<uint32_t> instance_indices;
-        };
-        std::vector<Layer> layers;
-    };
-
-    void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
-                                       VkCommandBuffer graphics_cb,
-                                       VkSemaphore image_available,
-                                       VkSemaphore render_finished,
-                                       const SobelFrameRequest& req);
 
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot

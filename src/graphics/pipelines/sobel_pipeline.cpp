@@ -1,5 +1,5 @@
-﻿#include "graphics/pch.h"
-#include "graphics/frame/sobel_compute.hpp"
+#include "graphics/pch.h"
+#include "graphics/pipelines/sobel_pipeline.hpp"
 #include "graphics/frame/vertex_types.hpp"
 
 #include "graphics/gpu_prv_lib.h"
@@ -25,7 +25,7 @@ struct OverlayPC
 
 } // namespace
 
-void SobelCompute::create_images(const SobelComputeCreateInfo& info)
+void SobelPipeline::create_images(const SobelPipelineCreateInfo& info)
 {
     create_image(
         info.device, info.width, info.height, info.depth_format,
@@ -46,7 +46,7 @@ void SobelCompute::create_images(const SobelComputeCreateInfo& info)
                                    VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
-void SobelCompute::create_descriptors(VkDevice device)
+void SobelPipeline::create_descriptors(VkDevice device)
 {
     VkSamplerCreateInfo samp{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     samp.magFilter = VK_FILTER_NEAREST;
@@ -56,7 +56,7 @@ void SobelCompute::create_descriptors(VkDevice device)
     samp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     if (vkCreateSampler(device, &samp, nullptr, &depth_sampler_) != VK_SUCCESS ||
         vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS)
-        throw std::runtime_error("SobelCompute: samplers");
+        throw std::runtime_error("SobelPipeline: samplers");
 
     const DescriptorBinding compute_binds[] = {
         { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT },
@@ -79,13 +79,13 @@ void SobelCompute::create_descriptors(VkDevice device)
                                   &compute_set_) ||
         !allocate_descriptor_sets(device, descriptor_pool_, &overlay_set_layout_, 1,
                                   &overlay_set_))
-        throw std::runtime_error("SobelCompute: allocate descriptor sets");
+        throw std::runtime_error("SobelPipeline: allocate descriptor sets");
 
-    // Write once at create — never update while CBs are pending (VUID-03047).
+    // Write once at create � never update while CBs are pending (VUID-03047).
     write_static_descriptors_();
 }
 
-void SobelCompute::write_static_descriptors_()
+void SobelPipeline::write_static_descriptors_()
 {
     const DescriptorImageWrite compute_imgs[] = {
         { compute_set_, 0, sel_depth_view_, depth_sampler_,
@@ -104,7 +104,7 @@ void SobelCompute::write_static_descriptors_()
     write_descriptor_images(device_, &overlay_img, 1);
 }
 
-void SobelCompute::create_compute_pipeline(VkDevice device)
+void SobelPipeline::create_compute_pipeline(VkDevice device)
 {
     VkPushConstantRange pcr{};
     pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -120,7 +120,7 @@ void SobelCompute::create_compute_pipeline(VkDevice device)
     pipeline_ = create_pipeline(device, pci);
 }
 
-void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
+void SobelPipeline::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
                                               VkDescriptorSetLayout ubo_layout)
 {
     std::vector<uint8_t> vert_code, frag_code;
@@ -190,7 +190,7 @@ void SobelCompute::create_depth_only_pipeline(VkDevice device, VkFormat depth_fo
     destroy_shader_module(device, frag);
 }
 
-void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_format)
+void SobelPipeline::create_overlay_pipeline(VkDevice device, VkFormat color_format)
 {
     std::vector<uint8_t> vert_code, frag_code;
     load_shader_source("edge_overlay_vert.spv", vert_code);
@@ -241,32 +241,32 @@ void SobelCompute::create_overlay_pipeline(VkDevice device, VkFormat color_forma
     destroy_shader_module(device, frag);
 }
 
-void SobelCompute::create_sync(VkDevice device)
+void SobelPipeline::create_sync(VkDevice device)
 {
     VkSemaphoreCreateInfo sci{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     for (uint32_t i = 0; i < kMaxFrames; ++i)
     {
         if (vkCreateSemaphore(device, &sci, nullptr, &compute_finished_[i]) != VK_SUCCESS ||
             vkCreateSemaphore(device, &sci, nullptr, &graphics_to_compute_[i]) != VK_SUCCESS)
-            throw std::runtime_error("SobelCompute: per-frame semaphores");
+            throw std::runtime_error("SobelPipeline: per-frame semaphores");
     }
 }
 
-VkSemaphore SobelCompute::graphics_to_compute(uint32_t frame_index) const
+VkSemaphore SobelPipeline::graphics_to_compute(uint32_t frame_index) const
 {
     return graphics_to_compute_[frame_index % kMaxFrames];
 }
 
-VkSemaphore SobelCompute::compute_finished(uint32_t frame_index) const
+VkSemaphore SobelPipeline::compute_finished(uint32_t frame_index) const
 {
     return compute_finished_[frame_index % kMaxFrames];
 }
 
-void SobelCompute::create(const SobelComputeCreateInfo& info)
+void SobelPipeline::create(const SobelPipelineCreateInfo& info)
 {
     if (!info.device || !info.mem_props || !info.frame_ubo_layout ||
         info.width == 0 || info.height == 0)
-        throw std::runtime_error("SobelCompute::create: invalid args");
+        throw std::runtime_error("SobelPipeline::create: invalid args");
 
     device_ = info.device;
     width_ = info.width;
@@ -283,7 +283,7 @@ void SobelCompute::create(const SobelComputeCreateInfo& info)
     create_sync(info.device);
 }
 
-void SobelCompute::destroy(VkDevice device)
+void SobelPipeline::destroy(VkDevice device)
 {
     if (!device)
         return;
@@ -331,15 +331,15 @@ void SobelCompute::destroy(VkDevice device)
     if (sel_depth_image_) { destroy_image(device, sel_depth_image_, sel_depth_memory_); sel_depth_image_ = VK_NULL_HANDLE; sel_depth_memory_ = VK_NULL_HANDLE; }
 }
 
-void SobelCompute::recreate(const SobelComputeCreateInfo& info)
+void SobelPipeline::recreate(const SobelPipelineCreateInfo& info)
 {
     destroy(info.device);
     create(info);
 }
 
-void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
+void SobelPipeline::record_selection_depth(const SelectionDepthDrawParams& p)
 {
-    // sel_depth → DEPTH_ATTACHMENT
+    // sel_depth ? DEPTH_ATTACHMENT
     cmd_image_barrier_aspect(p.cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   0, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -390,11 +390,11 @@ void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
     vkCmdEndRendering(p.cmd);
 }
 
-void SobelCompute::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
+void SobelPipeline::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // Execution dependency only for depth write â†’ external/compute. Keep DEPTH_ATTACHMENT
-    // layout; compute CB performs ATTACHMENT â†’ SHADER_READ (valid stages on CMP queue).
+    // Execution dependency only for depth write → external/compute. Keep DEPTH_ATTACHMENT
+    // layout; compute CB performs ATTACHMENT → SHADER_READ (valid stages on CMP queue).
     // Avoid dstStage=COMPUTE on a pure-graphics family (can drop the barrier).
     cmd_image_barrier_aspect(cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -407,11 +407,11 @@ void SobelCompute::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
 }
 
-void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float threshold)
+void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float threshold)
 {
     const bool split = (graphics_family_ != compute_family_);
 
-    // Acquire (if split) + layout ATTACHMENT → SHADER_READ for sampling (CMP-safe stages).
+    // Acquire (if split) + layout ATTACHMENT ? SHADER_READ for sampling (CMP-safe stages).
     cmd_image_barrier_aspect(cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -423,7 +423,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 
     // Descriptors written once in create (write_static_descriptors_).
 
-    // Discard prior contents → GENERAL for storage write (no FRAGMENT stages on CMP).
+    // Discard prior contents ? GENERAL for storage write (no FRAGMENT stages on CMP).
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                   0, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -443,7 +443,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 
     vkCmdDispatch(cmd, (width_ + 7) / 8, (height_ + 7) / 8, 1);
 
-    // Make edge write available; keep GENERAL — graphics does GENERAL→SHADER_READ after wait.
+    // Make edge write available; keep GENERAL � graphics does GENERAL?SHADER_READ after wait.
     // Release ownership to graphics when families differ (dst stages = NONE on CMP queue).
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
@@ -454,7 +454,7 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 
     // Return sel_depth ownership to graphics. Layout can stay SHADER_READ; next graphics
-    // pass uses UNDEFINED → DEPTH_ATTACHMENT (discard).
+    // pass uses UNDEFINED ? DEPTH_ATTACHMENT (discard).
     if (split)
     {
         cmd_image_barrier_aspect(cmd, sel_depth_image_,
@@ -467,10 +467,10 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
     }
 }
 
-void SobelCompute::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
+void SobelPipeline::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // After compute_finished wait: own edge on graphics, GENERAL → SHADER_READ for sampling.
+    // After compute_finished wait: own edge on graphics, GENERAL ? SHADER_READ for sampling.
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   0, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
@@ -480,7 +480,7 @@ void SobelCompute::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 }
 
-void SobelCompute::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
+void SobelPipeline::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
                                   const float highlight_rgba[4])
 {
     // Descriptors written once in create (write_static_descriptors_).

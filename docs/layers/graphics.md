@@ -28,7 +28,9 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `frame/` | Sync, resources, recorder, presenter, descriptors, picker, Sobel, swapchain targets, task graph |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
-| `frame/async_sobel_submit.cpp` | Multi-CB async Sobel submit + fence serialization |
+| `pipelines/sobel_pipeline.*` | Depth-only + compute + overlay PSOs, images, record helpers |
+| `frame/sobel_async_pass.*` | Multi-queue Sobel submit (_3D↔CMP) + fence; context API |
+| `frame/sobel_types.hpp` | `SobelFrameRequest` modes/layers |
 | `frame/gpu_frame_publish.cpp` | Triple-buffer `publish_frame` / `apply_published_frame` |
 | `frame/selection_state.cpp` | Selection, hover, multi-tx filter, detail refill pin |
 | `frame/frame_shared_state.*` | Debug drawer / mesh arena / viewProj shared by loop + record |

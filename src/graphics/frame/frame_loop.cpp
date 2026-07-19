@@ -258,7 +258,7 @@ void GraphicsSystem::render()
     // Sobel mode matrix (K5): selection gold wins; else confirmed-tip green if kill-switch on.
     SobelFrameRequest sobel_req{};
     bool want_sobel = false;
-    if (sobel_.ready())
+    if (sobel_pipe_.ready())
     {
         uint32_t selected_instance = ~0u;
         {
@@ -332,8 +332,31 @@ void GraphicsSystem::render()
 
     if (want_sobel)
     {
-        submit_frame_with_async_sobel(begin.frame_index, acq.image_index, commandBuffer,
-                                      acq.image_available, acq.render_finished, sobel_req);
+        FramesInFlight& slot = inFlightFrames[begin.frame_index % MAX_FRAMES_IN_FLIGHT];
+        SobelAsyncSubmitContext sctx{};
+        sctx.device = device;
+        sctx.graphics_queue = queues_.get(QueueType::_3D);
+        sctx.compute_queue = queues_.get(QueueType::CMP);
+        sctx.width = width;
+        sctx.height = height;
+        sctx.main_graphics_cb = commandBuffer;
+        sctx.compute_cb = slot.computeCommandBuffer;
+        sctx.overlay_cb = slot.overlayCommandBuffer;
+        sctx.layer_depth_cb = slot.layerDepthCommandBuffer;
+        sctx.image_available = acq.image_available;
+        sctx.render_finished = acq.render_finished;
+        sctx.frame_ubo_set = frame_descriptors_.set();
+        sctx.vertex_buffer = frame_resources_.vertex_buffer();
+        sctx.instance_buffer = frame_resources_.instance_buffer();
+        sctx.index_buffer = frame_resources_.index_buffer();
+        sctx.index_count = 36;
+        sctx.swapchain_color_view = swapchain_targets_.color_view(acq.image_index);
+        sctx.swapchain_image = swapchainImages[acq.image_index];
+        sctx.swapchain = swapchain;
+        sctx.recorder = &frame_recorder_;
+        sctx.frame_sync = &frame_sync_;
+        sctx.presenter = &frame_presenter_;
+        sobel_async_.submit(sobel_pipe_, sctx, begin.frame_index, acq.image_index, sobel_req);
     }
     else
     {

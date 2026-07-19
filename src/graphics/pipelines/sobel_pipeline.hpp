@@ -1,14 +1,15 @@
 #pragma once
 
-// Selection / confirmed-tip depth pass + async Sobel on CMP + edge overlay on _3D.
-// Scene depth is not used — only the requested instances are redrawn into sel_depth_.
+// Sobel pipeline assets: selection depth-only draw + compute edge detect + overlay PSOs.
+// Images/descriptors live here; multi-queue submit is SobelAsyncPass (frame/).
+// Scene depth is not used — only requested instances are redrawn into sel_depth_.
 #include "graphics/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
 
-struct SobelComputeCreateInfo
+struct SobelPipelineCreateInfo
 {
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties* mem_props = nullptr;
@@ -39,12 +40,12 @@ struct SelectionDepthDrawParams
 // Soft safety ceiling (not a product limit of 32). All eligible cubes may be highlighted.
 static constexpr uint32_t kMaxSobelInstances = 4096;
 
-class SobelCompute
+class SobelPipeline
 {
 public:
-    void create(const SobelComputeCreateInfo& info);
+    void create(const SobelPipelineCreateInfo& info);
     void destroy(VkDevice device);
-    void recreate(const SobelComputeCreateInfo& info);
+    void recreate(const SobelPipelineCreateInfo& info);
 
     // Clear + redraw N instances into sel_depth_ (depth-only). Leaves sel_depth_ as DEPTH_ATTACHMENT.
     // Single BeginRendering: one LOAD_OP_CLEAR then N DrawIndexed — no re-clear between draws.
@@ -74,7 +75,7 @@ public:
     bool ready() const { return pipeline_ != VK_NULL_HANDLE && depth_only_pipeline_ != VK_NULL_HANDLE; }
 
 private:
-    void create_images(const SobelComputeCreateInfo& info);
+    void create_images(const SobelPipelineCreateInfo& info);
     void create_descriptors(VkDevice device);
     void write_static_descriptors_();
     void create_compute_pipeline(VkDevice device);
