@@ -115,6 +115,7 @@
     <ClCompile Include="..\src\network\alephium\alephium_adapter.cpp" />
     <ClCompile Include="..\src\network\alephium\main_chain_cache.cpp" />
     <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp" />
+    <ClCompile Include="..\src\network\fake\fake_chain_simulator.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\network\commands.h" />
@@ -124,6 +125,7 @@
     <ClInclude Include="..\src\network\alephium\alephium_adapter.hpp" />
     <ClInclude Include="..\src\network\alephium\main_chain_cache.hpp" />
     <ClInclude Include="..\src\network\alephium\alph_detail_store.hpp" />
+    <ClInclude Include="..\src\network\fake\fake_chain_simulator.hpp" />
     <ClInclude Include="..\src\domain\alph_block.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

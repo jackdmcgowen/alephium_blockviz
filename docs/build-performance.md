@@ -1,5 +1,7 @@
 # Build performance (MSVC / sln)
 
+**Status: active.** Layer map: [docs/layers/README.md](layers/README.md). Graphics rebuild notes also linked from [layers/graphics.md](layers/graphics.md).
+
 ## Goals
 
 - Faster **cold** Debug|x64 rebuilds (target ~2× vs pre-PCH baseline).

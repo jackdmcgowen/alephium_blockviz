@@ -50,8 +50,11 @@ void BlockScene::reset()
 
 bool BlockScene::add_block(cJSON* block)
 {
-    AlphBlock alph_block(block);
+    return add_block(AlphBlock(block));
+}
 
+bool BlockScene::add_block(const AlphBlock& alph_block)
+{
     std::lock_guard<std::mutex> lock(mu_);
 
     if (alph_block.hash.empty())

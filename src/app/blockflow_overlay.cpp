@@ -290,7 +290,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         domain_i = 0;
     if (ImGui::BeginCombo("##domain", labels[domain_i]))
     {
-        for (int i = 0; i < 2; ++i) // Mainnet + Testnet only
+        for (int i = 0; i < 3; ++i) // Mainnet + Testnet + Debug (FakeChain)
         {
             const bool selected = (domain_i == i);
             if (ImGui::Selectable(labels[i], selected))
@@ -309,13 +309,9 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
             }
             if (selected)
                 ImGui::SetItemDefaultFocus();
+            if (i == static_cast<int>(NetworkDomain::Debug) && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Offline FakeChain simulator (no HTTP)");
         }
-        // Debug: visible but disabled
-        ImGui::BeginDisabled(true);
-        ImGui::Selectable(labels[2], false);
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Simulator planned â€” not available yet");
         ImGui::EndCombo();
     }
 

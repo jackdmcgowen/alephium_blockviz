@@ -40,6 +40,8 @@ public:
     void reset();
 
     bool add_block(cJSON* block);
+    // Synthetic / FakeChain path (no cJSON). Same semantics as JSON add.
+    bool add_block(const AlphBlock& alph_block);
     bool remove_block(const std::string& hash);
 
     // Sequential frontier: H_c+1 default; chain_walk allows validated multi-step jump.
