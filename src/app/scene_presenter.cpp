@@ -161,32 +161,66 @@ void ScenePresenter::collect_walk_force_hashes_(std::unordered_set<std::string>&
     }
 }
 
-std::string ScenePresenter::next_walk_dep_(
-    const std::string& node_hash,
-    const std::unordered_set<std::string>& visited,
-    const std::unordered_map<std::string, glm::vec3>& positions) const
+int ScenePresenter::chain_idx_for_hash_(const std::string& hash) const
 {
+    if (hash.empty())
+        return 255;
+    if (auto d = scene_.detail_store().get(hash))
+        return static_cast<int>(d->chain_idx()) & 15;
+    if (auto n = scene_.graph().get(hash))
+    {
+        if (n->lane < 16)
+            return static_cast<int>(n->lane);
+    }
+    return 255; // unknown → sort last
+}
+
+std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_hash) const
+{
+    std::vector<std::string> out;
     if (node_hash.empty())
-        return {};
+        return out;
     auto d = scene_.detail_store().get(node_hash);
     if (!d || d->deps.empty())
+        return out;
+    struct Item
+    {
+        std::string hash;
+        int         shard = 255;
+    };
+    std::vector<Item> items;
+    items.reserve(d->deps.size());
+    for (const std::string& dep : d->deps)
+    {
+        if (dep.empty())
+            continue;
+        items.push_back(Item{ dep, chain_idx_for_hash_(dep) });
+    }
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
+        if (a.shard != b.shard)
+            return a.shard < b.shard;
+        return a.hash < b.hash;
+    });
+    out.reserve(items.size());
+    for (const Item& it : items)
+        out.push_back(it.hash);
+    return out;
+}
+
+std::string ScenePresenter::next_walk_dep_for_slot_(
+    const std::string& node_hash, int slot,
+    const std::unordered_set<std::string>& visited) const
+{
+    // Slot s always means the s-th entry in shard-sorted deps — never "first free".
+    if (node_hash.empty() || slot < 0)
         return {};
-    // Prefer first dep present in layout positions (stable order); skip visited.
-    for (const std::string& dep : d->deps)
-    {
-        if (dep.empty() || visited.count(dep) != 0)
-            continue;
-        if (positions.find(dep) != positions.end())
-            return dep;
-    }
-    // Missing-in-layout first dep still named → caller may ghost-die.
-    for (const std::string& dep : d->deps)
-    {
-        if (dep.empty() || visited.count(dep) != 0)
-            continue;
-        return dep; // may not be in positions
-    }
-    return {};
+    const std::vector<std::string> sorted = sorted_deps_(node_hash);
+    if (slot >= static_cast<int>(sorted.size()))
+        return {};
+    const std::string& dep = sorted[static_cast<size_t>(slot)];
+    if (dep.empty() || visited.count(dep) != 0)
+        return {};
+    return dep;
 }
 
 void ScenePresenter::restart_dep_walk_(
@@ -218,13 +252,10 @@ void ScenePresenter::restart_dep_walk_(
     const float stagger = st.walk_slot_stagger_sec > 0.f ? st.walk_slot_stagger_sec
                                                          : kWalkSlotStagger;
 
-    // hop0 TRACE: selected H → each dep[i] so all 2G−1 slots are visible.
-    std::vector<std::string> dep_roots;
-    if (auto d = scene_.detail_store().get(root_hash))
-    {
-        dep_roots = d->deps;
+    // hop0 TRACE: H → shard-sorted deps[s]; slot s sticks for the whole depth.
+    std::vector<std::string> dep_roots = sorted_deps_(root_hash);
+    if (!dep_roots.empty())
         walk_seeded_from_detail_ = true;
-    }
     walk_visited_sobel_[root_hash] = 1.f;
 
     const int nslots = kWalkSlotCount;
@@ -233,7 +264,7 @@ void ScenePresenter::restart_dep_walk_(
     {
         DepWalkSlot& s = walk_slots_[static_cast<size_t>(i)];
         s = DepWalkSlot{};
-        s.slot = i;
+        s.slot = i; // permanent: always the i-th shard-sorted dep chain
         s.delay = stagger * static_cast<float>(i);
         s.state = WalkSlotState::Pending;
         s.state_start_sec = now;
@@ -380,8 +411,9 @@ void ScenePresenter::tick_dep_walk_(
             }
             s.visited.insert(s.to_hash);
             s.hops_done += 1;
+            // Sticky slot: always the s-th shard-sorted dep of the current tip.
             const std::string next =
-                next_walk_dep_(s.to_hash, s.visited, positions);
+                next_walk_dep_for_slot_(s.to_hash, s.slot, s.visited);
             if (next.empty())
             {
                 s.state = WalkSlotState::Dying;
@@ -1521,7 +1553,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             int stagger_i = 0;
             const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
 
-            for (const std::string& dep_hash : block.deps)
+            // Same shard-sorted order as TRACE walk slots.
+            const std::vector<std::string> gold_deps = sorted_deps_(block.hash);
+            const std::vector<std::string>& dep_list =
+                gold_deps.empty() ? block.deps : gold_deps;
+            for (const std::string& dep_hash : dep_list)
             {
                 auto dep_it = block_positions.find(dep_hash);
                 if (dep_it != block_positions.end() && drawn.count(dep_hash) != 0)

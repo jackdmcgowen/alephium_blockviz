@@ -140,10 +140,13 @@ private:
                         const std::unordered_map<std::string, glm::vec3>& positions);
     void draw_dep_walk_(DebugDrawer& debug, float tip_len, float tip_rad, float shaft_r,
                         float clearance);
-    // First live+positioned dep of node, skipping visited; empty if none.
-    std::string next_walk_dep_(const std::string& node_hash,
-                               const std::unordered_set<std::string>& visited,
-                               const std::unordered_map<std::string, glm::vec3>& positions) const;
+    // Shard (chain_idx) for hash; 255 if unknown.
+    int chain_idx_for_hash_(const std::string& hash) const;
+    // Deps of node sorted by chain_idx then hash (stable slot order).
+    std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
+    // Sticky slot index into sorted_deps_; never "first available".
+    std::string next_walk_dep_for_slot_(const std::string& node_hash, int slot,
+                                        const std::unordered_set<std::string>& visited) const;
     void collect_walk_force_hashes_(std::unordered_set<std::string>& out) const;
     bool dep_walk_active_() const;
 
