@@ -1,5 +1,6 @@
 ﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
+#include "graphics/gpu_prv_lib.h"
 
 #include <queue>
 #include <stdexcept>
@@ -167,23 +168,14 @@ void FrameTaskGraph::emit_barrier(VkCommandBuffer cmd, VkImage image, const Imag
     if (!cmd || image == VK_NULL_HANDLE)
         return;
 
-    VkImageMemoryBarrier2 b{};
-    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    b.srcStageMask = e.src_stage ? e.src_stage : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-    b.srcAccessMask = e.src_access;
-    b.dstStageMask = e.dst_stage ? e.dst_stage : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-    b.dstAccessMask = e.dst_access;
-    b.oldLayout = e.old_layout;
-    b.newLayout = e.new_layout;
-    b.srcQueueFamilyIndex = e.src_queue_family;
-    b.dstQueueFamilyIndex = e.dst_queue_family;
-    b.image = image;
-    b.subresourceRange = { e.aspect, 0, 1, 0, 1 };
+    // Zero stages defaulted here (graph-only); shared helper does not invent stages.
+    const VkPipelineStageFlags2 src =
+        e.src_stage ? e.src_stage : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    const VkPipelineStageFlags2 dst =
+        e.dst_stage ? e.dst_stage : VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
 
-    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &b;
-    vkCmdPipelineBarrier2(cmd, &dep);
+    cmd_image_barrier_aspect(cmd, image, e.old_layout, e.new_layout, e.src_access, e.dst_access,
+                             src, dst, e.aspect, e.src_queue_family, e.dst_queue_family);
 }
 
 std::string FrameTaskGraph::debug_order_string() const

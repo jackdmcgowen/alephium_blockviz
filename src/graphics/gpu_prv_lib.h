@@ -90,6 +90,35 @@ void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory);
 VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 void destroy_image_view(VkDevice device, VkImageView imageview);
 
+// Layout transition via VkImageMemoryBarrier2 (shared by _3D + CMP paths).
+// Queue families default to IGNORED (no ownership transfer).
+void cmd_image_barrier(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout old_layout,
+    VkImageLayout new_layout,
+    VkAccessFlags2 src_access,
+    VkAccessFlags2 dst_access,
+    VkPipelineStageFlags2 src_stage,
+    VkPipelineStageFlags2 dst_stage,
+    VkImageSubresourceRange range,
+    uint32_t src_queue_family = VK_QUEUE_FAMILY_IGNORED,
+    uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED);
+
+// Convenience: single mip / single layer for the given aspect.
+void cmd_image_barrier_aspect(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout old_layout,
+    VkImageLayout new_layout,
+    VkAccessFlags2 src_access,
+    VkAccessFlags2 dst_access,
+    VkPipelineStageFlags2 src_stage,
+    VkPipelineStageFlags2 dst_stage,
+    VkImageAspectFlags aspect,
+    uint32_t src_queue_family = VK_QUEUE_FAMILY_IGNORED,
+    uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED);
+
   //shader.cpp
 void load_shader_source(const char* const   filename,
     std::vector<uint8_t>& src);

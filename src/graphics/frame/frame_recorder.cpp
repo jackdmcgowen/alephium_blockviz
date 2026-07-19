@@ -2,37 +2,13 @@
 #include "graphics/frame/frame_recorder.hpp"
 
 #include "graphics/debug/debug_drawer.h"
+#include "graphics/gpu_prv_lib.h"
 #include "graphics/mesh_arena.h"
 
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 
 #include <stdexcept>
-
-static void pipeline_barrier(VkCommandBuffer buffer, VkImage image,
-    VkImageLayout oldLayout, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 srcStageMask,
-    VkImageLayout newLayout, VkAccessFlags2 dstAccessMask, VkPipelineStageFlags2 dstStageMask,
-    VkImageSubresourceRange subresourceRange)
-{
-    VkImageMemoryBarrier2 barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    barrier.srcAccessMask = srcAccessMask;
-    barrier.srcStageMask = srcStageMask;
-    barrier.dstAccessMask = dstAccessMask;
-    barrier.dstStageMask = dstStageMask;
-    barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange = subresourceRange;
-
-    VkDependencyInfo depInfo{};
-    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    depInfo.imageMemoryBarrierCount = 1;
-    depInfo.pImageMemoryBarriers = &barrier;
-    vkCmdPipelineBarrier2(buffer, &depInfo);
-}
 
 void FrameRecorder::record_main(const FrameRecordParams& p)
 {
@@ -81,26 +57,25 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
     {
         if (msaa && p.color_image != VK_NULL_HANDLE)
         {
-            pipeline_barrier(p.cmd, p.color_image,
-                VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            cmd_image_barrier(p.cmd, p.color_image,
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
         }
         if (p.resolve_color_image != VK_NULL_HANDLE || (!msaa && p.color_image != VK_NULL_HANDLE))
         {
             VkImage img = msaa ? p.resolve_color_image : p.color_image;
-            pipeline_barrier(p.cmd, img,
-                VK_IMAGE_LAYOUT_UNDEFINED, 0, 0,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            cmd_image_barrier(p.cmd, img,
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
         }
-        pipeline_barrier(p.cmd, p.depth_image,
-            VK_IMAGE_LAYOUT_UNDEFINED, 0, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+        cmd_image_barrier(p.cmd, p.depth_image,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            0, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
             { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
     }
 
@@ -172,10 +147,10 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
 
 void FrameRecorder::transition_color_to_present(VkCommandBuffer cmd, VkImage color_image)
 {
-    pipeline_barrier(cmd, color_image,
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+    cmd_image_barrier(cmd, color_image,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
         { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 }
 

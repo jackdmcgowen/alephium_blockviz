@@ -23,31 +23,6 @@ struct OverlayPC
     float highlight[4];
 };
 
-void image_barrier(VkCommandBuffer cmd, VkImage image,
-                   VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access,
-                   VkImageLayout old_layout, VkImageLayout new_layout,
-                   VkImageAspectFlags aspect,
-                   uint32_t src_family = VK_QUEUE_FAMILY_IGNORED,
-                   uint32_t dst_family = VK_QUEUE_FAMILY_IGNORED)
-{
-    VkImageMemoryBarrier2 b{};
-    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    b.srcStageMask = src_stage;
-    b.srcAccessMask = src_access;
-    b.dstStageMask = dst_stage;
-    b.dstAccessMask = dst_access;
-    b.oldLayout = old_layout;
-    b.newLayout = new_layout;
-    b.srcQueueFamilyIndex = src_family;
-    b.dstQueueFamilyIndex = dst_family;
-    b.image = image;
-    b.subresourceRange = { aspect, 0, 1, 0, 1 };
-    VkDependencyInfo dep{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &b;
-    vkCmdPipelineBarrier2(cmd, &dep);
-}
 } // namespace
 
 void SobelCompute::create_images(const SobelComputeCreateInfo& info)
@@ -364,12 +339,12 @@ void SobelCompute::recreate(const SobelComputeCreateInfo& info)
 
 void SobelCompute::record_selection_depth(const SelectionDepthDrawParams& p)
 {
-    // sel_depth â†’ DEPTH_ATTACHMENT
-    image_barrier(p.cmd, sel_depth_image_,
-                  VK_PIPELINE_STAGE_2_NONE, 0,
-                  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    // sel_depth → DEPTH_ATTACHMENT
+    cmd_image_barrier_aspect(p.cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  0, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_NONE,
+                  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                   VK_IMAGE_ASPECT_DEPTH_BIT);
 
     VkRenderingAttachmentInfo depth_att{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -421,12 +396,12 @@ void SobelCompute::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
     // Execution dependency only for depth write â†’ external/compute. Keep DEPTH_ATTACHMENT
     // layout; compute CB performs ATTACHMENT â†’ SHADER_READ (valid stages on CMP queue).
     // Avoid dstStage=COMPUTE on a pure-graphics family (can drop the barrier).
-    image_barrier(cmd, sel_depth_image_,
+    cmd_image_barrier_aspect(cmd, sel_depth_image_,
+                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 0,
                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0,
-                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                  VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                   VK_IMAGE_ASPECT_DEPTH_BIT,
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED,
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
@@ -436,24 +411,23 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 {
     const bool split = (graphics_family_ != compute_family_);
 
-    // Acquire (if split) + layout ATTACHMENT â†’ SHADER_READ for sampling (CMP-safe stages).
-    image_barrier(cmd, sel_depth_image_,
-                  VK_PIPELINE_STAGE_2_NONE, 0,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+    // Acquire (if split) + layout ATTACHMENT → SHADER_READ for sampling (CMP-safe stages).
+    cmd_image_barrier_aspect(cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  0, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_PIPELINE_STAGE_2_NONE, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_IMAGE_ASPECT_DEPTH_BIT,
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED,
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
 
     // Descriptors written once in create (write_static_descriptors_).
 
-    // Discard prior contents â†’ GENERAL for storage write (no FRAGMENT stages on CMP).
-    image_barrier(cmd, edge_image_,
-                  VK_PIPELINE_STAGE_2_NONE, 0,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+    // Discard prior contents → GENERAL for storage write (no FRAGMENT stages on CMP).
+    cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                  0, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_NONE, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_IMAGE_ASPECT_COLOR_BIT);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
@@ -469,25 +443,25 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 
     vkCmdDispatch(cmd, (width_ + 7) / 8, (height_ + 7) / 8, 1);
 
-    // Make edge write available; keep GENERAL â€” graphics does GENERALâ†’SHADER_READ after wait.
+    // Make edge write available; keep GENERAL — graphics does GENERAL→SHADER_READ after wait.
     // Release ownership to graphics when families differ (dst stages = NONE on CMP queue).
-    image_barrier(cmd, edge_image_,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_NONE, 0,
+    cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, 0,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_NONE,
                   VK_IMAGE_ASPECT_COLOR_BIT,
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED,
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 
     // Return sel_depth ownership to graphics. Layout can stay SHADER_READ; next graphics
-    // pass uses UNDEFINED â†’ DEPTH_ATTACHMENT (discard).
+    // pass uses UNDEFINED → DEPTH_ATTACHMENT (discard).
     if (split)
     {
-        image_barrier(cmd, sel_depth_image_,
-                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                      VK_PIPELINE_STAGE_2_NONE, 0,
+        cmd_image_barrier_aspect(cmd, sel_depth_image_,
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 0,
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_NONE,
                       VK_IMAGE_ASPECT_DEPTH_BIT,
                       compute_family_, graphics_family_);
     }
@@ -496,11 +470,11 @@ void SobelCompute::record_dispatch(VkCommandBuffer cmd, float strength, float th
 void SobelCompute::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // After compute_finished wait: own edge on graphics, GENERAL â†’ SHADER_READ for sampling.
-    image_barrier(cmd, edge_image_,
-                  VK_PIPELINE_STAGE_2_NONE, 0,
-                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+    // After compute_finished wait: own edge on graphics, GENERAL → SHADER_READ for sampling.
+    cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  0, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_PIPELINE_STAGE_2_NONE, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                   VK_IMAGE_ASPECT_COLOR_BIT,
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED,
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
