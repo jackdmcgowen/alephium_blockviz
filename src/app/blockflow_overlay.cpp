@@ -1,5 +1,6 @@
 ﻿#include "app/pch.h"
 #include "app/blockflow_overlay.hpp"
+#include "app/user_prefs.hpp"
 #include "app/ui_chrome.hpp"
 #include "network/network_domain.hpp"
 
@@ -47,6 +48,21 @@ void BlockflowOverlay::set_domain_urls(std::vector<std::string> urls)
 void BlockflowOverlay::set_initial_domain(NetworkDomain d)
 {
     domain_ = d;
+}
+
+void BlockflowOverlay::set_filter_multi_tx(bool enabled)
+{
+    filter_multi_tx_ = enabled;
+    engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+}
+
+void BlockflowOverlay::save_prefs() const
+{
+    UserPrefs p;
+    p.domain = domain_;
+    p.filter_multi_tx = filter_multi_tx_;
+    if (!save_user_prefs(p))
+        std::printf("[app] warning: failed to save %s\n", kUserPrefsPath);
 }
 
 std::string BlockflowOverlay::resolve_url_(NetworkDomain d) const
@@ -304,6 +320,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
                         domain_ = next;
                         session_start_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
                         camera_.reattach_timeline();
+                        save_prefs();
                     }
                 }
             }
@@ -434,7 +451,10 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
         if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
+        {
             engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+            save_prefs();
+        }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
 

@@ -66,6 +66,7 @@ src/graphics/shaders/*.spv
 imgui.ini
 debug.log
 *.ini
+user_prefs.json
 
 # OS junk
 Thumbs.db

@@ -122,6 +122,88 @@ bool BlockScene::remove_block(const std::string& hash)
     return true;
 }
 
+size_t BlockScene::prune(int64_t min_timestamp_ms, size_t max_nodes)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+
+    std::unordered_set<NodeId> protect;
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (!confirmed_hash_[i].empty())
+            protect.insert(confirmed_hash_[i]);
+        if (!pending_hash_[i].empty())
+            protect.insert(pending_hash_[i]);
+        for (const NodeId& h : frontier_walk_[i])
+            if (!h.empty())
+                protect.insert(h);
+    }
+
+    std::vector<NodeId> drop;
+    const auto snap = graph_.nodes_snapshot(); // sorts; holds no scene mu_ internally but graph has own mu
+    // nodes_snapshot locks graph mu_ — we already hold scene mu_ which orders: scene then graph in other paths?
+    // BlockScene methods always take mu_ then call graph_ which takes its own mu_ — OK (different mutexes).
+
+    for (const GraphNode& n : snap)
+    {
+        if (protect.count(n.id))
+            continue;
+        if (min_timestamp_ms > 0 && n.timestamp_ms > 0 && n.timestamp_ms < min_timestamp_ms)
+            drop.push_back(n.id);
+    }
+
+    // Count cap: drop oldest non-protected after time prune.
+    if (max_nodes > 0)
+    {
+        std::vector<GraphNode> remain;
+        remain.reserve(snap.size());
+        std::unordered_set<NodeId> dropping(drop.begin(), drop.end());
+        for (const GraphNode& n : snap)
+        {
+            if (dropping.count(n.id))
+                continue;
+            remain.push_back(n);
+        }
+        if (remain.size() > max_nodes)
+        {
+            std::sort(remain.begin(), remain.end(),
+                      [](const GraphNode& a, const GraphNode& b) {
+                          if (a.timestamp_ms != b.timestamp_ms)
+                              return a.timestamp_ms < b.timestamp_ms;
+                          return a.id < b.id;
+                      });
+            size_t need = remain.size() - max_nodes;
+            for (const GraphNode& n : remain)
+            {
+                if (need == 0)
+                    break;
+                if (protect.count(n.id))
+                    continue;
+                drop.push_back(n.id);
+                --need;
+            }
+        }
+    }
+
+    if (drop.empty())
+        return 0;
+
+    GraphDelta delta;
+    delta.remove_nodes = drop;
+    graph_.apply(delta);
+    detail_store_.remove_many(drop);
+    for (const NodeId& id : drop)
+    {
+        erase_confirmed_unlocked_(id);
+        uncle_set_.erase(id);
+    }
+    feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
+                               [&](const RecentFeedItem& b) {
+                                   return std::find(drop.begin(), drop.end(), b.hash) != drop.end();
+                               }),
+                feed_.end());
+    return drop.size();
+}
+
 void BlockScene::mark_uncle(const NodeId& hash)
 {
     if (hash.empty())

@@ -150,6 +150,24 @@ void test_graph_lane()
     expect(n.has_value() && n->lane == 14, "lane 14 for 3->2");
     expect(n->height == 1, "height 1");
 }
+
+void test_prune_protects_frontier()
+{
+    std::printf("\n== prune time + protect frontier ==\n");
+    BlockScene scene;
+    AlphBlock oldb = make_block("old", 0, 0, 1);
+    oldb.timestamp = 1000;
+    AlphBlock tipb = make_block("tip", 0, 0, 2);
+    tipb.timestamp = 9'000'000;
+    scene.add_block(oldb);
+    scene.add_block(tipb);
+    scene.mark_confirmed("tip", /*lane=*/0, 2, false);
+    const size_t n = scene.prune(/*min_ts=*/5'000'000, /*max=*/0);
+    expect(n >= 1, "pruned at least old block");
+    expect(!scene.graph().contains("old"), "old dropped");
+    expect(scene.graph().contains("tip"), "frontier tip protected");
+    expect(scene.confirmed_tip_hash(0) == "tip", "tip still confirmed");
+}
 } // namespace
 
 int main()
@@ -161,6 +179,7 @@ int main()
     test_detail_slim_pin();
     test_detail_via_scene();
     test_graph_lane();
+    test_prune_protects_frontier();
 
     std::printf("\n%s: %d failure(s)\n", g_fails ? "FAILED" : "PASSED", g_fails);
     return g_fails ? 1 : 0;

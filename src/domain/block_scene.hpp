@@ -44,6 +44,11 @@ public:
     bool add_block(const AlphBlock& alph_block);
     bool remove_block(const std::string& hash);
 
+    // Retention: drop old/excess nodes from graph, detail store, confirmed bag, feed.
+    // Keeps per-lane confirmed frontier tips and pending tips. Returns removed count.
+    // min_timestamp_ms <= 0 skips time filter; max_nodes == 0 skips count cap.
+    size_t prune(int64_t min_timestamp_ms, size_t max_nodes);
+
     // Sequential frontier: H_c+1 default; chain_walk allows validated multi-step jump.
     // Bag membership always records proven main for solid drawing.
     void mark_confirmed(const NodeId& hash);

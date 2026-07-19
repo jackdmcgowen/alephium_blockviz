@@ -1,5 +1,6 @@
 ﻿#include "network/pch.h"
 #include "network/alephium/network_poller.hpp"
+#include "domain/alph_block.hpp"
 
 #include <curl/curl.h>
 #include <chrono>
@@ -11,7 +12,8 @@ extern "C" CURL* curl;
 extern const char* baseUrl;
 
 NetworkPoller::NetworkPoller(BlockScene& scene, IEngine& engine)
-    : adapter_(scene, engine)
+    : scene_(scene)
+    , adapter_(scene, engine)
 {
 }
 
@@ -88,6 +90,18 @@ void NetworkPoller::thread_main()
 
         // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
+
+        // Retention: keep ~2× lookback window and a soft node cap (protects frontier tips).
+        {
+            const int64_t look = adapter_.lookback_ms() > 0
+                                     ? adapter_.lookback_ms()
+                                     : static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+            const int64_t min_ts = now - look * 2;
+            const size_t removed = scene_.prune(min_ts, /*max_nodes=*/12000);
+            if (removed > 0)
+                std::printf("[net] prune removed=%zu (min_ts window 2x lookback)\n", removed);
+        }
+
         adapter_.publish_hud(domain_, base_url_copy_.c_str(), /*switching=*/false);
 
         for (int i = 0; i < 10 && running_; ++i)

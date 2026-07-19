@@ -35,17 +35,11 @@ main / Win32 / config.json
 | **Engine** | `blockviz_engine` | [engine.md](engine.md) |
 | **Graphics** | `graphics` | [graphics.md](graphics.md) |
 | **Network** | `network` | [network.md](network.md) |
+| **Domain** | (sources in app + detail store in network) | [domain.md](domain.md) |
 
-### Domain (shared data plane — not a full layer doc)
+### Domain (shared data plane)
 
-`src/domain/` holds chain-agnostic graph/scene/layout:
-
-- `BlockScene` — live blocks, confirmed bag / frontier `H_c`, uncles, mutex, network HUD bag
-- `BlockGraph` — metadata graph + optional edges
-- `PolarShardLayout` — 16-lane polar positions
-- `alph_block.hpp` — Alephium parse model used by network + inspector
-
-**Writers:** network (ingest, marks). **Readers:** app `ScenePresenter` under scene mutex; graphics may hold `BlockScene*` for selection detail.
+See **[domain.md](domain.md)**. Summary: `BlockScene` / `BlockGraph` / layout under `src/domain/`; network writes, app presenter reads.
 
 ---
 

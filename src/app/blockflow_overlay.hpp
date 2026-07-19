@@ -23,6 +23,11 @@ public:
     // Optional config URLs for domain resolution (mainnet/testnet from config.json).
     void set_domain_urls(std::vector<std::string> urls);
     void set_initial_domain(NetworkDomain d);
+    void set_filter_multi_tx(bool enabled);
+    bool filter_multi_tx() const { return filter_multi_tx_; }
+
+    // Persist domain + filter to user_prefs.json (best-effort).
+    void save_prefs() const;
 
 private:
     void draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h);

@@ -39,6 +39,7 @@ public:
 private:
     void thread_main();
 
+    BlockScene&       scene_;
     AlephiumAdapter   adapter_;
     BlockFetchPool    fetch_pool_;
     Config            cfg_{};

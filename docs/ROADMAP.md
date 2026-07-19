@@ -43,9 +43,11 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 4 | **Config persistence** (last domain, filters, optional layout meters) | [app](layers/app.md) | Modularization PR12 remainder |
-| 5 | Graph + detail **retention / prune** policy | domain · [network](layers/network.md) | Growth was accepted short-term; lookback/history will need bounds |
-| 6 | Optional **`docs/layers/domain.md`** | docs | Shared `BlockScene` / graph / layout data plane not fully documented |
+| 4 | **Config persistence** (last domain, filters) | [app](layers/app.md) | **Done on `feature/p1-config-persistence-prune`** — `user_prefs.json` |
+| 5 | Graph + detail **retention / prune** policy | [domain](layers/domain.md) · [network](layers/network.md) | **Done on branch** — `BlockScene::prune`, poller + FakeChain hooks |
+| 6 | **`docs/layers/domain.md`** | docs | **Done on branch** |
+
+*(Mark fully Done in the Done table after merge to main.)*
 
 ---
 
