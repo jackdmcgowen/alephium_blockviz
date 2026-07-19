@@ -26,3 +26,4 @@ inline void vnv_expect(bool cond, const char* msg, VnvStats& s)
 }
 
 #define VNV_EXPECT(stats, cond) ::vnv_expect(!!(cond), #cond, (stats))
+#define VNV_EXPECT_MSG(stats, cond, msg) ::vnv_expect(!!(cond), (msg), (stats))

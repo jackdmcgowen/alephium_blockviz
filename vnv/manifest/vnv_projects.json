@@ -8,7 +8,18 @@
       "exe_name": "mod_domain.exe",
       "out_dir_key": "mod_domain",
       "depends_on_libraries": [],
-      "sources_under": "vnv/mod/tests/",
+      "sources_under": "vnv/mod/tests/domain/",
+      "run_by_default": true
+    },
+    {
+      "id": "mod_network",
+      "category": "mod",
+      "vcxproj": "sln/mod_network.vcxproj",
+      "guid": "{D1E2F3A4-B5C6-4789-9ABC-DEF012345678}",
+      "exe_name": "mod_network.exe",
+      "out_dir_key": "mod_network",
+      "depends_on_libraries": [],
+      "sources_under": "vnv/mod/tests/network/",
       "run_by_default": true
     },
     {

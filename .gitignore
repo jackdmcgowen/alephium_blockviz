@@ -68,7 +68,9 @@ debug.log
 *.ini
 user_prefs.json
 
-# VnV visual capture artifacts (goldens are tracked)
+# VnV capture / per-test runtime artifacts (expected/ is tracked)
+vnv/mod/tests/**/out/
+vnv/int/tests/**/out/
 vnv/int/tests/visual/out/
 tests/visual/out/
 

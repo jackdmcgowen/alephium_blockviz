@@ -4,7 +4,7 @@ Automated checks for **alephium_blockviz**, separate from the product app soluti
 
 | Category | Path | GPU? | Purpose |
 |----------|------|------|---------|
-| **mod** | `vnv/mod/tests/` | No | Module / domain logic |
+| **mod** | `vnv/mod/tests/<area>/<test_id>/` | No | Module logic (one subfolder per test; optional `expected/`) |
 | **int** | `vnv/int/tests/` | Yes | Integration (engine + systems, visual goldens) |
 | **bench** | `vnv/bench/tests/` | Later | Performance baselines (not implemented yet) |
 
