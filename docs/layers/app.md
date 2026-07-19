@@ -29,7 +29,7 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
 | Timeline minimap (overlay) | **Full-width sliding 3-window histogram** (newer flush right); Z from genesis-aligned segment bounds; labels = **segment number** (`#G_seg`); Live prefix on tip segment when on-track; page steps one window; draw ring from camera Z with **alpha fade** |
 | Camera view presets | **End** (1) / **Side** (2) / **V** toggle with **pose memory** + blend. **L/R** = Z. **End U/D** = Z; **Side U/D** = orbit. Short RMB homes current preset |
-| Selection + dep walk | Gold one-hop fan stays. **Shard-rejoin TRACE**: hop H→D[s] (leave), then D[s]→older block on **same shard as H** (rejoin), then leave via slot s again. Ties a shard to its clique without walking other groups. TRACE violet + Sobel fade. **R** / Replay. Missing hop → fetch. |
+| Selection + dep walk | Gold one-hop fan stays. **Shard-rejoin TRACE**: H→D[s] (leave); rejoin finds dep on **reverse(D)** e.g. [0→1]→[1→0] (same-shard [0→0] continues on [0→0]); then leave via slot s again. **R** / Replay. Missing hop → fetch. |
 | Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |

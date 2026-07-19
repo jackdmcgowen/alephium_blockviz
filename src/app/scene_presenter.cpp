@@ -225,14 +225,27 @@ std::string ScenePresenter::next_walk_dep_for_slot_(
 
 bool ScenePresenter::hash_on_shard_(const std::string& hash, int from, int to) const
 {
+    int f = 0, t = 0;
+    if (!shard_of_hash_(hash, f, t))
+        return false;
+    return f == from && t == to;
+}
+
+bool ScenePresenter::shard_of_hash_(const std::string& hash, int& from_out, int& to_out) const
+{
     if (hash.empty())
         return false;
     if (auto d = scene_.detail_store().get(hash))
-        return d->chainFrom == from && d->chainTo == to;
+    {
+        from_out = d->chainFrom;
+        to_out = d->chainTo;
+        return true;
+    }
     if (auto n = scene_.graph().get(hash))
     {
-        return static_cast<int>(n->group_from) == from &&
-               static_cast<int>(n->group_to) == to;
+        from_out = static_cast<int>(n->group_from);
+        to_out = static_cast<int>(n->group_to);
+        return true;
     }
     return false;
 }
@@ -241,13 +254,13 @@ std::string ScenePresenter::find_dep_on_shard_(
     const std::string& node_hash, int from, int to,
     const std::unordered_set<std::string>& visited) const
 {
-    // Rejoin hop: among deps of node, pick one on original shard S=[from→to].
+    // Among deps of node, pick one on shard [from→to] (rejoin uses reverse of leave target).
     if (node_hash.empty())
         return {};
     auto d = scene_.detail_store().get(node_hash);
     if (!d || d->deps.empty())
         return {};
-    // Prefer oldest (lowest timestamp) same-shard dep for history depth.
+    // Prefer oldest (lowest timestamp) for history depth.
     std::string best;
     int64_t best_ts = 0;
     bool have_ts = false;
@@ -479,17 +492,22 @@ void ScenePresenter::tick_dep_walk_(
             }
             s.visited.insert(s.to_hash);
             s.hops_done += 1;
-            // Alternate Leave (clique slot s) and Rejoin (back onto original shard S).
+            // Alternate Leave (clique slot s) and Rejoin (reverse of leave-target shard).
+            // Example: leave to [0→1] → rejoin looks for dep on [1→0]; [0→0] reverses to itself.
             std::string next;
             if (s.last_hop == WalkHopKind::Leave)
             {
-                // Arrived on cross-shard D[s] → rejoin original shard S.
-                next = find_dep_on_shard_(s.to_hash, s.orig_from, s.orig_to, s.visited);
+                int uf = 0, ut = 0;
+                if (shard_of_hash_(s.to_hash, uf, ut))
+                {
+                    // Reverse of the node we just landed on.
+                    next = find_dep_on_shard_(s.to_hash, /*from=*/ut, /*to=*/uf, s.visited);
+                }
                 s.last_hop = WalkHopKind::Rejoin;
             }
             else
             {
-                // Arrived on S → leave again via sticky clique index s.
+                // After rejoin, leave again via sticky clique index s.
                 next = next_walk_dep_for_slot_(s.to_hash, s.slot, s.visited);
                 s.last_hop = WalkHopKind::Leave;
             }

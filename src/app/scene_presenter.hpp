@@ -152,12 +152,14 @@ private:
     // Shard (chain_idx) for hash; 255 if unknown.
     int chain_idx_for_hash_(const std::string& hash) const;
     bool hash_on_shard_(const std::string& hash, int from, int to) const;
+    // Resolve chainFrom/chainTo for hash; false if unknown.
+    bool shard_of_hash_(const std::string& hash, int& from_out, int& to_out) const;
     // Deps of node sorted by chain_idx then hash (stable leave-slot order).
     std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
     // Leave hop: sticky slot index into sorted_deps_.
     std::string next_walk_dep_for_slot_(const std::string& node_hash, int slot,
                                         const std::unordered_set<std::string>& visited) const;
-    // Rejoin hop: first dep of node that lies on original shard (from,to).
+    // Rejoin hop: dep of node on shard [from→to] (caller passes reverse of leave target).
     std::string find_dep_on_shard_(const std::string& node_hash, int from, int to,
                                    const std::unordered_set<std::string>& visited) const;
     void collect_walk_force_hashes_(std::unordered_set<std::string>& out) const;
