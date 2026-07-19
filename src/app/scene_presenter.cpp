@@ -1579,6 +1579,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.net_switching = hud.switching;
         out.ui.cache_pressure_level = hud.cache_pressure_level;
         out.ui.browse_mode = hud.browse_mode;
+        out.ui.disk_cache_segments = hud.disk_cache_segments;
+        out.ui.disk_cache_mb = hud.disk_cache_mb;
+        out.ui.disk_cache_boot_blocks = hud.disk_cache_boot_blocks;
         out.ui.timeline_origin_ms = timeline_origin_ms;
         out.ui.genesis_ms =
             scene_.genesis_ms() > 0 ? scene_.genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;

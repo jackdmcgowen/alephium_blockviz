@@ -314,8 +314,112 @@ void SegmentDiskCache::enforce_lru_(std::vector<SegmentMeta>& segs) const
         segs.pop_back();
         std::error_code ec;
         fs::remove(segment_path_(drop.g_seg), ec);
-        // Leave block files; orphaned blocks ok until manual clean (size-bound later).
     }
+}
+
+std::vector<std::string> SegmentDiskCache::hashes_for_segment_(int g_seg) const
+{
+    std::vector<std::string> out;
+    std::string body;
+    if (!read_text_file_(segment_path_(g_seg), body))
+        return out;
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (!root)
+        return out;
+    cJSON* hashes = cJSON_GetObjectItem(root, "hashes");
+    if (cJSON_IsArray(hashes))
+    {
+        cJSON* h = nullptr;
+        cJSON_ArrayForEach(h, hashes)
+        {
+            if (cJSON_IsString(h) && h->valuestring)
+                out.push_back(h->valuestring);
+        }
+    }
+    cJSON_Delete(root);
+    return out;
+}
+
+void SegmentDiskCache::garbage_collect_orphans_(const std::vector<SegmentMeta>& keep) const
+{
+    std::unordered_set<std::string> live;
+    for (const SegmentMeta& m : keep)
+    {
+        for (const std::string& h : hashes_for_segment_(m.g_seg))
+            live.insert(h);
+    }
+    const fs::path blocks_root = root_dir_() + "\\blocks";
+    std::error_code ec;
+    if (!fs::exists(blocks_root, ec))
+        return;
+    int removed = 0;
+    for (fs::recursive_directory_iterator it(blocks_root, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+            continue;
+        const std::string name = it->path().filename().string();
+        // name = <hash>.json.gz
+        if (name.size() < 9 || name.find(".json.gz") == std::string::npos)
+            continue;
+        const std::string hash = name.substr(0, name.size() - 8); // strip .json.gz
+        if (live.count(hash) != 0)
+            continue;
+        fs::remove(it->path(), ec);
+        ++removed;
+    }
+    if (removed > 0)
+        std::printf("[disk-cache] orphan GC removed %d block files domain=%s\n", removed,
+                    domain_key_.c_str());
+}
+
+uint64_t SegmentDiskCache::approx_disk_bytes_() const
+{
+    uint64_t total = 0;
+    std::error_code ec;
+    const fs::path root = root_dir_();
+    if (!fs::exists(root, ec))
+        return 0;
+    for (fs::recursive_directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (it->is_regular_file(ec))
+            total += static_cast<uint64_t>(it->file_size(ec));
+    }
+    return total;
+}
+
+void SegmentDiskCache::enforce_disk_budget_(std::vector<SegmentMeta>& segs,
+                                           int64_t genesis_ms) const
+{
+    enforce_lru_(segs);
+    garbage_collect_orphans_(segs);
+    while (approx_disk_bytes_() > kMaxDiskBytes && !segs.empty())
+    {
+        std::sort(segs.begin(), segs.end(),
+                  [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg < b.g_seg; });
+        const SegmentMeta drop = segs.front();
+        segs.erase(segs.begin());
+        std::error_code ec;
+        fs::remove(segment_path_(drop.g_seg), ec);
+        garbage_collect_orphans_(segs);
+        std::printf("[disk-cache] disk budget: dropped G=%d domain=%s\n", drop.g_seg,
+                    domain_key_.c_str());
+    }
+    save_manifest_(segs, genesis_ms);
+}
+
+SegmentDiskCache::CacheStats SegmentDiskCache::stats() const
+{
+    CacheStats s;
+    s.enabled = enabled();
+    s.root = root_dir_();
+    if (!enabled())
+        return s;
+    std::vector<SegmentMeta> segs;
+    int64_t gen = 0;
+    if (load_manifest_(segs, gen))
+        s.segments = static_cast<int>(segs.size());
+    s.bytes = static_cast<int64_t>(approx_disk_bytes_());
+    return s;
 }
 
 bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
@@ -338,23 +442,42 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
     cJSON* hashes = cJSON_AddArrayToObject(seg, "hashes");
 
     int written = 0;
+    int skipped_ts = 0;
+    int skipped_io = 0;
     for (const CachedBlock& cb : blocks)
     {
         if (cb.block.hash.empty())
             continue;
-        if (cb.block.timestamp < from_ms || cb.block.timestamp >= to_ms)
+        // Inclusive [from_ms, to_ms] so open live tip edge still caches.
+        const int64_t ts = cb.block.timestamp;
+        if (ts < from_ms || ts > to_ms)
+        {
+            ++skipped_ts;
             continue;
+        }
         const std::string json = block_to_json_(cb);
         if (json.empty())
+        {
+            ++skipped_io;
             continue;
+        }
         if (!write_gzip_file_(block_path_(cb.block.hash), json))
+        {
+            ++skipped_io;
+            std::printf("[disk-cache] gzip write fail hash=%.12s… path=%s\n",
+                        cb.block.hash.c_str(), block_path_(cb.block.hash).c_str());
             continue;
+        }
         cJSON_AddItemToArray(hashes, cJSON_CreateString(cb.block.hash.c_str()));
         ++written;
     }
     if (written == 0)
     {
         cJSON_Delete(seg);
+        std::printf("[disk-cache] save empty G=%d candidates=%zu skip_ts=%d skip_io=%d "
+                    "window=[%lld,%lld]\n",
+                    g_seg, blocks.size(), skipped_ts, skipped_io,
+                    static_cast<long long>(from_ms), static_cast<long long>(to_ms));
         return false;
     }
 
@@ -365,7 +488,11 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
     const bool seg_ok = write_text_file_(segment_path_(g_seg), printed);
     cJSON_free(printed);
     if (!seg_ok)
+    {
+        std::printf("[disk-cache] segment meta write fail G=%d path=%s\n", g_seg,
+                    segment_path_(g_seg).c_str());
         return false;
+    }
 
     std::vector<SegmentMeta> segs;
     int64_t man_gen = genesis_ms;
@@ -397,12 +524,10 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         m.block_count = written;
         segs.push_back(m);
     }
-    enforce_lru_(segs);
-    const bool ok = save_manifest_(segs, man_gen);
-    if (ok)
-        std::printf("[disk-cache] saved segment G=%d blocks=%d domain=%s\n", g_seg, written,
-                    domain_key_.c_str());
-    return ok;
+    enforce_disk_budget_(segs, man_gen);
+    std::printf("[disk-cache] saved segment G=%d blocks=%d domain=%s root=%s\n", g_seg, written,
+                domain_key_.c_str(), root_dir_().c_str());
+    return true;
 }
 
 SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
@@ -410,23 +535,42 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
 {
     LoadResult r;
     out_blocks.clear();
+    r.root = root_dir_();
     if (!enabled() || max_segments <= 0)
+    {
+        std::printf("[disk-cache] load skip enabled=%d domain=%s\n", enabled() ? 1 : 0,
+                    domain_key_.c_str());
         return r;
+    }
 
     std::vector<SegmentMeta> segs;
     int64_t genesis_ms = 0;
     if (!load_manifest_(segs, genesis_ms))
+    {
+        std::printf("[disk-cache] no manifest at %s\n", manifest_path_().c_str());
         return r;
+    }
+    r.manifest_ok = true;
     r.genesis_ms = genesis_ms;
+
+    // Recompute g_live from manifest genesis when possible.
+    int effective_live = g_live;
+    if (genesis_ms > 0)
+    {
+        const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const int64_t w = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+        if (w > 0 && now_ms > genesis_ms)
+            effective_live = static_cast<int>((now_ms - genesis_ms) / w);
+    }
 
     std::sort(segs.begin(), segs.end(),
               [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg > b.g_seg; });
 
-    // Prefer segments at or below g_live (historical + recent).
+    // Most recent N by g_seg; only drop absurd future segments (clock skew).
     std::vector<SegmentMeta> pick;
     for (const SegmentMeta& m : segs)
     {
-        if (g_live >= 0 && m.g_seg > g_live)
+        if (effective_live >= 0 && m.g_seg > effective_live + 1)
             continue;
         pick.push_back(m);
         if (static_cast<int>(pick.size()) >= max_segments)
@@ -437,11 +581,16 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
               [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg < b.g_seg; });
 
     std::unordered_set<std::string> seen;
+    int parse_fail = 0;
+    int missing_file = 0;
     for (const SegmentMeta& m : pick)
     {
         std::string body;
         if (!read_text_file_(segment_path_(m.g_seg), body))
+        {
+            std::printf("[disk-cache] missing segment file G=%d\n", m.g_seg);
             continue;
+        }
         cJSON* root = cJSON_Parse(body.c_str());
         if (!root)
             continue;
@@ -459,10 +608,16 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
                     continue;
                 std::string bj;
                 if (!read_gzip_file_(block_path_(hash), bj))
+                {
+                    ++missing_file;
                     continue;
+                }
                 CachedBlock cb;
                 if (!json_to_block_(bj, cb))
+                {
+                    ++parse_fail;
                     continue;
+                }
                 out_blocks.push_back(std::move(cb));
                 ++got;
             }
@@ -476,8 +631,9 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
             r.chunk_keys.insert(r.chunk_keys.end(), keys.begin(), keys.end());
         }
     }
-    if (r.segments_loaded > 0)
-        std::printf("[disk-cache] bootstrap domain=%s segments=%d blocks=%d\n",
-                    domain_key_.c_str(), r.segments_loaded, r.blocks_loaded);
+    std::printf("[disk-cache] load domain=%s manifest_segs=%zu pick=%zu loaded_seg=%d "
+                "blocks=%d miss=%d parse_fail=%d g_live=%d path=%s\n",
+                domain_key_.c_str(), segs.size(), pick.size(), r.segments_loaded,
+                r.blocks_loaded, missing_file, parse_fail, effective_live, r.root.c_str());
     return r;
 }

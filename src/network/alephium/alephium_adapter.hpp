@@ -317,6 +317,7 @@ private:
     // Verified segment disk cache (per domain); bootstrap + persist closed windows.
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;
+    int  disk_cache_bootstrap_blocks_ = 0;
     std::unordered_set<int> disk_cache_saved_g_; // G_seg already written this session
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;

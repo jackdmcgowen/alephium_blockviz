@@ -1,7 +1,13 @@
 # Segment disk cache (design)
 
-**Status:** **P1/P2 in progress** on `feature/segment-disk-cache` (`segment_disk_cache.*` + adapter bootstrap/persist).  
+**Status:** **P1–P3 implemented** on `feature/segment-disk-cache`.  
 **Goal:** Bootstrap recent sessions within bounded disk/time by caching **verified** timeline segments and replaying them before network fill.
+
+### Debug checklist (load empty?)
+
+1. Look for `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\` after Steady.  
+2. Console: `[disk-cache] saved segment` must appear at least once (k=0 warm or k≥1).  
+3. On next launch: `[disk-cache] load … blocks=N` and `[adapter] disk-cache bootstrap`.
 
 ## Intent
 
@@ -119,7 +125,7 @@ Then:
 |----|--------|
 | **P1** | Manifest schema + write closed verified segments + gzip blocks |
 | **P2** | Startup/domain load priority + mark intervals fetched |
-| **P3** | LRU/disk caps, HUD, optional background re-verify |
+| **P3** | **Done:** 512 MiB cap, orphan GC, Network HUD line, save k=0 warm + k≥1, load diagnostics |
 
 ## Open decisions
 

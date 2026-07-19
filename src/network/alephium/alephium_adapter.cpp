@@ -111,6 +111,7 @@ void AlephiumAdapter::reset_stats()
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
     disk_cache_bootstrapped_ = false;
+    disk_cache_bootstrap_blocks_ = 0;
     disk_cache_saved_g_.clear();
     phase_ = Phase::BootstrapPoll;
     bootstrap_poll_done_ = false;
@@ -209,6 +210,13 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.cache_pressure_level = cache_pressure_level_;
     // History when camera lookback k>=1 (live tip window outside sliding 3-slot view).
     hud.browse_mode = (cam >= 1) ? 1 : (live_catchup_active_ ? 2 : 0);
+    {
+        const auto cs = disk_cache_.stats();
+        hud.disk_cache_segments = cs.segments;
+        hud.disk_cache_mb =
+            static_cast<int>((cs.bytes + 1024 * 1024 - 1) / (1024 * 1024));
+        hud.disk_cache_boot_blocks = disk_cache_bootstrap_blocks_;
+    }
 
     // Timeline segments: only the active triple-buffer ring (scrolling minimap).
     {
@@ -519,18 +527,22 @@ void AlephiumAdapter::on_start()
 
 void AlephiumAdapter::bootstrap_disk_cache_()
 {
-    if (disk_cache_bootstrapped_ || !disk_cache_.enabled())
+    if (disk_cache_bootstrapped_)
+        return;
+    disk_cache_bootstrapped_ = true;
+    disk_cache_bootstrap_blocks_ = 0;
+
+    if (!disk_cache_.enabled())
     {
-        disk_cache_bootstrapped_ = true;
+        std::printf("[adapter] disk-cache disabled domain=%s\n", disk_cache_.domain().c_str());
         return;
     }
-    disk_cache_bootstrapped_ = true;
 
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
     int64_t genesis = scene_.genesis_ms() > 0 ? scene_.genesis_ms()
                                               : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     const int64_t w = window_ms_();
-    int g_live = 0;
+    int g_live = -1;
     if (w > 0 && now_ms > genesis)
         g_live = static_cast<int>((now_ms - genesis) / w);
 
@@ -538,7 +550,11 @@ void AlephiumAdapter::bootstrap_disk_cache_()
     const auto lr =
         disk_cache_.load_recent(g_live, SegmentDiskCache::kStartupLoadMax, blocks);
     if (lr.blocks_loaded <= 0)
+    {
+        std::printf("[adapter] disk-cache bootstrap empty domain=%s path=%s\n",
+                    disk_cache_.domain().c_str(), disk_cache_.root_dir().c_str());
         return;
+    }
 
     if (lr.genesis_ms > 0)
     {
@@ -553,10 +569,8 @@ void AlephiumAdapter::bootstrap_disk_cache_()
     {
         if (cb.block.hash.empty())
             continue;
-        if (scene_.add_block(cb.block))
-            ++admitted;
-        else
-            ++admitted; // already present still counts as bootstrap
+        scene_.add_block(cb.block);
+        ++admitted;
         if (cb.confirmed)
         {
             scene_.mark_confirmed(cb.block.hash);
@@ -566,39 +580,59 @@ void AlephiumAdapter::bootstrap_disk_cache_()
     for (int64_t key : lr.chunk_keys)
         history_slots_fetched_.insert(key);
 
-    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d confirmed=%d chunks=%zu\n",
-                lr.segments_loaded, lr.blocks_loaded, confirmed, lr.chunk_keys.size());
-    (void)admitted;
+    disk_cache_bootstrap_blocks_ = admitted;
+    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d confirmed=%d "
+                "chunks=%zu path=%s\n",
+                lr.segments_loaded, admitted, confirmed, lr.chunk_keys.size(),
+                disk_cache_.root_dir().c_str());
 }
 
 void AlephiumAdapter::maybe_persist_verified_segments_()
 {
     if (!disk_cache_.enabled())
         return;
+    // Need Steady (or just finished BFS into Steady) so windows are meaningful.
     if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
         return;
 
-    // Collect closed polled windows (lookback k >= 1) not yet saved this session.
     for (const LookbackWindowSlot& slot : lookback_windows_)
     {
-        if (!slot.polled || slot.index < 1)
+        if (!slot.polled)
             continue;
-        if (slot.to_ms <= slot.from_ms || slot.global_index < 0)
-            continue;
-        const int G = slot.global_index;
-        if (disk_cache_saved_g_.count(G) != 0)
+        if (slot.to_ms <= slot.from_ms)
             continue;
 
-        // Prefer BFS having run at least once after fill (session gen > 0).
-        if (bfs_generation_ < 1 && phase_ != Phase::Steady)
+        // k=0 (live): only after BFS has run once and we are in Steady (warm snapshot).
+        // k>=1: any Steady/BfsTrace with polled complete.
+        if (slot.index == 0)
+        {
+            if (phase_ != Phase::Steady || bfs_generation_ < 1)
+                continue;
+        }
+        else if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
+        {
+            continue;
+        }
+
+        const int G = (slot.global_index >= 0) ? slot.global_index
+                                               : lookback_to_global_(slot.index);
+        if (G < 0)
+            continue;
+        if (disk_cache_saved_g_.count(G) != 0)
             continue;
 
         std::vector<SegmentDiskCache::CachedBlock> blocks;
         const auto nodes = scene_.nodes_snapshot();
         blocks.reserve(256);
+        // Prefer membership by global segment id when genesis known.
         for (const GraphNode& n : nodes)
         {
-            if (n.timestamp_ms < slot.from_ms || n.timestamp_ms >= slot.to_ms)
+            bool in_win = false;
+            if (genesis_resolved_ && genesis_ms_ > 0)
+                in_win = (global_segment_id_(n.timestamp_ms) == G);
+            else
+                in_win = (n.timestamp_ms >= slot.from_ms && n.timestamp_ms <= slot.to_ms);
+            if (!in_win)
                 continue;
             SegmentDiskCache::CachedBlock cb;
             if (auto d = scene_.detail_store().get(n.id))
@@ -610,9 +644,13 @@ void AlephiumAdapter::maybe_persist_verified_segments_()
                 cb.block.timestamp = n.timestamp_ms;
                 cb.block.chainFrom = static_cast<uint8_t>(n.group_from);
                 cb.block.chainTo = static_cast<uint8_t>(n.group_to);
+                cb.block.txn_count = n.txn_count;
+                cb.block.alph_out_atto = n.alph_out_atto;
             }
             if (cb.block.hash.empty())
                 continue;
+            if (cb.block.timestamp <= 0)
+                cb.block.timestamp = n.timestamp_ms;
             {
                 std::lock_guard<std::mutex> lock(scene_.mutex());
                 cb.confirmed = scene_.is_confirmed_locked(cb.block.hash);
@@ -620,7 +658,12 @@ void AlephiumAdapter::maybe_persist_verified_segments_()
             blocks.push_back(std::move(cb));
         }
         if (blocks.empty())
+        {
+            std::printf("[disk-cache] skip save G=%d k=%d reason=no_blocks window=[%lld,%lld]\n",
+                        G, slot.index, static_cast<long long>(slot.from_ms),
+                        static_cast<long long>(slot.to_ms));
             continue;
+        }
 
         if (disk_cache_.save_segment(G, slot.from_ms, slot.to_ms, genesis_ms_, blocks))
             disk_cache_saved_g_.insert(G);
@@ -2352,6 +2395,8 @@ void AlephiumAdapter::on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms
         }
         recompute_window_chunk_stats_(wi);
     }
+    // Window may have flipped to polled — warm disk cache when possible.
+    maybe_persist_verified_segments_();
 }
 
 void AlephiumAdapter::on_interval_chunk_failed_(int64_t from_ms)

@@ -186,6 +186,10 @@ public:
         int         cache_pressure_level = 0;
         // 0 = Live (k0 in sliding window), 1 = History (live tip halted).
         int         browse_mode = 0;
+        // Segment disk cache (verified BFS bootstrap).
+        int         disk_cache_segments = 0;
+        int         disk_cache_mb = 0;
+        int         disk_cache_boot_blocks = 0;
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;

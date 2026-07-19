@@ -798,12 +798,18 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::ProgressBar(pool_frac, ImVec2(-1.f, 0.f));
     ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
     ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
+    if (ui.disk_cache_segments > 0 || ui.disk_cache_boot_blocks > 0)
+        ImGui::TextDisabled("Disk cache: %d seg · %d MB · boot %d blocks",
+                            ui.disk_cache_segments, ui.disk_cache_mb,
+                            ui.disk_cache_boot_blocks);
+    else
+        ImGui::TextDisabled("Disk cache: empty (fills after Steady + polled windows)");
     if (ui.cache_pressure_level >= 2)
         ImGui::TextColored(ImVec4(1.f, 0.45f, 0.2f, 1.f),
-                           "Timeline cache HARD — oldest blocks may drop (future: disk cache)");
+                           "Timeline RAM HARD — oldest blocks may drop");
     else if (ui.cache_pressure_level >= 1)
         ImGui::TextColored(ImVec4(1.f, 0.85f, 0.3f, 1.f),
-                           "Timeline cache large — loaded history kept in RAM until hard cap");
+                           "Timeline RAM large — history kept until hard cap");
 
     // Sliding triple-buffer ring (older→newer); load % per active window.
     if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
