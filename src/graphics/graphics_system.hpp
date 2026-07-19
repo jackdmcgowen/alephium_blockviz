@@ -3,7 +3,14 @@
 
 // Internal to graphics.lib only (create_graphics_system returns IGraphicsSystem*).
 // Host/app code must not include this header — keeps Vulkan out of product TUs.
-// Future: full PIMPL (Impl in .cpp) if external includes become necessary.
+//
+// Method bodies are split across TUs (still GraphicsSystem::):
+//   graphics_system.cpp     — lifecycle, init/resize, create_*, record_command_buffer
+//   frame/frame_loop.cpp    — render_loop / render
+//   frame/async_sobel_submit.cpp — submit_frame_with_async_sobel
+//   frame/gpu_frame_publish.cpp  — publish_frame / apply_published_frame
+//   frame/selection_state.cpp    — selection, hover, multi-tx filter, detail refill
+// See docs/layers/graphics.md (living module map).
 
 #include <vulkan/vulkan.h>
 #include <vector>
