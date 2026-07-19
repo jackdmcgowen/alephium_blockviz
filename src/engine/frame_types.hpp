@@ -22,6 +22,8 @@ struct FrameSourceInput
     AlphBlock   selected_detail;
     const Frustum* frustum = nullptr;
     glm::vec3 instance_half_extents{ 1.f, 1.f, 1.f };
+    glm::vec3 camera_eye{ 0.f, 0.f, 0.f };
+    bool      has_camera_eye = false;
 };
 
 struct FrameSourceOutput

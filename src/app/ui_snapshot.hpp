@@ -71,6 +71,20 @@ struct UiSnapshot
     int           segment_count = 0;
     TimeSegmentUi segments[kMaxTimeSegments]{};
 
+    // World-anchored hover billboard (ImGui projects world_pos each frame).
+    // Overlay owns fade alpha; presenter sets want_visible + content.
+    struct BlockBillboardUi
+    {
+        bool  want_visible = false;
+        char  hash[72]{};
+        float world_pos[3]{ 0.f, 0.f, 0.f }; // slightly in front of cube toward camera
+        int   height     = -1;
+        int   chain_from = -1;
+        int   chain_to   = -1;
+        int   txn_count  = -1; // -1 = unknown (no detail yet)
+    };
+    BlockBillboardUi block_billboard{};
+
     UiSnapshot()
     {
         for (int& h : confirmed_height_by_lane)

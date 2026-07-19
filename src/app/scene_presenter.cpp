@@ -922,6 +922,71 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     out.ui.selected_hash = in.selected_hash;
     out.ui.selected_detail = in.selected_detail;
     scene_.get_trace_status_locked(&out.ui.trace_phase, &out.ui.trace_offset);
+
+    // Hover billboard: content + world anchor (overlay fades / projects).
+    // Policy A: suppress while hovered == selected (inspector owns the block).
+    {
+        auto& bb = out.ui.block_billboard;
+        bb = UiSnapshot::BlockBillboardUi{};
+        const bool hover_ok = !in.hovered_hash.empty() &&
+                              (in.selected_hash.empty() || in.hovered_hash != in.selected_hash);
+        if (hover_ok)
+        {
+            auto pit = block_positions.find(in.hovered_hash);
+            if (pit != block_positions.end())
+            {
+                const glm::vec3 block_pos = pit->second;
+                glm::vec3 eye = in.has_camera_eye
+                                    ? in.camera_eye
+                                    : glm::vec3(0.f, 0.f, scene_.camera_scroll_z());
+                glm::vec3 to_cam = eye - block_pos;
+                const float len = glm::length(to_cam);
+                if (len > 1e-4f)
+                    to_cam /= len;
+                else
+                    to_cam = glm::vec3(0.f, 0.f, 1.f);
+                constexpr float kBillboardOffset = 2.5f;
+                const glm::vec3 world = block_pos + to_cam * kBillboardOffset;
+
+                bb.want_visible = true;
+                std::snprintf(bb.hash, sizeof(bb.hash), "%s", in.hovered_hash.c_str());
+                bb.world_pos[0] = world.x;
+                bb.world_pos[1] = world.y;
+                bb.world_pos[2] = world.z;
+
+                // Prefer placement height/lane; fall back to detail store.
+                int height = -1;
+                int chain_from = -1;
+                int chain_to = -1;
+                for (const PlacedBlock& p : layout.placements)
+                {
+                    if (p.hash != in.hovered_hash)
+                        continue;
+                    height = p.height;
+                    chain_from = static_cast<int>(p.lane / ALPH_NUM_GROUPS);
+                    chain_to = static_cast<int>(p.lane % ALPH_NUM_GROUPS);
+                    break;
+                }
+                int txn_count = -1;
+                if (auto d = scene_.detail_store().get(in.hovered_hash))
+                {
+                    if (height < 0)
+                        height = d->height;
+                    if (chain_from < 0)
+                    {
+                        chain_from = d->chainFrom;
+                        chain_to = d->chainTo;
+                    }
+                    // Detail present: report txn size (0 is valid).
+                    txn_count = static_cast<int>(d->txns.size());
+                }
+                bb.height = height;
+                bb.chain_from = chain_from;
+                bb.chain_to = chain_to;
+                bb.txn_count = txn_count;
+            }
+        }
+    }
     {
         const auto tips = scene_.tip_ids();
         out.ui.tip_count = static_cast<int>(tips.size());

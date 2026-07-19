@@ -159,6 +159,111 @@ void BlockflowOverlay::draw()
 
     draw_network(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
+    draw_block_billboard_(ui, ui_w, ui_h, dt_sec);
+}
+
+void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, float ui_h,
+                                             float dt_sec)
+{
+    const auto& src = ui.block_billboard;
+    const bool want = src.want_visible && src.hash[0] != '\0';
+
+    // Latch content while fading out so text does not pop empty mid-fade.
+    if (want)
+    {
+        billboard_hash_ = src.hash;
+        billboard_pos_[0] = src.world_pos[0];
+        billboard_pos_[1] = src.world_pos[1];
+        billboard_pos_[2] = src.world_pos[2];
+        billboard_height_ = src.height;
+        billboard_chain_from_ = src.chain_from;
+        billboard_chain_to_ = src.chain_to;
+        billboard_txn_count_ = src.txn_count;
+    }
+
+    const float target = want ? 1.f : 0.f;
+    if (target > billboard_alpha_)
+    {
+        const float rate = 1.f / std::max(kBillboardFadeInSec, 1e-3f);
+        billboard_alpha_ = std::min(1.f, billboard_alpha_ + rate * dt_sec);
+    }
+    else if (target < billboard_alpha_)
+    {
+        const float rate = 1.f / std::max(kBillboardFadeOutSec, 1e-3f);
+        billboard_alpha_ = std::max(0.f, billboard_alpha_ - rate * dt_sec);
+    }
+
+    if (billboard_alpha_ < 0.01f)
+    {
+        if (!want)
+            billboard_hash_.clear();
+        return;
+    }
+
+    const glm::vec3 world(billboard_pos_[0], billboard_pos_[1], billboard_pos_[2]);
+    const glm::mat4 vp = camera_.camera().view_proj();
+    const glm::vec4 clip = vp * glm::vec4(world, 1.f);
+    if (clip.w <= 1e-4f)
+        return;
+
+    const float inv_w = 1.f / clip.w;
+    const float ndc_x = clip.x * inv_w;
+    const float ndc_y = clip.y * inv_w;
+    // Camera up is (0,-1,0); NDC y already matches top-down screen space with ImGui.
+    const float sx = (ndc_x * 0.5f + 0.5f) * ui_w;
+    const float sy = (ndc_y * 0.5f + 0.5f) * ui_h;
+
+    if (ndc_x < -1.2f || ndc_x > 1.2f || ndc_y < -1.2f || ndc_y > 1.2f)
+        return;
+
+    // Keep label inside center scene band between rails.
+    const float rail = ui_chrome::rail_width(ui_w);
+    const float min_x = rail + 8.f;
+    const float max_x = ui_w - rail - 8.f;
+    const float min_y = 8.f;
+    const float max_y = ui_h - 8.f;
+    if (max_x <= min_x)
+        return;
+
+    const float a = billboard_alpha_;
+    ImGui::SetNextWindowPos(ImVec2(sx, sy), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.78f * a);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.f, 8.f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+
+    if (ImGui::Begin("##block_billboard", nullptr, flags))
+    {
+        // Soft clamp: if window would sit under rails, ImGui still draws; nudge after size known.
+        ImVec2 pos = ImGui::GetWindowPos();
+        ImVec2 size = ImGui::GetWindowSize();
+        float nx = std::clamp(pos.x, min_x, std::max(min_x, max_x - size.x));
+        float ny = std::clamp(pos.y, min_y, std::max(min_y, max_y - size.y));
+        if (nx != pos.x || ny != pos.y)
+            ImGui::SetWindowPos(ImVec2(nx, ny));
+
+        if (billboard_height_ >= 0)
+            ImGui::Text("H  %d", billboard_height_);
+        else
+            ImGui::TextDisabled("H  --");
+
+        if (billboard_chain_from_ >= 0 && billboard_chain_to_ >= 0)
+            ImGui::Text("%d -> %d", billboard_chain_from_, billboard_chain_to_);
+        else
+            ImGui::TextDisabled("-- -> --");
+
+        if (billboard_txn_count_ >= 0)
+            ImGui::Text("%d txn%s", billboard_txn_count_,
+                        billboard_txn_count_ == 1 ? "" : "s");
+        else
+            ImGui::TextDisabled("-- txns");
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
 }
 
 void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h)

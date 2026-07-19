@@ -575,6 +575,8 @@ void GraphicsSystem::render_loop()
                 camera_->tick(last_frame_dt_sec_);
                 frame_frustum = camera_->frustum();
                 fin.frustum = &frame_frustum;
+                fin.camera_eye = camera_->camera().eye;
+                fin.has_camera_eye = true;
                 if (scene_)
                     scene_->set_camera_scroll_z(camera_->scroll_z());
             }
