@@ -3,9 +3,11 @@
 
 #include "network/commands.h"
 #include <cjson/cJSON.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 #define ALPH_TARGET_POLL_SECONDS ( 16 )
 #define ALPH_TARGET_BLOCK_SECONDS ( 8 )
@@ -114,8 +116,127 @@ public:
 	std::string scriptOpt;
 	int gasAmount;
 	std::string gasPrice;
+	// Sum of output attoAlphAmount (digits only); empty if unknown.
+	std::string alph_out_atto;
 
 };
+
+// Non-negative decimal digit strings (atto). Empty treated as "0".
+inline std::string alph_add_atto(const std::string& a_in, const std::string& b_in)
+{
+	std::string a = a_in.empty() ? "0" : a_in;
+	std::string b = b_in.empty() ? "0" : b_in;
+	// Strip non-digits / leading zeros noise from API.
+	auto clean = [](std::string& s) {
+		std::string o;
+		o.reserve(s.size());
+		for (char c : s)
+			if (c >= '0' && c <= '9')
+				o.push_back(c);
+		while (o.size() > 1 && o[0] == '0')
+			o.erase(o.begin());
+		if (o.empty())
+			o = "0";
+		s = std::move(o);
+	};
+	clean(a);
+	clean(b);
+	if (a.size() < b.size())
+		std::swap(a, b);
+	std::string out;
+	out.resize(a.size() + 1, '0');
+	int carry = 0;
+	int i = static_cast<int>(a.size()) - 1;
+	int j = static_cast<int>(b.size()) - 1;
+	int k = static_cast<int>(out.size()) - 1;
+	while (i >= 0 || j >= 0 || carry)
+	{
+		int sum = carry;
+		if (i >= 0)
+			sum += a[static_cast<size_t>(i--)] - '0';
+		if (j >= 0)
+			sum += b[static_cast<size_t>(j--)] - '0';
+		out[static_cast<size_t>(k--)] = static_cast<char>('0' + (sum % 10));
+		carry = sum / 10;
+	}
+	size_t start = 0;
+	while (start + 1 < out.size() && out[start] == '0')
+		++start;
+	return out.substr(start);
+}
+
+inline int alph_cmp_atto(const std::string& a_in, const std::string& b_in)
+{
+	std::string a = a_in.empty() ? "0" : a_in;
+	std::string b = b_in.empty() ? "0" : b_in;
+	auto clean = [](std::string& s) {
+		std::string o;
+		for (char c : s)
+			if (c >= '0' && c <= '9')
+				o.push_back(c);
+		while (o.size() > 1 && o[0] == '0')
+			o.erase(o.begin());
+		if (o.empty())
+			o = "0";
+		s = std::move(o);
+	};
+	clean(a);
+	clean(b);
+	if (a.size() != b.size())
+		return a.size() < b.size() ? -1 : 1;
+	if (a < b)
+		return -1;
+	if (a > b)
+		return 1;
+	return 0;
+}
+
+// Human ALPH (e.g. 1.5) → atto digit string (filter thresholds; not consensus-critical).
+inline std::string alph_from_double_to_atto(double alph)
+{
+	if (!(alph > 0.0) || !std::isfinite(alph))
+		return "0";
+	const double whole_d = std::floor(alph);
+	double frac = alph - whole_d;
+	unsigned long long whole = static_cast<unsigned long long>(whole_d);
+	frac = frac * 1e18 + 0.5;
+	unsigned long long frac_u = static_cast<unsigned long long>(frac);
+	if (frac_u >= 1000000000000000000ULL)
+	{
+		frac_u = 0;
+		++whole;
+	}
+	std::string s = std::to_string(whole);
+	char fracbuf[32];
+	std::snprintf(fracbuf, sizeof(fracbuf), "%018llu",
+	              static_cast<unsigned long long>(frac_u));
+	if (s == "0")
+	{
+		// Pure fraction: strip leading zeros of 18-digit frac.
+		std::string f(fracbuf);
+		while (f.size() > 1 && f[0] == '0')
+			f.erase(f.begin());
+		return f;
+	}
+	return s + fracbuf;
+}
+
+inline std::string alph_atto_to_display(const std::string& atto)
+{
+	UTXO u;
+	u.attoAlphAmount = atto.empty() ? "0" : atto;
+	return u.toAmount();
+}
+
+inline std::string alph_sum_txn_outputs(const AlphTxn& tx)
+{
+	if (!tx.alph_out_atto.empty())
+		return tx.alph_out_atto;
+	std::string sum = "0";
+	for (const UTXO& o : tx.outputs)
+		sum = alph_add_atto(sum, o.attoAlphAmount);
+	return sum;
+}
 
 class AlphBlock
 {
@@ -131,6 +252,8 @@ public:
 	std::vector<std::string> uncles;
 	// Preserved across detail slim (txns payload cleared); -1 = never parsed.
 	int txn_count = -1;
+	// Sum of all txn output ALPH (atto digits); survives slim; empty = unknown.
+	std::string alph_out_atto;
 
 	uint8_t chain_idx() const { return static_cast<uint8_t>(chainFrom * ALPH_NUM_GROUPS + chainTo); }
 
@@ -143,7 +266,8 @@ public:
 		, deps()
 		, txns()
 	    , uncles()
-		, txn_count(-1) {}
+		, txn_count(-1)
+		, alph_out_atto() {}
 
 	AlphBlock(cJSON* block)
 		: chainFrom(-1)
@@ -155,6 +279,7 @@ public:
 		, txns()
 		, uncles()
 		, txn_count(-1)
+		, alph_out_atto()
 	{
 		GET_OBJECT_ITEM(block, chainFrom);
 		GET_OBJECT_ITEM(block, chainTo);
@@ -258,9 +383,14 @@ public:
 						txn.outputs.push_back(output);
 					}
 
+					txn.alph_out_atto = alph_sum_txn_outputs(txn);
 					this->txns.push_back(txn);
 
 				}
+				// Block total ALPH out (all txn outputs); kept when txns slimmed.
+				this->alph_out_atto = "0";
+				for (const AlphTxn& t : this->txns)
+					this->alph_out_atto = alph_add_atto(this->alph_out_atto, t.alph_out_atto);
 			}
 
 		}
@@ -274,5 +404,15 @@ public:
 	}
 
 };
+
+inline std::string alph_sum_block_outputs(const AlphBlock& b)
+{
+	if (!b.alph_out_atto.empty())
+		return b.alph_out_atto;
+	std::string sum = "0";
+	for (const AlphTxn& tx : b.txns)
+		sum = alph_add_atto(sum, alph_sum_txn_outputs(tx));
+	return sum;
+}
 
 #endif	/* ALPH_BLOCK_H */

@@ -56,11 +56,12 @@ struct UiSnapshot
     float       poll_interval_sec     = 8.f;
     int         net_switching         = 0;
 
-    // Timeline segments (mirror BlockScene::TimeSegment; index 0 = live).
+    // Timeline segments (mirror BlockScene::TimeSegment).
     static constexpr int kMaxTimeSegments = 32;
     struct TimeSegmentUi
     {
-        int     index           = 0;
+        int     index           = 0;  // lookback k (0 = live)
+        int     global_index    = -1; // G from chain genesis → live
         int64_t from_ms         = 0;
         int64_t to_ms           = 0;
         float   load_ratio      = 0.f;
@@ -70,6 +71,9 @@ struct UiSnapshot
     };
     int           segment_count = 0;
     TimeSegmentUi segments[kMaxTimeSegments]{};
+    // Layout Z origin for minimap / camera jump (matches ScenePresenter).
+    int64_t timeline_origin_ms = 0;
+    float   meters_per_second  = 1.f;
 
     // World-anchored hover billboard (ImGui projects world_pos each frame).
     // Overlay owns fade alpha; presenter sets want_visible + content.
@@ -83,6 +87,7 @@ struct UiSnapshot
         int   chain_to   = -1;
         int   txn_count  = -1; // -1 = unknown (never parsed); survives detail slim
         int   is_uncle   = 0;  // 0/1 ghost uncle
+        char  alph_out[48]{};  // human ALPH total of outputs; empty if unknown
     };
     BlockBillboardUi block_billboard{};
 

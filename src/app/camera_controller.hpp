@@ -22,13 +22,13 @@ public:
     // Soft pan bounds only (Z uses timeline limits, not ±2000).
     static constexpr float kPanMin    = -800.f;
     static constexpr float kPanMax    =  800.f;
-    static constexpr float kEyeZStep  = 40.f;    // world units / second while key held
-    static constexpr float kWheelStep = 25.f;    // world units per mouse-wheel notch
+    static constexpr float kEyeZStep  = 200.f;   // world units / second while key held
+    static constexpr float kWheelStep = 100.f;   // world units per mouse-wheel notch
     static constexpr float kLookOmega   = 12.f;
     static constexpr float kPanOmega    = 14.f;
     // Scroll Z: linear approach toward target (not exp spring, not hard snap).
-    // Fast enough to track continuous live tip (~1 m/s) and smooth wheel jumps.
-    static constexpr float kScrollLinearSpeed = 120.f; // world units / second
+    // Fast enough for large segment jumps and wheel/key travel.
+    static constexpr float kScrollLinearSpeed = 500.f; // world units / second
     static constexpr float kLookSens  = 0.0045f;
     static constexpr float kPanSens   = 0.12f;
     static constexpr float kPitchMin  = -1.35f;
@@ -90,6 +90,16 @@ public:
         scroll_z_target_ = std::clamp(z, z_min_, z_max_);
     }
 
+    // Snap both current and target (minimap page / edge wrap) so network
+    // lookback index sees the new Z without scroll lerp lag.
+    void set_scroll_z_immediate(float z)
+    {
+        detach_timeline_();
+        const float c = std::clamp(z, z_min_, z_max_);
+        scroll_z_target_ = c;
+        scroll_z_ = c;
+    }
+
     // Move scroll target; actual eye Z linear-approaches in update_scroll_.
     void nudge_scroll(float world_delta)
     {
@@ -109,8 +119,9 @@ public:
             right /= rlen;
         glm::vec3 cam_up = glm::normalize(glm::cross(f, right));
 
-        pan_target_ -= right * (dx_px * kPanSens);
-        pan_target_ -= cam_up * (dy_px * kPanSens);
+        // Drag content with the pointer (not opposite): positive dx pans world right.
+        pan_target_ += right * (dx_px * kPanSens);
+        pan_target_ += cam_up * (dy_px * kPanSens);
         pan_target_.x = std::clamp(pan_target_.x, kPanMin, kPanMax);
         pan_target_.y = std::clamp(pan_target_.y, kPanMin, kPanMax);
         pan_target_.z = std::clamp(pan_target_.z, kPanMin, kPanMax);
@@ -121,8 +132,9 @@ public:
         look_engaged_ = false;
         free_look_ = true;
 
-        yaw_target_   += dx_px * kLookSens;
-        pitch_target_ += dy_px * kLookSens;
+        // Inverted-Y camera (up = -Y): drag right → look right; drag up → look up.
+        yaw_target_   -= dx_px * kLookSens;
+        pitch_target_ -= dy_px * kLookSens;
         pitch_target_  = std::clamp(pitch_target_, kPitchMin, kPitchMax);
 
         if (yaw_target_ >  glm::pi<float>())

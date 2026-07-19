@@ -43,6 +43,15 @@ void FrameResources::create(const FrameResourcesCreateInfo& info)
     mapped_instances_ = instance_.map(info.device);
     instance_count_ = 0;
 
+    // Cap outline pass; same layout as main instances (Sobel single-pass).
+    const uint32_t outline_max = (std::min)(max_instances_, 4096u);
+    const VkDeviceSize outline_size =
+        static_cast<VkDeviceSize>(sizeof(InstanceData)) * outline_max;
+    outline_ = buffers_->create(BufferDesc{
+        outline_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "cube.outline"});
+    mapped_outline_ = outline_.map(info.device);
+    outline_count_ = 0;
+
     uniform_ = buffers_->create(BufferDesc{
         sizeof(UniformBufferObject), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, host, "frame.ubo"});
 }
@@ -57,11 +66,18 @@ void FrameResources::destroy(VkDevice device)
         instance_.unmap(device);
         mapped_instances_ = nullptr;
     }
+    if (mapped_outline_ && outline_.valid())
+    {
+        outline_.unmap(device);
+        mapped_outline_ = nullptr;
+    }
     buffers_->destroy(vertex_);
     buffers_->destroy(index_);
     buffers_->destroy(instance_);
+    buffers_->destroy(outline_);
     buffers_->destroy(uniform_);
     instance_count_ = 0;
+    outline_count_ = 0;
     max_instances_ = 0;
     buffers_ = nullptr;
 }
@@ -78,6 +94,18 @@ size_t FrameResources::upload_instances(const GpuInstance* instances, size_t cou
     const size_t n = std::min(count, static_cast<size_t>(max_instances_));
     std::memcpy(mapped_instances_, instances, n * sizeof(GpuInstance));
     instance_count_ = n;
+    return n;
+}
+
+size_t FrameResources::upload_outline_instances(const InstanceData* instances, size_t count)
+{
+    outline_count_ = 0;
+    if (!mapped_outline_ || !instances || count == 0)
+        return 0;
+    const size_t cap = outline_.size() / sizeof(InstanceData);
+    const size_t n = std::min(count, cap);
+    std::memcpy(mapped_outline_, instances, n * sizeof(InstanceData));
+    outline_count_ = n;
     return n;
 }
 

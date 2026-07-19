@@ -139,11 +139,12 @@
     <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp" />
     <ClCompile Include="..\src\graphics\frame\selection_state.cpp" />
     <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp" />
-    <ClCompile Include="..\src\graphics\frame\async_sobel_submit.cpp" />
+    <ClCompile Include="..\src\graphics\frame\sobel_async_pass.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp" />
+    <ClCompile Include="..\src\graphics\frame\screenshot.cpp" />
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
     <ClCompile Include="..\src\graphics\frame\picker.cpp" />
-    <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp" />
+    <ClCompile Include="..\src\graphics\pipelines\sobel_pipeline.cpp" />
     <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp" />
     <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp" />
     <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
@@ -168,7 +169,9 @@
     <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp" />
     <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp" />
     <ClInclude Include="..\src\graphics\frame\picker.hpp" />
-    <ClInclude Include="..\src\graphics\frame\sobel_compute.hpp" />
+    <ClInclude Include="..\src\graphics\frame\sobel_async_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\sobel_types.hpp" />
+    <ClInclude Include="..\src\graphics\pipelines\sobel_pipeline.hpp" />
     <ClInclude Include="..\src\graphics\frame\vertex_types.hpp" />
     <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp" />
     <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp" />

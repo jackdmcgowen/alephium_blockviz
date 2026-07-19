@@ -6,10 +6,10 @@
 //
 // Method bodies are split across TUs (still GraphicsSystem::):
 //   graphics_system.cpp     — lifecycle, init/resize, create_*, record_command_buffer
-//   frame/frame_loop.cpp    — render_loop / render
-//   frame/async_sobel_submit.cpp — submit_frame_with_async_sobel
+//   frame/frame_loop.cpp    — render_loop / render (outline_count → async Sobel)
 //   frame/gpu_frame_publish.cpp  — publish_frame / apply_published_frame
 //   frame/selection_state.cpp    — selection, hover, multi-tx filter, detail refill
+// Sobel: pipelines/sobel_pipeline.* + frame/sobel_async_pass.* (not GS methods)
 // See docs/layers/graphics.md (living module map).
 
 #include <vulkan/vulkan.h>
@@ -36,7 +36,9 @@
 #include "graphics/frame/picker.hpp"
 #include "graphics/pipelines/cube_pipeline.hpp"
 #include "graphics/pipelines/picker_pipeline.hpp"
-#include "graphics/frame/sobel_compute.hpp"
+#include "graphics/pipelines/sobel_pipeline.hpp"
+#include "graphics/frame/sobel_async_pass.hpp"
+#include "graphics/frame/sobel_types.hpp"
 #include "graphics/frame/swapchain_targets.hpp"
 #include "graphics/frame/vertex_types.hpp"
 #include "graphics/buffer_manager.hpp"
@@ -81,18 +83,19 @@ public:
     AlphBlock copy_selected_block() const override;
     void set_ui_dep_hover(const std::string& hash) override;
     void set_scene_filter_multi_tx(bool enabled) override;
+    void set_scene_filter_min_alph(double min_alph) override;
+    // Capture client area (scene + ImGui) to PNG. Empty path → docs/images/capture_*.png
+    void request_screenshot(const char* path_utf8) override;
     std::string consume_detail_refill_request() override;
     void publish_ui_snapshot(UiSnapshot snap) override;
     UiSnapshot copy_ui_snapshot() const override;
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
-                       const std::vector<std::string>& confirmed_tip_hashes,
-                       const std::vector<std::string>& cyan_frontier_hashes,
-                       const std::vector<std::string>& incomplete_hashes) override;
+                       const std::vector<SobelOutlineInstance>& sobel_outlines) override;
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
 
-    // Kill-switch for always-on confirmed-tip green Sobel (default on). Selection gold unaffected.
+    // Kill-switch for role outlines (tips/cyan/orange). Selection gold still emitted by app.
     void set_visualize_confirmed_tips(bool enabled) { visualize_confirmed_tips_ = enabled; }
     bool visualize_confirmed_tips() const { return visualize_confirmed_tips_; }
 
@@ -127,23 +130,20 @@ private:
     PickerPipeline picker_pipe_;
     FrameResources frame_resources_;
     Picker picker_;
-    SobelCompute sobel_;
+    SobelPipeline  sobel_pipe_;
+    SobelAsyncPass sobel_async_;
 
     VkCommandPool commandPool = VK_NULL_HANDLE;       // _3D family
     VkCommandPool computeCommandPool = VK_NULL_HANDLE; // CMP family
-    // Serializes async Sobel so shared sel_depth/edge are not rewritten mid-flight (VUID-09600).
-    VkFence sobel_done_fence_ = VK_NULL_HANDLE;
-    bool    sobel_fence_in_flight_ = false;
     FrameSync frame_sync_;
 
     enum class PickKind : uint8_t { None = 0, Click, Hover };
 
     struct FramesInFlight
     {
-        VkCommandBuffer commandBuffer = VK_NULL_HANDLE; // main scene + pick + first sel depth
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE; // main scene + pick + outline depth/color
         VkCommandBuffer computeCommandBuffer = VK_NULL_HANDLE; // async Sobel CMP
         VkCommandBuffer overlayCommandBuffer = VK_NULL_HANDLE; // edge overlay (+ present last)
-        VkCommandBuffer layerDepthCommandBuffer = VK_NULL_HANDLE; // extra Sobel layers depth
         bool            pendingPick = false;
         PickKind        pickKind = PickKind::None;
         std::vector<std::string> pick_map;
@@ -167,6 +167,7 @@ private:
     std::string hovered_hash_;
     std::string ui_dep_hover_hash_; // inspector Deps row hover
     bool        filter_multi_tx_ = false; // scene: txn_count > 1 only
+    double      filter_min_alph_ = 0.0;   // human ALPH; 0 = off
     float     last_frame_dt_sec_ = 1.f / 60.f;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0;
@@ -195,30 +196,6 @@ private:
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
                                VkPrimitiveTopology topology, bool defer_present);
 
-    // Multi-layer async Sobel: each layer = depth redraw + compute + colored overlay.
-    // Layers paint additively (LOAD); gold is exclusive when selection is active.
-    struct SobelFrameRequest
-    {
-        enum class Mode {
-            SelectionGold,
-            ConfirmedTipsGreen,
-            CyanFrontier, // unconfirmed children of domain frontier
-            IncompleteTraceOrange
-        };
-        struct Layer
-        {
-            Mode mode = Mode::SelectionGold;
-            std::vector<uint32_t> instance_indices;
-        };
-        std::vector<Layer> layers;
-    };
-
-    void submit_frame_with_async_sobel(uint32_t frame_index, uint32_t image_index,
-                                       VkCommandBuffer graphics_cb,
-                                       VkSemaphore image_available,
-                                       VkSemaphore render_finished,
-                                       const SobelFrameRequest& req);
-
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot
     {
@@ -226,9 +203,7 @@ private:
         CameraUBO camera{};
         uint64_t client_seq = 0;
         std::vector<std::string> pick_map;
-        std::vector<std::string> confirmed_tip_hashes;
-        std::vector<std::string> cyan_frontier_hashes;
-        std::vector<std::string> incomplete_hashes;
+        std::vector<SobelOutlineInstance> sobel_outlines;
     };
     GpuFrameSlot gpu_slots_[kGpuSlots];
     mutable std::mutex submit_mutex_;
@@ -240,11 +215,7 @@ private:
     bool apply_published_frame();
     int  find_free_gpu_slot_unlocked() const;
 
-    // Loaded from GpuFrameSlot in apply_published_frame (paired with pick_id_to_hash_).
-    std::vector<std::string> sobel_tip_hashes_;
-    std::vector<std::string> sobel_cyan_hashes_;
-    std::vector<std::string> sobel_incomplete_hashes_;
-    // Kill-switch: gates tip/incomplete Sobel; selection gold always works. Default on.
+    // Kill-switch: gates role outlines via FrameSourceInput; selection gold always works.
     bool visualize_confirmed_tips_ = true;
 
     mutable std::mutex ui_snap_mutex_;
@@ -255,6 +226,11 @@ private:
     bool inited_ = false;
 
     void cleanup();
+
+    // Screenshot (Win32 client capture → PNG). Processed on render thread.
+    mutable std::mutex screenshot_mutex_;
+    std::string        screenshot_pending_path_;
+    bool consume_and_save_screenshot_();
 };
 
 #endif /* GRAPHICS_SYSTEM_HPP */

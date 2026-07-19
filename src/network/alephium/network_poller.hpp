@@ -39,6 +39,7 @@ public:
 private:
     void thread_main();
 
+    BlockScene&       scene_;
     AlephiumAdapter   adapter_;
     BlockFetchPool    fetch_pool_;
     Config            cfg_{};
@@ -48,5 +49,6 @@ private:
     std::string       base_url_copy_; // stable c_str for baseUrl
 
     static constexpr int kVerifyJobsPerIdleSlice = 24;
-    static constexpr int kFetchWorkers = 3;
+    // Overlap interval + hash GETs (was 3 hash-only).
+    static constexpr int kFetchWorkers = 6;
 };

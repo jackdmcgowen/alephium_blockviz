@@ -174,6 +174,12 @@ void FakeChainSimulator::tick_grow_()
         scene_.add_block(ghost);
         // Leave unconfirmed — presenter may classify incomplete if deps missing.
     }
+    // Soft retention: keep last ~64 heights worth of timeline + node cap.
+    if (tick_ % 20 == 0)
+    {
+        const int64_t min_ts = ts - static_cast<int64_t>(64) * ALPH_TARGET_BLOCK_SECONDS * 1000;
+        scene_.prune(min_ts, /*max_nodes=*/4000);
+    }
     publish_hud_(static_cast<int>(NetworkStatus::Steady));
 }
 

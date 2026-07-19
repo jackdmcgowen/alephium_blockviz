@@ -37,6 +37,8 @@ struct GraphNode
     uint32_t lane_count_hint = 1;
     std::string chain_label;
     int       txn_count     = -1; // from API; survives detail slim
+    // Sum of output ALPH (atto digits); survives detail slim; empty = unknown.
+    std::string alph_out_atto;
     BlockRole role          = BlockRole::Unknown;
 };
 

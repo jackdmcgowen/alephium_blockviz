@@ -1,0 +1,10 @@
+{
+  "id": "fake_overview",
+  "width": 1280,
+  "height": 720,
+  "warmup_ms": 4500,
+  "domain": "debug",
+  "ui": false,
+  "per_pixel_tol": 8,
+  "max_bad_fraction": 0.002
+}

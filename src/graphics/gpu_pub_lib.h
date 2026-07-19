@@ -56,6 +56,14 @@ struct GpuInstance
     float     alpha = 1.0f;               // for fade tweens
 };
 
+// Domain-agnostic Sobel outline: app assigns color; graphics has no role names.
+// instance_index indexes this frame's GpuInstance / pick_map list.
+struct SobelOutlineInstance
+{
+    uint32_t  instance_index = ~0u;
+    glm::vec4 color{ 1.f, 1.f, 1.f, 1.35f }; // rgb + intensity in a
+};
+
 struct FrameSubmit
 {
     const GpuInstance* instances      = nullptr;

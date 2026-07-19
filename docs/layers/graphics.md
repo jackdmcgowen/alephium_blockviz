@@ -16,6 +16,7 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | Pick pass + Sobel compute / overlay | Poll watermark |
 | ImGui **host** (backends NewFrame / Render) | Overlay widget layout (app) |
 | `gpu_pub_lib.h` public types | curl / cJSON |
+| Client-rect resize / swapchain recreate | Host borderless fullscreen (app HWND) |
 
 ## Current surface
 
@@ -27,10 +28,13 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `frame/` | Sync, resources, recorder, presenter, descriptors, picker, Sobel, swapchain targets, task graph |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
-| `frame/async_sobel_submit.cpp` | Multi-CB async Sobel submit + fence serialization |
+| `pipelines/sobel_pipeline.*` | Outline depth+color + compute + edge×color overlay PSOs |
+| `frame/sobel_async_pass.*` | Single-pass multi-queue Sobel (_3D↔CMP) + fence |
+| `frame/sobel_types.hpp` | Thin request type; outline list is `SobelOutlineInstance` in `gpu_pub_lib.h` |
 | `frame/gpu_frame_publish.cpp` | Triple-buffer `publish_frame` / `apply_published_frame` |
 | `frame/selection_state.cpp` | Selection, hover, multi-tx filter, detail refill pin |
 | `frame/frame_shared_state.*` | Debug drawer / mesh arena / viewProj shared by loop + record |
+| `frame/screenshot.cpp` | Client-area PNG capture (F12 / request_screenshot) |
 | `pipelines/` | Cube + picker pipeline objects |
 | `mesh_arena.*`, `buffer_manager.*` | Mesh / buffer pooling |
 | `debug/debug_drawer.*` | Arrows and debug geometry |
@@ -54,11 +58,13 @@ render thread (frame_loop.cpp):
   present
 ```
 
-### Sobel modes (product-facing kill-switch)
+### Sobel (domain-agnostic, single pass)
 
-- **Selection gold** when selected instance maps; always attempted if Sobel ready.
-- **Confirmed tips green** when unselected, tips resolve, and `visualize_confirmed_tips` is on (default on).
-- MVP: one highlight color/buffer per frame — **no dual gold+green**.
+- App builds `std::vector<SobelOutlineInstance>` (`instance_index` + `color`); graphics has **no** role names (gold/green/cyan/orange).
+- All outline cubes drawn in **one** depth+color pass (unless culled earlier in presenter).
+- Compute Sobel produces a **white** edge mask; overlay multiplies `edge × instance_color`.
+- Kill-switch `visualize_confirmed_tips` is passed to the presenter as `enable_role_outlines` (selection gold still emitted when selected).
+- Product colors live in `ScenePresenter` (brand palette); see [app.md](app.md).
 
 Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphics changes.
 
@@ -70,6 +76,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 4. ImGui host only; chrome via `IUiOverlay` on the render thread.
 5. Fast rebuilds: PCH, `/MP`, incremental shaders — [build-performance.md](../build-performance.md).
 6. Public header remains Vulkan-free.
+7. Fullscreen is **host-owned** (borderless HWND); graphics only follows client size via `Resize()`.
 
 ## Non-goals
 
@@ -93,6 +100,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 | **Done (P2)** | Pipeline/descriptor/barrier modularization | `PipelineType`, `descriptor.cpp`, `cmd_image_barrier`, MeshArena shared PSOs |
 | **Done (P2)** | Split `GraphicsSystem` orchestration | `frame_loop`, `async_sobel_submit`, `gpu_frame_publish`, `selection_state` |
 | **P2** | Always-on tip Sobel perf budget | Soft median regression target from historical design; kill-switch escape hatch |
+| **P1 (V1 landed)** | Visual regression harness | `vnv/int/tests/visual/` + `run_vnv.ps1 -Int` (BitBlt + golden); V2/V3: determinism + GPU readback |
 | **P3** | Full PIMPL of `GraphicsSystem` | Only if external includes force it |
 
 ## Interfaces

@@ -33,6 +33,9 @@ void BlockScene::reset()
         frontier_walk_[i].clear();
         network_hud_.tip_height_by_lane[i] = -1;
     }
+    for (int i = 0; i < kBfsThreadCount; ++i)
+        bfs_traces_[i] = BfsTraceSnap{};
+    bfs_trace_n_ = 0;
     trace_phase_ = 0;
     trace_offset_ = 0;
     genesis_ms_.store(ALPH_GENESIS_TIMESTAMP_MS_FALLBACK, std::memory_order_relaxed);
@@ -79,6 +82,7 @@ bool BlockScene::add_block(const AlphBlock& alph_block)
     node.chain_label =
         std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
     node.txn_count = alph_block.txn_count;
+    node.alph_out_atto = alph_block.alph_out_atto;
     if (uncle_set_.count(alph_block.hash))
         node.role = BlockRole::Uncle;
     delta.upsert_nodes.push_back(std::move(node));
@@ -120,6 +124,88 @@ bool BlockScene::remove_block(const std::string& hash)
                                [&](const RecentFeedItem& b) { return b.hash == hash; }),
                 feed_.end());
     return true;
+}
+
+size_t BlockScene::prune(int64_t min_timestamp_ms, size_t max_nodes)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+
+    std::unordered_set<NodeId> protect;
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        if (!confirmed_hash_[i].empty())
+            protect.insert(confirmed_hash_[i]);
+        if (!pending_hash_[i].empty())
+            protect.insert(pending_hash_[i]);
+        for (const NodeId& h : frontier_walk_[i])
+            if (!h.empty())
+                protect.insert(h);
+    }
+
+    std::vector<NodeId> drop;
+    const auto snap = graph_.nodes_snapshot(); // sorts; holds no scene mu_ internally but graph has own mu
+    // nodes_snapshot locks graph mu_ — we already hold scene mu_ which orders: scene then graph in other paths?
+    // BlockScene methods always take mu_ then call graph_ which takes its own mu_ — OK (different mutexes).
+
+    for (const GraphNode& n : snap)
+    {
+        if (protect.count(n.id))
+            continue;
+        if (min_timestamp_ms > 0 && n.timestamp_ms > 0 && n.timestamp_ms < min_timestamp_ms)
+            drop.push_back(n.id);
+    }
+
+    // Count cap: drop oldest non-protected after time prune.
+    if (max_nodes > 0)
+    {
+        std::vector<GraphNode> remain;
+        remain.reserve(snap.size());
+        std::unordered_set<NodeId> dropping(drop.begin(), drop.end());
+        for (const GraphNode& n : snap)
+        {
+            if (dropping.count(n.id))
+                continue;
+            remain.push_back(n);
+        }
+        if (remain.size() > max_nodes)
+        {
+            std::sort(remain.begin(), remain.end(),
+                      [](const GraphNode& a, const GraphNode& b) {
+                          if (a.timestamp_ms != b.timestamp_ms)
+                              return a.timestamp_ms < b.timestamp_ms;
+                          return a.id < b.id;
+                      });
+            size_t need = remain.size() - max_nodes;
+            for (const GraphNode& n : remain)
+            {
+                if (need == 0)
+                    break;
+                if (protect.count(n.id))
+                    continue;
+                drop.push_back(n.id);
+                --need;
+            }
+        }
+    }
+
+    if (drop.empty())
+        return 0;
+
+    GraphDelta delta;
+    delta.remove_nodes = drop;
+    graph_.apply(delta);
+    detail_store_.remove_many(drop);
+    for (const NodeId& id : drop)
+    {
+        erase_confirmed_unlocked_(id);
+        uncle_set_.erase(id);
+    }
+    feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
+                               [&](const RecentFeedItem& b) {
+                                   return std::find(drop.begin(), drop.end(), b.hash) != drop.end();
+                               }),
+                feed_.end());
+    return drop.size();
 }
 
 void BlockScene::mark_uncle(const NodeId& hash)
@@ -190,6 +276,30 @@ void BlockScene::clear_frontier_walk_locked(uint32_t lane)
     if (lane >= static_cast<uint32_t>(kLaneCount))
         return;
     frontier_walk_[lane].clear();
+}
+
+void BlockScene::set_bfs_traces(const BfsTraceSnap* traces, int n)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    bfs_trace_n_ = 0;
+    if (!traces || n <= 0)
+        return;
+    const int count = std::min(n, kBfsThreadCount);
+    for (int i = 0; i < count; ++i)
+        bfs_traces_[i] = traces[i];
+    bfs_trace_n_ = count;
+}
+
+void BlockScene::copy_bfs_traces_locked(BfsTraceSnap out[kBfsThreadCount], int* n_out) const
+{
+    // Caller holds mu_.
+    if (!out)
+        return;
+    const int n = std::min(bfs_trace_n_, kBfsThreadCount);
+    for (int i = 0; i < n; ++i)
+        out[i] = bfs_traces_[i];
+    if (n_out)
+        *n_out = n;
 }
 
 void BlockScene::set_pending_tip(uint32_t lane, const NodeId& hash)

@@ -1,5 +1,6 @@
 ﻿#include "app/pch.h"
 #include "app/blockflow_overlay.hpp"
+#include "app/user_prefs.hpp"
 #include "app/ui_chrome.hpp"
 #include "network/network_domain.hpp"
 
@@ -47,6 +48,33 @@ void BlockflowOverlay::set_domain_urls(std::vector<std::string> urls)
 void BlockflowOverlay::set_initial_domain(NetworkDomain d)
 {
     domain_ = d;
+}
+
+void BlockflowOverlay::set_filter_multi_tx(bool enabled)
+{
+    filter_multi_tx_ = enabled;
+    engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+}
+
+void BlockflowOverlay::set_filter_min_alph(double min_alph)
+{
+    filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
+    engine_.set_scene_filter_min_alph(filter_min_alph_);
+}
+
+void BlockflowOverlay::save_prefs() const
+{
+    UserPrefs p;
+    p.domain = domain_;
+    p.filter_multi_tx = filter_multi_tx_;
+    p.filter_min_alph = filter_min_alph_;
+    if (!save_user_prefs(p))
+        std::printf("[app] warning: failed to save %s\n", kUserPrefsPath);
+}
+
+float BlockflowOverlay::ts_to_z_(int64_t ts_ms, int64_t origin_ms, float mps) const
+{
+    return -static_cast<float>(ts_ms - origin_ms) * 0.001f * mps;
 }
 
 std::string BlockflowOverlay::resolve_url_(NetworkDomain d) const
@@ -159,6 +187,7 @@ void BlockflowOverlay::draw()
 
     draw_network(ui, ui_w, ui_h);
     draw_inspector(ui, ui_w, ui_h);
+    draw_timeline_minimap_(ui, ui_w, ui_h);
     draw_block_billboard_(ui, ui_w, ui_h, dt_sec);
 }
 
@@ -180,6 +209,10 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
         billboard_chain_to_ = src.chain_to;
         billboard_txn_count_ = src.txn_count;
         billboard_is_uncle_ = src.is_uncle != 0;
+        if (src.alph_out[0] != '\0')
+            std::snprintf(billboard_alph_, sizeof(billboard_alph_), "%s", src.alph_out);
+        else
+            billboard_alph_[0] = '\0';
     }
 
     const float target = want ? 1.f : 0.f;
@@ -265,9 +298,344 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
                         billboard_txn_count_ == 1 ? "" : "s");
         else
             ImGui::TextDisabled("-- txns");
+        if (billboard_alph_[0] != '\0')
+            ImGui::Text("%s ALPH", billboard_alph_);
+        else
+            ImGui::TextDisabled("-- ALPH");
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
+}
+
+void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, float ui_h)
+{
+    const float rail_w = ui_chrome::rail_width(ui_w);
+    const float bar_h = 62.f;
+    const float pad = 10.f;
+    const float bar_w = std::max(120.f, ui_w - 2.f * rail_w - 2.f * pad);
+    const float bar_x = rail_w + pad;
+    const float bar_y = ui_h - bar_h - pad;
+
+    ImGui::SetNextWindowPos(ImVec2(bar_x, bar_y), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(bar_w, bar_h), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.82f);
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("##timeline_minimap", nullptr, flags))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // Sticky origin for Z math (must match presenter + barrier planes).
+    const int64_t origin = ui.timeline_origin_ms > 0
+                               ? ui.timeline_origin_ms
+                               : static_cast<int64_t>(std::time(nullptr)) * 1000 -
+                                     static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const float mps = ui.meters_per_second > 1e-6f ? ui.meters_per_second : 1.f;
+
+    // Triple-buffer ring as 3 histogram bins (older → newer, left → right).
+    // Segment #G labels wrap as the ring slides — always at most 3 bins.
+    struct Slot
+    {
+        int     lookback_k = -1;
+        int     global_g = -1;
+        float   z_new = 0.f;
+        float   z_old = 0.f;
+        float   load = 0.f;
+        int     block_count = 0;
+        int     expected = 0;
+        bool    full = false;
+        bool    valid = false;
+    };
+    Slot slots[3]{};
+    int nslot = 0;
+    for (int i = 0; i < ui.segment_count && nslot < 3; ++i)
+    {
+        const auto& s = ui.segments[i];
+        if (s.from_ms <= 0 && s.to_ms <= 0)
+            continue;
+        const float z_from = ts_to_z_(s.from_ms, origin, mps);
+        const float z_to = ts_to_z_(s.to_ms, origin, mps);
+        Slot sl;
+        sl.lookback_k = s.index;
+        sl.global_g = s.global_index;
+        sl.z_new = std::min(z_from, z_to);
+        sl.z_old = std::max(z_from, z_to);
+        sl.load = s.load_ratio;
+        sl.block_count = s.block_count;
+        sl.expected = s.expected_blocks;
+        sl.full = s.confirmed_full != 0;
+        sl.valid = true;
+        slots[nslot++] = sl;
+    }
+    std::sort(slots, slots + nslot, [](const Slot& a, const Slot& b) {
+        return a.z_old > b.z_old; // older left
+    });
+
+    float z_hi = camera_.scroll_z() + 50.f;
+    float z_lo = camera_.scroll_z() - 50.f;
+    if (nslot > 0)
+    {
+        z_hi = slots[0].z_old;
+        z_lo = slots[nslot - 1].z_new;
+        for (int i = 0; i < nslot; ++i)
+        {
+            z_hi = std::max(z_hi, slots[i].z_old);
+            z_lo = std::min(z_lo, slots[i].z_new);
+        }
+    }
+    if (z_hi - z_lo < 1.f)
+    {
+        z_hi = camera_.scroll_z() + 100.f;
+        z_lo = camera_.scroll_z() - 20.f;
+    }
+    const float z_span = std::max(1.f, z_hi - z_lo);
+    // Prefer actual segment width when available (genesis-aligned may differ slightly).
+    float seg_step_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
+    if (nslot > 0)
+    {
+        float wsum = 0.f;
+        int nw = 0;
+        for (int i = 0; i < nslot; ++i)
+        {
+            const float w = slots[i].z_old - slots[i].z_new;
+            if (w > 1.f)
+            {
+                wsum += w;
+                ++nw;
+            }
+        }
+        if (nw > 0)
+            seg_step_z = wsum / static_cast<float>(nw);
+    }
+
+    // True chain end = oldest ring lookback near genesis (no further page older).
+    // lookback k grows with age; if oldest bin has huge k and low load we still allow page
+    // until camera Z hits limits (frame_loop genesis). Soft signal: no newer empty slots.
+    const bool at_live =
+        nslot > 0 && slots[nslot - 1].lookback_k == 0;
+
+    auto z_to_x = [&](float z) -> float {
+        return (z_hi - z) / z_span;
+    };
+    auto x_to_z = [&](float t) -> float {
+        t = std::clamp(t, 0.f, 1.f);
+        return z_hi - t * z_span;
+    };
+    auto snap_to_seg_mid = [&](float z) -> float {
+        float best = z;
+        float best_d = 1e30f;
+        for (int i = 0; i < nslot; ++i)
+        {
+            if (!slots[i].valid)
+                continue;
+            const float mid = 0.5f * (slots[i].z_new + slots[i].z_old);
+            const float d = std::abs(mid - z);
+            if (d < best_d)
+            {
+                best_d = d;
+                best = mid;
+            }
+        }
+        return best;
+    };
+    // Page one segment with immediate Z snap so ring k advances without lerp lag.
+    // Caret lands near right (begin) of the predicted new 3-bin window.
+    auto page_older_one = [&]() {
+        const float z0 = camera_.scroll_z();
+        const float stepped = z0 + seg_step_z;
+        const float slo = z_lo + seg_step_z;
+        const float shi = z_hi + seg_step_z;
+        const float span = std::max(1.f, shi - slo);
+        constexpr float kBeginFromNewer = 0.12f;
+        const float begin = slo + kBeginFromNewer * span;
+        camera_.set_scroll_z_immediate(std::max(stepped, begin));
+    };
+    auto page_newer_one = [&]() {
+        const float z0 = camera_.scroll_z();
+        const float stepped = z0 - seg_step_z;
+        const float slo = z_lo - seg_step_z;
+        const float shi = z_hi - seg_step_z;
+        const float span = std::max(1.f, shi - slo);
+        constexpr float kBeginFromNewer = 0.12f;
+        const float begin = slo + kBeginFromNewer * span;
+        camera_.set_scroll_z_immediate(std::min(stepped, begin));
+    };
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetCursorScreenPos();
+    const float track_h = 28.f;
+    const float track_y = wp.y + 24.f;
+    const float track_w = ImGui::GetContentRegionAvail().x;
+
+    // Track background.
+    dl->AddRectFilled(ImVec2(wp.x, track_y), ImVec2(wp.x + track_w, track_y + track_h),
+                      IM_COL32(16, 16, 20, 230), 4.f);
+    dl->AddLine(ImVec2(wp.x, track_y + track_h - 1.f),
+                ImVec2(wp.x + track_w, track_y + track_h - 1.f), IM_COL32(60, 60, 70, 200),
+                1.f);
+
+    // Histogram bins: width = Z span of segment; height ∝ load (density/chunk fill).
+    const ImU32 kHistCol[3] = {
+        IM_COL32(70, 110, 180, 255),
+        IM_COL32(40, 180, 190, 255),
+        IM_COL32(255, 92, 0, 255),
+    };
+    for (int i = 0; i < nslot; ++i)
+    {
+        if (!slots[i].valid)
+            continue;
+        float t0 = z_to_x(slots[i].z_old);
+        float t1 = z_to_x(slots[i].z_new);
+        if (t1 < t0)
+            std::swap(t0, t1);
+        const float x0 = wp.x + t0 * track_w;
+        const float x1 = wp.x + t1 * track_w;
+        // Prefer density if counts exist; else load_ratio.
+        float hist = slots[i].load;
+        if (slots[i].expected > 0 && slots[i].block_count > 0)
+        {
+            const float dens = static_cast<float>(slots[i].block_count) /
+                               static_cast<float>(slots[i].expected);
+            hist = std::max(hist, dens);
+        }
+        hist = std::clamp(hist, 0.05f, 1.f);
+        const float h = track_h * hist;
+        const float y0 = track_y + track_h - h;
+        const bool is_live = (slots[i].lookback_k == 0);
+        ImU32 col = is_live ? IM_COL32(255, 92, 0, 210)
+                            : ((kHistCol[std::min(i, 2)] & 0x00FFFFFFu) |
+                               (static_cast<ImU32>(200) << 24));
+        // Dim empty / loading bins so ring still "wraps" visually.
+        if (hist < 0.12f)
+            col = (col & 0x00FFFFFFu) | (static_cast<ImU32>(90) << 24);
+        dl->AddRectFilled(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f), col,
+                          2.f);
+        // Divider at past edge (left of bin).
+        dl->AddLine(ImVec2(x0, track_y - 2.f), ImVec2(x0, track_y + track_h + 2.f),
+                    IM_COL32(180, 220, 255, 140), 1.2f);
+        if (slots[i].full)
+            dl->AddRect(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f),
+                        IM_COL32(255, 255, 255, 150), 2.f, 0, 1.1f);
+        char lab[28];
+        if (is_live)
+            std::snprintf(lab, sizeof(lab), "Live #%d", slots[i].global_g);
+        else if (slots[i].global_g >= 0)
+            std::snprintf(lab, sizeof(lab), "#%d", slots[i].global_g);
+        else
+            std::snprintf(lab, sizeof(lab), "k%d", slots[i].lookback_k);
+        const ImVec2 ts = ImGui::CalcTextSize(lab);
+        if (ts.x < (x1 - x0) - 4.f)
+            dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts.x, track_y + 2.f),
+                        IM_COL32(255, 255, 255, 230), lab);
+    }
+
+    // Caret: use scroll target if detached page just snapped; else current Z.
+    const float caret_z = camera_.scroll_z();
+    const float cam_t = std::clamp(z_to_x(caret_z), 0.f, 1.f);
+    const float cx = wp.x + cam_t * track_w;
+    dl->AddLine(ImVec2(cx, track_y - 3.f), ImVec2(cx, track_y + track_h + 3.f),
+                IM_COL32(255, 220, 80, 255), 2.f);
+    dl->AddTriangleFilled(ImVec2(cx, track_y - 3.f), ImVec2(cx - 5.f, track_y - 11.f),
+                          ImVec2(cx + 5.f, track_y - 11.f), IM_COL32(255, 220, 80, 255));
+
+    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 6.f));
+    const bool track_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    const double now_sec = ImGui::GetTime();
+    constexpr double kEdgePageCooldown = 0.14; // hold-to-page rate (~7/s)
+
+    if (track_hot)
+    {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+            (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)))
+        {
+            minimap_dragging_ = true;
+            const float mx = ImGui::GetIO().MousePos.x;
+            const float t = (mx - wp.x) / std::max(1.f, track_w);
+            // Scrub past edges: rate-limited wrap (not one-shot latch).
+            if (t < -0.02f)
+            {
+                if (now_sec >= minimap_edge_page_next_sec_)
+                {
+                    page_older_one();
+                    minimap_edge_page_next_sec_ = now_sec + kEdgePageCooldown;
+                }
+            }
+            else if (t > 1.02f)
+            {
+                if (now_sec >= minimap_edge_page_next_sec_)
+                {
+                    if (at_live)
+                        camera_.reattach_timeline();
+                    else
+                        page_newer_one();
+                    minimap_edge_page_next_sec_ = now_sec + kEdgePageCooldown;
+                }
+            }
+            else
+            {
+                camera_.set_scroll_z(x_to_z(t));
+            }
+        }
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && minimap_dragging_ &&
+            !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.f))
+        {
+            camera_.set_scroll_z_immediate(snap_to_seg_mid(camera_.scroll_z()));
+        }
+        if (ImGui::IsItemHovered() && nslot > 0)
+        {
+            const float z = camera_.scroll_z();
+            int best = 0;
+            float bd = 1e30f;
+            for (int i = 0; i < nslot; ++i)
+            {
+                const float mid = 0.5f * (slots[i].z_new + slots[i].z_old);
+                const float d = std::abs(mid - z);
+                if (d < bd)
+                {
+                    bd = d;
+                    best = i;
+                }
+            }
+            if (slots[best].valid)
+                ImGui::SetTooltip(
+                    "Ring bin  G=%d  k=%d  load=%.0f%%  blocks=%d\n"
+                    "3-slot histogram | page edge to wrap indices",
+                    slots[best].global_g, slots[best].lookback_k, slots[best].load * 100.f,
+                    slots[best].block_count);
+        }
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        minimap_dragging_ = false;
+
+    ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y));
+    if (ImGui::SmallButton("Live"))
+        camera_.reattach_timeline();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("< Seg"))
+        page_older_one();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Seg >"))
+    {
+        if (at_live)
+            camera_.reattach_timeline();
+        else
+            page_newer_one();
+    }
+    ImGui::SameLine();
+    if (nslot > 0)
+    {
+        const int g_lo = slots[0].global_g;
+        const int g_hi = slots[nslot - 1].global_g;
+        ImGui::TextDisabled("hist 3-bin | G %d..%d | wrap", g_lo, g_hi);
+    }
+    else
+        ImGui::TextDisabled("hist 3-bin | wrap ring");
+
+    ImGui::End();
 }
 
 void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h)
@@ -304,6 +672,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
                         domain_ = next;
                         session_start_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
                         camera_.reattach_timeline();
+                        save_prefs();
                     }
                 }
             }
@@ -434,9 +803,35 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     if (ImGui::CollapsingHeader("Blockflow", ImGuiTreeNodeFlags_DefaultOpen))
     {
         if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
+        {
             engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+            save_prefs();
+        }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+        {
+            float min_alph_f = static_cast<float>(filter_min_alph_);
+            if (ImGui::DragFloat("Min ALPH out", &min_alph_f, 0.1f, 0.f, 1.0e9f, "%.3f",
+                                 ImGuiSliderFlags_AlwaysClamp))
+            {
+                set_filter_min_alph(static_cast<double>(min_alph_f));
+                save_prefs();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Hide blocks whose total output ALPH is below this value.\n"
+                    "0 = off. Unknown amounts are hidden when active.");
+        }
+        if (ImGui::Button("Screenshot (F12)"))
+            engine_.request_screenshot(nullptr);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Save client PNG under docs/images/capture_*.png");
+        ImGui::TextDisabled("F11 fullscreen  ·  Esc exit FS / quit");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "F11: borderless fullscreen (monitor of the window)\n"
+                "Esc in fullscreen: return to windowed\n"
+                "Esc windowed: quit application");
 
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
@@ -640,6 +1035,14 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::Separator();
 
         // â”€â”€ Transactions: one-line headers, expand for detail â”€â”€
+        {
+            const std::string block_alph = alph_sum_block_outputs(inspector);
+            if (!block_alph.empty() && block_alph != "0")
+                ImGui::Text("Block out: %s ALPH", alph_atto_to_display(block_alph).c_str());
+            else if (!inspector.alph_out_atto.empty() && inspector.alph_out_atto != "0")
+                ImGui::Text("Block out: %s ALPH",
+                            alph_atto_to_display(inspector.alph_out_atto).c_str());
+        }
         ImGui::Text("Transactions (%d)", static_cast<int>(inspector.txns.size()));
         if (inspector.txns.empty())
             ImGui::TextDisabled("No transactions loaded (detail may still be fetching).");
@@ -655,13 +1058,20 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             short_id(tx.txid, id_buf, sizeof(id_buf));
             const int n_in = static_cast<int>(tx.inputs.size());
             const int n_out = static_cast<int>(tx.outputs.size());
+            const std::string tx_alph = alph_sum_txn_outputs(tx);
+            const std::string tx_alph_disp =
+                (!tx_alph.empty() && tx_alph != "0") ? alph_atto_to_display(tx_alph) : std::string{};
 
-            // Closed label: short id + io counts + gas (one line, no heavy widgets).
+            char tx_label[192];
+            if (tx_alph_disp.empty())
+                std::snprintf(tx_label, sizeof(tx_label), "%s  in %d · out %d · gas %d", id_buf,
+                              n_in, n_out, tx.gasAmount);
+            else
+                std::snprintf(tx_label, sizeof(tx_label), "%s  in %d · out %d · gas %d · %s ALPH",
+                              id_buf, n_in, n_out, tx.gasAmount, tx_alph_disp.c_str());
             const bool open = ImGui::TreeNodeEx(
-                "##tx",
-                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
-                "%s  in %d Â· out %d Â· gas %d",
-                id_buf, n_in, n_out, tx.gasAmount);
+                "##tx", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
+                "%s", tx_label);
 
             if (ImGui::IsItemHovered() && !tx.txid.empty())
                 ImGui::SetTooltip("%s", tx.txid.c_str());
@@ -725,13 +1135,13 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         ImGui::TextDisabled(
             "Solid=main+deps Â· green=frontier tip + blockDeps Â· cyan=unconfirmed children of frontier Â· orange=missing deps Â· gold=select");
         {
-            // User-facing names (adapter phases still Bootstrap/IdentifyTips/DfsTrace/Steady).
+            // Adapter phases: Bootstrap/IdentifyTips/BfsTrace/Steady.
             const char* pname = "Bootstrap";
             if (ui.trace_phase == 1) pname = "Identify tips";
-            else if (ui.trace_phase == 2) pname = "Confirm walk";
+            else if (ui.trace_phase == 2) pname = "BFS confirm";
             else if (ui.trace_phase == 3) pname = "Steady";
             ImGui::TextDisabled(
-                "Confirm phase: %s Â· open lanes=%d Â· history only if camera unlocks lookback",
+                "Confirm phase: %s | open BFS threads=%d | rays from [g->g] then gaps",
                 pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");

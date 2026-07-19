@@ -28,7 +28,8 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { { 0.7f, 0.7f, 0.7f, 1.0f } };
+    // Brand canvas: near-black (Alephium white-on-black default).
+    colorAttachment.clearValue.color = { { 0.043f, 0.043f, 0.047f, 1.0f } };
     if (msaa)
     {
         colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;

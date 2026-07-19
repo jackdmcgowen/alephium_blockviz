@@ -1,6 +1,7 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
 #include "graphics/frame/frame_shared_state.hpp"
+#include "graphics/frame/vertex_types.hpp"
 
 #include <cstring>
 #include <vector>
@@ -20,16 +21,14 @@ int GraphicsSystem::find_free_gpu_slot_unlocked() const
 
 void GraphicsSystem::submit_frame(const FrameSubmit& frame)
 {
-    publish_frame(frame, {}, {}, {}, {});
+    publish_frame(frame, {}, {});
 }
 
 void GraphicsSystem::publish_frame(const FrameSubmit& frame,
                                  const std::vector<std::string>& pick_map,
-                                 const std::vector<std::string>& confirmed_tip_hashes,
-                                 const std::vector<std::string>& cyan_frontier_hashes,
-                                 const std::vector<std::string>& incomplete_hashes)
+                                 const std::vector<SobelOutlineInstance>& sobel_outlines)
 {
-    // Deep-copy only â€” no GPU work. Latest pending wins if GPU has not acquired yet.
+    // Deep-copy only — no GPU work. Latest pending wins if GPU has not acquired yet.
     std::lock_guard<std::mutex> lock(submit_mutex_);
 
     const int write = find_free_gpu_slot_unlocked();
@@ -41,9 +40,7 @@ void GraphicsSystem::publish_frame(const FrameSubmit& frame,
     slot.camera = frame.camera;
     slot.client_seq = frame.client_seq;
     slot.pick_map = pick_map;
-    slot.confirmed_tip_hashes = confirmed_tip_hashes;
-    slot.cyan_frontier_hashes = cyan_frontier_hashes;
-    slot.incomplete_hashes = incomplete_hashes;
+    slot.sobel_outlines = sobel_outlines;
 
     pending_slot_ = write;
 }
@@ -66,12 +63,27 @@ bool GraphicsSystem::apply_published_frame()
         slot.instances.size());
     frame_resources_.upload_camera(slot.camera, &g_viewProj);
 
+    // Compact outline buffer: pos/scale from published instances, color from app.
+    std::vector<InstanceData> outline_gpu;
+    outline_gpu.reserve(slot.sobel_outlines.size());
+    for (const SobelOutlineInstance& o : slot.sobel_outlines)
+    {
+        if (o.instance_index >= slot.instances.size())
+            continue;
+        if (outline_gpu.size() >= kMaxSobelInstances)
+            break;
+        const GpuInstance& src = slot.instances[o.instance_index];
+        InstanceData d{};
+        d.pos = src.pos;
+        d.scale = src.scale;
+        d.color = glm::vec3(o.color.r, o.color.g, o.color.b);
+        d.alpha = o.color.a;
+        outline_gpu.push_back(d);
+    }
+    frame_resources_.upload_outline_instances(
+        outline_gpu.empty() ? nullptr : outline_gpu.data(), outline_gpu.size());
+
     pick_id_to_hash_ = slot.pick_map;
-    sobel_tip_hashes_ = slot.confirmed_tip_hashes;
-    sobel_cyan_hashes_ = slot.cyan_frontier_hashes;
-    sobel_incomplete_hashes_ = slot.incomplete_hashes;
     gpu_frame_seq_ = slot.client_seq;
     return true;
 }
-
-

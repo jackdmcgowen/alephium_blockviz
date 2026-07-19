@@ -36,17 +36,29 @@ Network owns curl lifecycle, the poller thread, REST helpers (`commands.c`), and
 ### Adapter phases
 
 ```text
-BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady
+BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady
 ```
 
 | Phase | Behavior (summary) |
 |-------|---------------------|
 | **BootstrapPoll** | First lookback window poll |
 | **IdentifyTips** | Establish tips / main-chain identity; poll may be gated |
-| **DfsTrace** | Per-lane confirm walk (pool-oriented); poll may be gated |
-| **Steady** | Interval polls; concurrent confirm maintenance |
+| **BfsTrace** | Parallel BFS confirm (`N=2G−1` workers): phase A seeds diagonal tips `[g→g]` only; phase B seeds remaining tips only if not already visited. Cross-shard deps. Pool-only expand; live holes hash-fill, history time-slots. Restart when segment fully loads. |
+| **Steady** | Interval polls; BFS maintenance + camera-unlock restart |
 
 Additional policy themes (see header comments on `AlephiumAdapter`): sequential frontier height `H_c`, free-main dep propagation, chain-walk multi-step confirm, live vs historical fetch rules (history may restrict hash fetches).
+
+**Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
+
+**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
+
+**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. History **≥2** is gated until Steady and live window 0 is fully chunk-filled.
+
+**Triple-buffer segment ring:** always **current + 2 ahead** `{k_eff, k_eff+1, k_eff+2}` (HUD older→newer). Prefetch hysteresis (~40% into current segment toward older) raises `k_eff` early; pump fills **ahead windows first**. Bootstrap includes index 2 ASAP. **Global index G** from genesis; windows genesis-aligned. Minimap Z-proportional to planes; page-older steps one segment and recenters toward the **right**.
+
+**Cache:** keep graph/detail until process private memory ≈ **2 GB** (or soft node cap); no routine 2×lookback wipe. Evict oldest non-frontier under pressure.
+
+**Timeline origin:** sticky session origin (not min loaded block ts) so attached camera Z does not jump when history admits.
 
 ### Domains
 
@@ -94,14 +106,19 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| **P0** | Keep phases, dual-write rules, and thread contract accurate | Update when adapter policy shifts |
-| **P0** | Document `INetworkSystem` + domain enums | `configure`, `switch_domain`, status |
 | **Done** | Offline Debug / FakeChain simulator | `src/network/fake/fake_chain_simulator.*` |
-| **Done** | Unit tests (no GPU) | `tests/domain_tests.cpp` / `blockviz_tests` |
+| **Done** | Unit tests (no GPU) | `vnv/mod/tests/` / `mod_domain` via `run_vnv.ps1` |
+| **Done** | Live poll vs camera lookback `k` | Skip window 0 while `k>0`; resync on return |
+| **Done** | Chunked timeline interval polls | ~60s chunks, budgeted pump, newest-first |
+| **Done** | Dual-segment bootstrap + triple-buffer ring | ≤3 active segments; admit-driven progress |
+| **Done** | HttpIoPool + async interval GETs | Workers overlap timeline RTT; `mod_network` |
+| **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
+| **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |
+| **Standing** | Keep phases, dual-write, thread contract accurate | Hygiene when adapter policy shifts |
 | **P1** | Config / URL resolution notes | `config.json` array + `network_domain_resolve_url` |
-| **P2** | Retention / prune policy | Graph + detail vs lookback + camera history |
 | **P2** | Optional websocket tip stream | Focused feature, not a networking rewrite |
 | **P2** | Second real chain adapter | After FakeChain proves wiring |
+| **P2** | Eye-centered chunk priority / adaptive chunk size | Optional polish on top of newest-first |
 
 ## Interfaces
 
@@ -123,8 +140,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 | Thread | Work |
 |--------|------|
-| Network / poller | Poll, verify drain, fetch pool, cache, scene writes |
+| Network / poller | Policy: poll schedule, drain results, admit, confirm, cache, scene writes |
+| **HttpIoPool workers** (default 6) | REST GETs only (interval chunks, block-by-hash, …); private curl / transport |
 | UI / render | Must not call into `MainChainCache`; domain switch may **block** until poller restarted |
+
+Timeline `blocks-with-events` chunks are **enqueued** to the pool (inflight cap ~4) so bootstrap/history RTT overlaps; poller **admits** on drain. VnV: `vnv/mod/tests/network/` (`mod_network`).
 
 ## Related
 

@@ -9,6 +9,8 @@
 #include "app/camera_controller.hpp"
 #include "app/scene_presenter.hpp"
 #include "app/config.h"
+#include "app/user_prefs.hpp"
+#include "app/window_fullscreen.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
@@ -31,6 +33,7 @@ static CameraController camera;
 static IEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
 static ScenePresenter* scene_presenter = nullptr;
+static WindowFullscreenState g_fullscreen{};
 
 static void stop_engine_once()
 {
@@ -38,6 +41,12 @@ static void stop_engine_once()
         return;
     engine->stop();
     engine_stopped = true;
+}
+
+static void request_resize_if_engine()
+{
+    if (engine)
+        engine->on_resize();
 }
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -50,6 +59,35 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         if (engine)
             engine->on_resize();
+        break;
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        // Ignore key repeats (bit 30 of lParam).
+        if (lParam & (1 << 30))
+            break;
+        if (wParam == VK_F11)
+        {
+            if (toggle_borderless_fullscreen(hwnd, g_fullscreen))
+                request_resize_if_engine();
+            return 0;
+        }
+        if (wParam == VK_ESCAPE)
+        {
+            if (g_fullscreen.fullscreen)
+            {
+                if (set_borderless_fullscreen(hwnd, g_fullscreen, false))
+                    request_resize_if_engine();
+            }
+            else
+            {
+                // Windowed: Esc quits (historical behavior).
+                keepRunning = false;
+                stop_engine_once();
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
         break;
 
     case WM_CLOSE:
@@ -107,8 +145,12 @@ int main()
         if (config_array.configs[i].url)
             domain_urls.emplace_back(config_array.configs[i].url);
     }
-    const NetworkDomain boot_domain =
-        network_domain_from_url(config_array.configs[0].url);
+    const UserPrefs prefs = load_user_prefs();
+    // Prefer last-used domain from user_prefs.json; fall back to first config URL.
+    NetworkDomain boot_domain = prefs.domain;
+    if (boot_domain != NetworkDomain::Debug && boot_domain != NetworkDomain::Mainnet &&
+        boot_domain != NetworkDomain::Testnet)
+        boot_domain = network_domain_from_url(config_array.configs[0].url);
     std::vector<const char*> url_ptrs;
     url_ptrs.reserve(domain_urls.size());
     for (const auto& u : domain_urls)
@@ -118,6 +160,8 @@ int main()
         static_cast<int>(url_ptrs.size()));
     printf("Using config url: %s (domain %s)\n", boot_url.c_str(),
            network_domain_label(boot_domain));
+    if (prefs.filter_multi_tx)
+        printf("Prefs: filter_multi_tx=on\n");
 
     // One init path: configure + register all systems, then init_systems / start once.
     engine = create_engine();
@@ -134,7 +178,10 @@ int main()
     NetworkSystemConfig net_cfg;
     net_cfg.base_url = boot_url;
     net_cfg.domain = static_cast<int>(boot_domain);
-    net_cfg.lookback_ms = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const int lookback_sec = (prefs.lookback_seconds > 0)
+                                 ? prefs.lookback_seconds
+                                 : ALPH_LOOKBACK_WINDOW_SECONDS;
+    net_cfg.lookback_ms = static_cast<int64_t>(lookback_sec) * 1000;
     net_cfg.poll_interval_ms = static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
 
     INetworkSystem* network = create_network_system(scene, *engine);
@@ -146,6 +193,10 @@ int main()
     overlay = new BlockflowOverlay(camera, *engine);
     overlay->set_domain_urls(domain_urls);
     overlay->set_initial_domain(boot_domain);
+    if (prefs.filter_multi_tx)
+        overlay->set_filter_multi_tx(true);
+    if (prefs.filter_min_alph > 0.0)
+        overlay->set_filter_min_alph(prefs.filter_min_alph);
     scene_presenter = new ScenePresenter(scene);
     engine->set_scene(&scene);
     engine->set_camera(&camera);
@@ -168,16 +219,14 @@ int main()
             DispatchMessage(&msg);
         }
 
-        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
-        {
-            keepRunning = false;
-            stop_engine_once();
-        }
+        // Esc / F11 handled in WndProc (FS-aware). Do not poll GetAsyncKeyState here.
 
         Sleep(10);
     }
 
     stop_engine_once();
+    if (overlay)
+        overlay->save_prefs();
     engine->free_systems();
     destroy_engine(engine);
     engine = nullptr;

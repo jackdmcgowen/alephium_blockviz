@@ -112,6 +112,8 @@
     <ClCompile Include="..\src\network\network_system.cpp" />
     <ClCompile Include="..\src\network\alephium\network_poller.cpp" />
     <ClCompile Include="..\src\network\alephium\block_fetch_pool.cpp" />
+    <ClCompile Include="..\src\network\alephium\http_transport.cpp" />
+    <ClCompile Include="..\src\network\alephium\http_io_pool.cpp" />
     <ClCompile Include="..\src\network\alephium\alephium_adapter.cpp" />
     <ClCompile Include="..\src\network\alephium\main_chain_cache.cpp" />
     <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp" />

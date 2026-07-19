@@ -72,11 +72,12 @@
     <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\selection_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\async_sobel_submit.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\sobel_async_pass.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\screenshot.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\picker.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pipelines\sobel_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
     <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
@@ -99,7 +100,9 @@
     <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\picker.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\sobel_compute.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\sobel_async_pass.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\sobel_types.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\pipelines\sobel_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\vertex_types.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>

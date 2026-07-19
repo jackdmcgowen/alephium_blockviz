@@ -4,7 +4,7 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).
 
 **Last updated:** 2026-07-19  
-**Versions:** app **0.4.0** · engine **0.5.0** (see identity headers)
+**Versions:** app **0.6.0** · engine **0.7.0** (see identity headers)
 
 | Status | Meaning |
 |--------|---------|
@@ -27,7 +27,10 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | Living layer docs (app, engine, graphics, network) | [layers/](layers/README.md) |
 | Scene UX + graphics pipeline modular work (feature branch) | multi-tx filter, billboards, dep hover, PSO/frame split — on `feature/graphics-pipeline-descriptor-modular` |
 | Offline **Debug / FakeChain** simulator | [network](layers/network.md) `fake/fake_chain_simulator.*`; Network panel Debug selectable |
-| Domain / detail **unit tests** | `tests/domain_tests.cpp` · `sln/blockviz_tests.vcxproj` |
+| Domain / detail **unit tests** | `vnv/mod/tests/` · `mod_domain` |
+| Borderless **fullscreen** (F11 / Esc exit FS) | App `window_fullscreen.hpp`; graphics resizes only |
+| Graphics **visual regression** harness (V1) | `vnv/int/tests/visual/` · `int_visual` |
+| **VnV framework** (mod/int/bench layout + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `scripts/run_vnv.ps1` |
 
 ---
 
@@ -35,7 +38,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| — | *(empty — previous P0 landed on feature branch with app 0.4 / engine 0.5)* | | Merge to `main` + push `app-v0.4.0` / `engine-v0.5.0` tags when ready ([AGENTS.md](../AGENTS.md)) |
+| — | *(empty — p1 branch release: timeline ring, BFS confirm, minimap histogram)* | | Merge to `main` + `app-v0.6.0` / `engine-v0.7.0` tags ([AGENTS.md](../AGENTS.md)) |
 
 ---
 
@@ -43,9 +46,11 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 4 | **Config persistence** (last domain, filters, optional layout meters) | [app](layers/app.md) | Modularization PR12 remainder |
-| 5 | Graph + detail **retention / prune** policy | domain · [network](layers/network.md) | Growth was accepted short-term; lookback/history will need bounds |
-| 6 | Optional **`docs/layers/domain.md`** | docs | Shared `BlockScene` / graph / layout data plane not fully documented |
+| 4 | **Config persistence** (last domain, filters) | [app](layers/app.md) | **Done on `feature/p1-config-persistence-prune`** — `user_prefs.json` |
+| 5 | Graph + detail **retention / prune** policy | [domain](layers/domain.md) · [network](layers/network.md) | **Done on branch** — `BlockScene::prune`, poller + FakeChain hooks |
+| 6 | **`docs/layers/domain.md`** | docs | **Done on branch** |
+
+*(Mark fully Done in the Done table after merge to main.)*
 
 ---
 
@@ -56,7 +61,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | 7 | Richer **dep-viz modes** (selection / frontier / LOD) | [app](layers/app.md) | Product decision first; avoid full edge soup by default |
 | 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
 | 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
-| 10 | **History depth + LOD** presentation | app · network | Builds on segment cull / camera history |
+| 10 | **History depth + LOD** presentation | app · network | Network half: chunked timeline ingest done on branch; presentation LOD still open |
 | 11 | **Second real chain** adapter | [network](layers/network.md) | Only after FakeChain proves multi-adapter wiring |
 | 12 | Headless / client-driven **frame test seam** | [engine](layers/engine.md) · [graphics](layers/graphics.md) | Only if automated GPU / CI tests become a goal |
 

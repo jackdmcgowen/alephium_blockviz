@@ -1,14 +1,16 @@
 #pragma once
 
-// Selection / confirmed-tip depth pass + async Sobel on CMP + edge overlay on _3D.
-// Scene depth is not used — only the requested instances are redrawn into sel_depth_.
+// Sobel pipeline assets: outline depth+color draw + compute edge detect + overlay.
+// Images/descriptors live here; multi-queue submit is SobelAsyncPass (frame/).
+// Scene depth is not used — only requested instances are redrawn into sel_depth_.
+// Outline colors come from a compact instance buffer (app-fed); Sobel edge is white × color.
 #include "graphics/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
 
-struct SobelComputeCreateInfo
+struct SobelPipelineCreateInfo
 {
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties* mem_props = nullptr;
@@ -20,17 +22,16 @@ struct SobelComputeCreateInfo
     uint32_t compute_family = 0;
 };
 
-// One clear + N indexed draws of cube instances in a single BeginRendering.
-// Cubes only — never debug arrows. Safety cap is high (see record_selection_depth).
-struct SelectionDepthDrawParams
+// One clear + one multi-instance DrawIndexed of outline cubes (pos/scale/color).
+// Cubes only — never debug arrows. Safety cap is high (see record_outline_pass).
+struct OutlinePassDrawParams
 {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkDescriptorSet ubo_set = VK_NULL_HANDLE;
     VkBuffer vertex_buffer = VK_NULL_HANDLE;
-    VkBuffer instance_buffer = VK_NULL_HANDLE;
+    VkBuffer outline_instance_buffer = VK_NULL_HANDLE; // InstanceData[] compact
     VkBuffer index_buffer = VK_NULL_HANDLE;
-    const uint32_t* instance_indices = nullptr;
-    uint32_t instance_index_count = 0; // ≥1 when recording; capped at kMaxSobelInstances
+    uint32_t outline_count = 0; // ≥1 when recording; capped at kMaxSobelInstances
     uint32_t index_count = 36;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -39,19 +40,22 @@ struct SelectionDepthDrawParams
 // Soft safety ceiling (not a product limit of 32). All eligible cubes may be highlighted.
 static constexpr uint32_t kMaxSobelInstances = 4096;
 
-class SobelCompute
+class SobelPipeline
 {
 public:
-    void create(const SobelComputeCreateInfo& info);
+    void create(const SobelPipelineCreateInfo& info);
     void destroy(VkDevice device);
-    void recreate(const SobelComputeCreateInfo& info);
+    void recreate(const SobelPipelineCreateInfo& info);
 
-    // Clear + redraw N instances into sel_depth_ (depth-only). Leaves sel_depth_ as DEPTH_ATTACHMENT.
-    // Single BeginRendering: one LOAD_OP_CLEAR then N DrawIndexed — no re-clear between draws.
-    void record_selection_depth(const SelectionDepthDrawParams& p);
+    // Clear depth+color, redraw N outline instances in one BeginRendering.
+    // Leaves sel_depth_ as DEPTH_ATTACHMENT and outline_color as COLOR_ATTACHMENT.
+    void record_outline_pass(const OutlinePassDrawParams& p);
 
-    // Transition sel_depth_ DEPTH_ATTACHMENT → SHADER_READ (and queue release if needed).
+    // Transition sel_depth_ DEPTH_ATTACHMENT → release for compute.
     void record_sel_depth_release_for_compute(VkCommandBuffer cmd);
+
+    // COLOR_ATTACHMENT → SHADER_READ for overlay sampling (graphics family).
+    void record_outline_color_to_shader_read(VkCommandBuffer cmd);
 
     // Compute: sample sel_depth_, write edge image (CMP-queue-safe stages only).
     void record_dispatch(VkCommandBuffer cmd, float strength, float threshold);
@@ -59,9 +63,9 @@ public:
     // Graphics: acquire edge image + GENERAL → SHADER_READ before overlay sample.
     void record_edge_acquire_for_graphics(VkCommandBuffer cmd);
 
-    // Fullscreen edge overlay into current color attachment (additive blend).
+    // Fullscreen edge×color overlay into current color attachment (premultiplied).
     void record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
-                        const float highlight_rgba[4]);
+                        float intensity = 1.0f);
 
     VkImage sel_depth_image() const { return sel_depth_image_; }
     VkImageView sel_depth_view() const { return sel_depth_view_; }
@@ -71,15 +75,15 @@ public:
     VkSemaphore graphics_to_compute(uint32_t frame_index) const;
     VkSemaphore compute_finished(uint32_t frame_index) const;
 
-    bool ready() const { return pipeline_ != VK_NULL_HANDLE && depth_only_pipeline_ != VK_NULL_HANDLE; }
+    bool ready() const { return pipeline_ != VK_NULL_HANDLE && outline_pipeline_ != VK_NULL_HANDLE; }
 
 private:
-    void create_images(const SobelComputeCreateInfo& info);
+    void create_images(const SobelPipelineCreateInfo& info);
     void create_descriptors(VkDevice device);
     void write_static_descriptors_();
     void create_compute_pipeline(VkDevice device);
-    void create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
-                                    VkDescriptorSetLayout ubo_layout);
+    void create_outline_pipeline(VkDevice device, VkFormat depth_format,
+                                 VkDescriptorSetLayout ubo_layout);
     void create_overlay_pipeline(VkDevice device, VkFormat color_format);
     void create_sync(VkDevice device);
 
@@ -90,10 +94,15 @@ private:
     uint32_t compute_family_ = 0;
     VkFormat depth_format_ = VK_FORMAT_UNDEFINED;
 
-    // Selection-only depth (not the scene depth)
+    // Outline-only depth (not the scene depth)
     VkImage sel_depth_image_ = VK_NULL_HANDLE;
     VkDeviceMemory sel_depth_memory_ = VK_NULL_HANDLE;
     VkImageView sel_depth_view_ = VK_NULL_HANDLE;
+
+    // Per-pixel outline tint (written with depth; sampled by overlay)
+    VkImage outline_color_image_ = VK_NULL_HANDLE;
+    VkDeviceMemory outline_color_memory_ = VK_NULL_HANDLE;
+    VkImageView outline_color_view_ = VK_NULL_HANDLE;
 
     VkImage edge_image_ = VK_NULL_HANDLE;
     VkDeviceMemory edge_memory_ = VK_NULL_HANDLE;
@@ -101,6 +110,7 @@ private:
 
     VkSampler depth_sampler_ = VK_NULL_HANDLE;
     VkSampler edge_sampler_ = VK_NULL_HANDLE;
+    VkSampler outline_color_sampler_ = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout compute_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
@@ -108,9 +118,9 @@ private:
     VkPipelineLayout compute_layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 
-    // Depth-only redraw of selection / tip instances
-    VkPipelineLayout depth_only_layout_ = VK_NULL_HANDLE;
-    VkPipeline depth_only_pipeline_ = VK_NULL_HANDLE;
+    // Outline depth+color redraw of all requested instances (single pass)
+    VkPipelineLayout outline_layout_ = VK_NULL_HANDLE;
+    VkPipeline outline_pipeline_ = VK_NULL_HANDLE;
 
     VkDescriptorSetLayout overlay_set_layout_ = VK_NULL_HANDLE;
     VkDescriptorSet overlay_set_ = VK_NULL_HANDLE;

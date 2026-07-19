@@ -233,7 +233,7 @@ void GraphicsSystem::init()
     create_sync_objects();
 
     {
-        SobelComputeCreateInfo sci{};
+        SobelPipelineCreateInfo sci{};
         sci.device = device;
         sci.mem_props = &deviceMemProps;
         sci.width = width;
@@ -242,7 +242,8 @@ void GraphicsSystem::init()
         sci.frame_ubo_layout = frame_descriptors_.layout();
         sci.graphics_family = queues_.family_index(QueueType::_3D);
         sci.compute_family = queues_.family_index(QueueType::CMP);
-        sobel_.create(sci);
+        sobel_pipe_.create(sci);
+        sobel_async_.create(device);
     }
 
     // Setup Dear ImGui context
@@ -252,16 +253,34 @@ void GraphicsSystem::init()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 
     ImGuiStyle& style = ImGui::GetStyle();
-
-    // Set background color to dark grey
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
-
-    // Set text color to light grey
-    style.Colors[ImGuiCol_Text] = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
-
-    // Set button color
-    style.Colors[ImGuiCol_Button] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f); // Dark button color
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f); // Slightly lighter on hover
+    // Alephium-aligned chrome: black panels, white type, brand orange accents.
+    // Tokens: docs/brand/alephium_palette.md
+    style.WindowRounding = 4.f;
+    style.FrameRounding = 3.f;
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.102f, 0.106f, 0.118f, 0.96f); // panel #1A1B1E
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.08f, 0.09f, 0.94f);
+    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.12f, 0.14f, 0.98f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.165f, 0.173f, 0.192f, 1.f); // #2A2C31
+    style.Colors[ImGuiCol_Text] = ImVec4(0.96f, 0.96f, 0.96f, 1.f);
+    style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.62f, 1.f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.18f, 0.18f, 0.20f, 1.f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(1.f, 0.36f, 0.0f, 0.35f); // brand orange
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(1.f, 0.36f, 0.0f, 0.55f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.16f, 0.16f, 0.18f, 1.f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1.f, 0.36f, 0.0f, 0.45f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(1.f, 0.36f, 0.0f, 0.70f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.18f, 0.16f, 1.f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.20f, 0.14f, 1.f);
+    style.Colors[ImGuiCol_CheckMark] = ImVec4(1.f, 0.36f, 0.0f, 1.f);
+    style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.f, 0.36f, 0.0f, 0.9f);
+    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.f, 0.45f, 0.1f, 1.f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.10f, 0.09f, 1.f);
+    style.Colors[ImGuiCol_Separator] = ImVec4(0.22f, 0.22f, 0.24f, 1.f);
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.08f, 0.08f, 0.09f, 0.8f);
+    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.28f, 0.30f, 1.f);
+    style.Colors[ImGuiCol_PlotHistogram] = ImVec4(1.f, 0.36f, 0.0f, 0.85f);
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplVulkan_InitInfo imgui_vk = {};
@@ -304,7 +323,7 @@ void GraphicsSystem::init()
         const uint32_t main_p = g.add_pass(PassNode{ "MainColorDepth", QueueType::_3D, {} });
         const uint32_t pick_p = g.add_pass(PassNode{ "Picker", QueueType::_3D, {} });
         const uint32_t sel_p  = g.add_pass(PassNode{ "SelectionDepth", QueueType::_3D, {} });
-        const uint32_t sob_p  = g.add_pass(PassNode{ "SobelCompute", QueueType::CMP, {} });
+        const uint32_t sob_p  = g.add_pass(PassNode{ "SobelAsyncCMP", QueueType::CMP, {} });
         const uint32_t ovl_p  = g.add_pass(PassNode{ "EdgeOverlay", QueueType::_3D, {} });
         const uint32_t pre_p  = g.add_pass(PassNode{ "Present", QueueType::_3D, {} });
         ImageBarrierEdge e{};
@@ -361,13 +380,8 @@ void GraphicsSystem::stop()
     running = false;
     if (renderThread.joinable())
         renderThread.join();
-    // Drain in-flight multi-layer Sobel before free() tears down CBs/semaphores.
-    if (sobel_fence_in_flight_ && sobel_done_fence_ != VK_NULL_HANDLE && device != VK_NULL_HANDLE)
-    {
-        vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &sobel_done_fence_);
-        sobel_fence_in_flight_ = false;
-    }
+    // Drain in-flight Sobel before free() tears down CBs/semaphores.
+    sobel_async_.wait_idle(device);
 }
 
 
@@ -436,7 +450,8 @@ void GraphicsSystem::resize_internal()
         picker_.recreate_resources(pr);
     }
     {
-        SobelComputeCreateInfo sci{};
+        sobel_async_.wait_idle(device);
+        SobelPipelineCreateInfo sci{};
         sci.device = device;
         sci.mem_props = &deviceMemProps;
         sci.width = width;
@@ -445,7 +460,7 @@ void GraphicsSystem::resize_internal()
         sci.frame_ubo_layout = frame_descriptors_.layout();
         sci.graphics_family = queues_.family_index(QueueType::_3D);
         sci.compute_family = queues_.family_index(QueueType::CMP);
-        sobel_.recreate(sci);
+        sobel_pipe_.recreate(sci);
     }
 
     s_resized = true;
@@ -528,9 +543,6 @@ void GraphicsSystem::create_command_pool()
             throw std::runtime_error("Failed to allocate _3D main command buffers");
         if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].overlayCommandBuffer) != VK_SUCCESS)
             throw std::runtime_error("Failed to allocate _3D overlay command buffers");
-        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].layerDepthCommandBuffer) !=
-            VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate _3D layer-depth command buffers");
     }
 
     allocInfo.commandPool = computeCommandPool;
@@ -552,14 +564,7 @@ void GraphicsSystem::create_sync_objects()
                                      ? static_cast<uint32_t>(MAX_SWAPCHAIN_IMAGES)
                                      : static_cast<uint32_t>(swapchainImages.size());
     frame_sync_.create(info);
-
-    if (sobel_done_fence_ == VK_NULL_HANDLE)
-    {
-        VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        if (vkCreateFence(device, &fci, nullptr, &sobel_done_fence_) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create sobel completion fence");
-    }
-    sobel_fence_in_flight_ = false;
+    sobel_async_.create(device);
 }
 
 
@@ -668,7 +673,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
         }
     }
 
-    // Async Sobel path adds depth barriers and ends the CB in submit_frame_with_async_sobel.
+    // Async Sobel path adds depth barriers and ends the CB in SobelAsyncPass::submit.
     if (!defer_present)
         frame_recorder_.end(buffer);
 
@@ -690,21 +695,14 @@ void GraphicsSystem::cleanup()
         g_meshArena = nullptr;
     }
 
-    sobel_.destroy(device);
+    sobel_async_.destroy(device);
+    sobel_pipe_.destroy(device);
 
-    // Descriptors reference UBO in frame_resources â€” free pool before buffers.
+    // Descriptors reference UBO in frame_resources — free pool before buffers.
     frame_descriptors_.destroy(device);
     frame_resources_.destroy(device);
 
     frame_sync_.destroy(device);
-    if (sobel_done_fence_ != VK_NULL_HANDLE)
-    {
-        if (sobel_fence_in_flight_)
-            vkWaitForFences(device, 1, &sobel_done_fence_, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(device, sobel_done_fence_, nullptr);
-        sobel_done_fence_ = VK_NULL_HANDLE;
-        sobel_fence_in_flight_ = false;
-    }
     if (computeCommandPool != VK_NULL_HANDLE)
     {
         vkDestroyCommandPool(device, computeCommandPool, nullptr);
@@ -720,7 +718,6 @@ void GraphicsSystem::cleanup()
         inFlightFrames[i].commandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].computeCommandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].overlayCommandBuffer = VK_NULL_HANDLE;
-        inFlightFrames[i].layerDepthCommandBuffer = VK_NULL_HANDLE;
     }
 
     picker_.destroy(device);

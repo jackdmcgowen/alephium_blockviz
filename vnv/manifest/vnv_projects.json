@@ -1,0 +1,39 @@
+{
+  "projects": [
+    {
+      "id": "mod_domain",
+      "category": "mod",
+      "vcxproj": "sln/mod_domain.vcxproj",
+      "guid": "{B7E2C91A-4F3D-48A1-9C6E-2D8F0A1B3C4D}",
+      "exe_name": "mod_domain.exe",
+      "out_dir_key": "mod_domain",
+      "depends_on_libraries": [],
+      "sources_under": "vnv/mod/tests/domain/",
+      "run_by_default": true
+    },
+    {
+      "id": "mod_network",
+      "category": "mod",
+      "vcxproj": "sln/mod_network.vcxproj",
+      "guid": "{D1E2F3A4-B5C6-4789-9ABC-DEF012345678}",
+      "exe_name": "mod_network.exe",
+      "out_dir_key": "mod_network",
+      "depends_on_libraries": [],
+      "sources_under": "vnv/mod/tests/network/",
+      "run_by_default": true
+    },
+    {
+      "id": "int_visual",
+      "category": "int",
+      "vcxproj": "sln/int_visual.vcxproj",
+      "guid": "{C8D3E4F5-A1B2-4C5D-9E0F-1A2B3C4D5E6F}",
+      "exe_name": "int_visual.exe",
+      "out_dir_key": "int_visual",
+      "depends_on_libraries": ["blockviz_engine", "graphics", "network"],
+      "sources_under": "vnv/int/tests/visual/",
+      "run_by_default": true,
+      "kind": "visual_golden",
+      "case": "fake_overview"
+    }
+  ]
+}

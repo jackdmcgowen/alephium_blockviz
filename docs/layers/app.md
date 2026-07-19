@@ -16,15 +16,18 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `ScenePresenter` visual policy | Graphics pipelines / Sobel barriers |
 | `CameraController` timeline UX | Network thread lifecycle |
 | Host identity (`app_identity.hpp`) | Engine version tags |
+| Borderless fullscreen (HWND style + placement) | Exclusive display mode / Vulkan FS exclusive |
 
 ## Current surface
 
 | Path | Role |
 |------|------|
-| `src/app/main.cpp` | Window, config boot, system register, message pump |
+| `src/app/main.cpp` | Window, config boot, system register, message pump; F11/Esc fullscreen |
+| `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (save style + placement) |
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
-| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, highlight hash lists, `UiSnapshot` |
+| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
+| Timeline minimap (overlay) | **3-bin histogram** of the triple-buffer ring (older→newer); bar height ∝ load/density; `#G` labels wrap as the ring slides; Live / scrub / page; edge hold auto-pages (no 3-segment history cap — lookback continues to genesis) |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |
@@ -47,6 +50,10 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 
 Presentation only — confirmation marks come from **network** into `BlockScene`.
 
+### Sobel colors (app → graphics)
+
+Graphics is domain-agnostic: the presenter emits `std::vector<SobelOutlineInstance>` with `instance_index` + `rgba` (intensity in **a**). Product roles map to palette constants in `scene_presenter.cpp` (gold / tip green / frontier cyan / incomplete orange). Selection is exclusive (gold only); otherwise role outlines are co-visible in **one** GPU pass. Kill-switch arrives as `FrameSourceInput::enable_role_outlines`.
+
 ## Goals
 
 1. Readable BlockFlow frontier at a glance (table above).
@@ -55,6 +62,7 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 4. Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.
 5. Keep product color / filter policy out of graphics Vulkan code.
 6. Ship host version via `app_identity` + `app-v*` tags on `main` (`AGENTS.md`).
+7. **Borderless fullscreen:** F11 toggles; **Esc exits fullscreen** (windowed Esc still quits). Graphics only resizes.
 
 ## Non-goals
 
@@ -73,9 +81,16 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 |----------|------|--------|
 | **P0** | Keep this visual model + color legend aligned with code | Update when `ScenePresenter` semantics change |
 | **Done** | Enable Debug domain in overlay | FakeChain selectable in Network panel |
-| **P1** | Config persistence | Last domain, multi-tx filter, optional layout meters (modularization PR12 remainder) |
+| **Done** | Config persistence | Last domain, multi-tx + min ALPH filters (`user_prefs.json`) |
+| **Done** | Timeline minimap + segment jump | Bottom strip; Live / scrub / prev-next |
+| **Done** | ALPH out totals + amount filter | Sum txn outputs; billboard + inspector; min ALPH filter |
+| **Done** | Layout/camera orientation | Lane 0→0 screen-right; LMB/RMB signs fixed |
 | **P2** | Confirm polish | Feed-row confirmed badge; eye-check green vs shard palette; dual outline only if product asks |
 | **P2** | History / LOD presentation | Modes on top of segment cull / barrier planes |
+
+**Layout convention:** camera `up=(0,-1,0)` makes world **+X** screen-left; polar placement uses **−r·cos(θ)** so chain **0→0** sits on the viewer’s **right**.
+
+**Timeline origin:** set once per session (`now − lookback`); never rewrite from earliest block (avoids attached-camera Z snaps on load).
 
 ## Interfaces
 

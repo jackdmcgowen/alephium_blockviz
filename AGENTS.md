@@ -41,6 +41,11 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 
 ## Related gates
 
+- **VnV (verification & validation):** see `vnv/README.md`.
+  - After adding/removing a **shared library** or VnV project: edit `vnv/manifest/*.json`, then `.\scripts\sync_solutions.ps1` (updates product + VnV `.sln` files).
+  - Domain/network logic: `.\scripts\run_vnv.ps1` (mod).
+  - Graphics/presentation or before further features: `.\scripts\run_vnv.ps1 -All`.
+  - Drift check: `.\scripts\sync_solutions.ps1 -CheckOnly`.
 - Vulkan validation: follow `.grok/skills/vulkan-validator/SKILL.md` before committing/pushing graphics changes.
 - Build speed / PCH / IWYU / adding systems: see `docs/build-performance.md`. Use `scripts/bench_build.ps1` before claiming compile-time improvements.
 

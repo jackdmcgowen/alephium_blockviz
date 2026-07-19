@@ -86,6 +86,12 @@ void GraphicsSystem::set_scene_filter_multi_tx(bool enabled)
     filter_multi_tx_ = enabled;
 }
 
+void GraphicsSystem::set_scene_filter_min_alph(double min_alph)
+{
+    std::lock_guard<std::mutex> lock(selection_mutex_);
+    filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
+}
+
 std::string GraphicsSystem::consume_detail_refill_request()
 {
     std::lock_guard<std::mutex> lock(detail_refill_mutex_);

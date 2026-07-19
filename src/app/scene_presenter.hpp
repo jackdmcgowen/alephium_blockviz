@@ -10,6 +10,7 @@
 //   orange   — missing-dep incompletes (not green/cyan)
 //   gold     — selection
 //   red      — removal death fade
+//   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
 #include "domain/block_scene.hpp"
 #include "domain/layout.hpp"
 #include "engine/engine.hpp"
@@ -78,10 +79,16 @@ private:
     void tip_dep_tick_and_draw_(DebugDrawer& debug,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
                                 const std::unordered_set<std::string>& live_nodes,
+                                const std::unordered_set<std::string>& drawn_set,
                                 const std::unordered_set<std::string>& green_display,
                                 const std::unordered_set<std::string>& cyan_owners,
                                 const std::unordered_set<std::string>& frontier_domain,
                                 float tip_len, float tip_rad, float shaft_r, float clearance);
+
+    // Short colored BFS paths (no edge soup; both ends must be drawn).
+    void draw_bfs_traces_(DebugDrawer& debug,
+                          const std::unordered_map<std::string, glm::vec3>& positions,
+                          const std::unordered_set<std::string>& drawn_set);
 
     void update_death_and_walk_(const std::unordered_set<std::string>& live_nodes,
                                 const std::unordered_map<std::string, glm::vec3>& positions,

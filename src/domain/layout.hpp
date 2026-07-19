@@ -3,6 +3,7 @@
 // Polar layout for multi-lane block cubes. No Vulkan / cJSON.
 // Z axis is a shared wall-clock timeline (block timestamps), not height index.
 // Heights may diverge across shards — that is expected for a DAG.
+// X: −r·cos(θ) so lane 0 (θ=0) is screen-right under camera up=(0,-1,0).
 #include "domain/block_graph.hpp"
 
 #include <cstdint>
@@ -37,6 +38,7 @@ struct PlacedBlock
     int         height = 0;
     int64_t     timestamp_ms = 0;
     int         txn_count = -1;
+    std::string alph_out_atto; // block total output ALPH (atto); empty = unknown
     bool        is_uncle = false;
     glm::vec3   pos{ 0.0f };
     glm::vec3   color{ 1.0f };
