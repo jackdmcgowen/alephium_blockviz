@@ -135,6 +135,12 @@ private:
     int  camera_lookback_index_() const;
     int64_t window_ms_() const;
     int64_t chunk_ms_() const;
+    // Global segment G from genesis: [genesis+G*W, genesis+(G+1)*W); live = highest G.
+    int  live_global_segment_id_() const;
+    int  global_segment_id_(int64_t ts_ms) const;
+    int  lookback_to_global_(int k) const;
+    int  global_to_lookback_(int G) const;
+    void bounds_for_global_(int G, int64_t& from_ms, int64_t& to_ms) const;
     // Budgeted newest-first chunk GETs for needed windows. Returns chunks fetched.
     int  pump_timeline_chunks_(int max_chunks);
     // Fetch one chunk of a window (newest incomplete, or force newest for live).
@@ -149,6 +155,8 @@ private:
     // Triple-buffer ring of absolute lookback indices (≤ kSegmentRingSize).
     void update_segment_ring_();
     bool is_active_segment_(int index) const;
+    // Lookback k with prefetch hysteresis (start k+1/k+2 before full cross).
+    int  effective_lookback_index_() const;
     // On successful interval admit: advance fill cursor for owning window(s).
     void on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms);
     void on_interval_chunk_failed_(int64_t from_ms);
@@ -220,7 +228,8 @@ private:
     // HTTP fills are chunked (kTimelineChunkMs); polled = all chunks in span done.
     struct LookbackWindowSlot
     {
-        int     index = 0;
+        int     index = 0;            // lookback k (0 = live)
+        int     global_index = -1;    // G from genesis
         int64_t from_ms = 0;
         int64_t to_ms = 0;
         bool    polled = false;           // all chunks fetched once
@@ -277,8 +286,8 @@ private:
     static constexpr int64_t kTimelineChunkMs = 60'000;
     // drain_verify: at most one chunk every this many ms.
     static constexpr int64_t kChunkPumpIntervalMs = 400;
-    static constexpr int kMaxChunksPerPoll = 2;
-    static constexpr int kMaxChunksPerDrain = 1;
+    static constexpr int kMaxChunksPerPoll = 4;
+    static constexpr int kMaxChunksPerDrain = 2;
     // Triple-buffer ring: at most 3 active lookback windows for fetch/HUD/draw.
     static constexpr int kSegmentRingSize = 3;
     static constexpr int kInitialSegmentCount = 2; // bootstrap windows 0 and 1
@@ -286,4 +295,7 @@ private:
     static constexpr int kBootstrapChunksPerDrain = 4;
     static constexpr int kPreTipChunksPerDrain = 2;
     static constexpr int kChunkMaxRetries = 3;
+    // Past this fraction of current segment toward older → bump effective k.
+    static constexpr float kPrefetchHysteresis = 0.40f;
+    static constexpr int kAheadChunksPerDrain = 4; // prioritize filling k+1,k+2
 };

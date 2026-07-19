@@ -8,6 +8,15 @@
 #include <ctime>
 #include <thread>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#endif
+
 extern "C" CURL* curl;
 extern const char* baseUrl;
 
@@ -91,15 +100,35 @@ void NetworkPoller::thread_main()
         // Tip is_main, per-chain DFS, fetch admits.
         adapter_.drain_verify(kVerifyJobsPerIdleSlice, running_);
 
-        // Retention: keep ~2× lookback window and a soft node cap (protects frontier tips).
+        // Retention: keep all history until process private memory ~2 GB (or soft node cap).
+        // No routine time-based wipe — segments stay cached for re-visit.
         {
-            const int64_t look = adapter_.lookback_ms() > 0
-                                     ? adapter_.lookback_ms()
-                                     : static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
-            const int64_t min_ts = now - look * 2;
-            const size_t removed = scene_.prune(min_ts, /*max_nodes=*/12000);
-            if (removed > 0)
-                std::printf("[net] prune removed=%zu (min_ts window 2x lookback)\n", removed);
+            static constexpr size_t kMemCapBytes = 2ull * 1024 * 1024 * 1024;
+            static constexpr size_t kSoftMaxNodes = 250000;
+            size_t private_bytes = 0;
+#if defined(_WIN32)
+            PROCESS_MEMORY_COUNTERS_EX pmc{};
+            if (GetProcessMemoryInfo(GetCurrentProcess(),
+                                     reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
+                                     sizeof(pmc)))
+                private_bytes = static_cast<size_t>(pmc.PrivateUsage);
+#endif
+            const size_t nodes = scene_.total_blocks();
+            const bool over_mem = private_bytes > 0 && private_bytes >= kMemCapBytes;
+            const bool over_nodes = nodes >= kSoftMaxNodes;
+            if (over_mem || over_nodes)
+            {
+                // Drop oldest non-frontier first; no min_ts (retain until mem pressure).
+                size_t cap = kSoftMaxNodes * 9 / 10;
+                if (over_mem && nodes > 1000)
+                    cap = (std::min)(cap, nodes * 85 / 100);
+                if (over_nodes)
+                    cap = (std::min)(cap, kSoftMaxNodes * 9 / 10);
+                const size_t removed = scene_.prune(/*min_timestamp_ms=*/0, cap);
+                if (removed > 0)
+                    std::printf("[net] prune removed=%zu (mem=%zu MB nodes=%zu -> cap %zu)\n",
+                                removed, private_bytes / (1024 * 1024), nodes, cap);
+            }
         }
 
         adapter_.publish_hud(domain_, base_url_copy_.c_str(), /*switching=*/false);

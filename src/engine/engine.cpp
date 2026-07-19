@@ -206,13 +206,10 @@ public:
 
     void publish_frame(const FrameSubmit& frame,
                        const std::vector<std::string>& pick_map,
-                       const std::vector<std::string>& confirmed_tip_hashes,
-                       const std::vector<std::string>& cyan_frontier_hashes,
-                       const std::vector<std::string>& incomplete_hashes) override
+                       const std::vector<SobelOutlineInstance>& sobel_outlines) override
     {
         if (graphics_)
-            graphics_->publish_frame(frame, pick_map, confirmed_tip_hashes,
-                                     cyan_frontier_hashes, incomplete_hashes);
+            graphics_->publish_frame(frame, pick_map, sobel_outlines);
     }
 
     void init_platform(void* hInstance, void* hwnd) override

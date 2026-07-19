@@ -329,155 +329,232 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         return;
     }
 
-    // Live tip on the right (newer = more negative Z → map high X).
+    // Sticky origin for Z math (must match presenter + barrier planes).
     const int64_t origin = ui.timeline_origin_ms > 0
                                ? ui.timeline_origin_ms
                                : static_cast<int64_t>(std::time(nullptr)) * 1000 -
                                      static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     const float mps = ui.meters_per_second > 1e-6f ? ui.meters_per_second : 1.f;
-    float z_lo = camera_.scroll_z() - 50.f;
-    float z_hi = camera_.scroll_z() + 50.f;
-    if (ui.segment_count > 0)
+
+    // Ring segments older → newer (HUD already ring-only); Z bounds match planes.
+    struct Slot
     {
-        z_lo = 1e30f;
-        z_hi = -1e30f;
-        for (int i = 0; i < ui.segment_count; ++i)
-        {
-            const auto& s = ui.segments[i];
-            if (s.from_ms <= 0 && s.to_ms <= 0)
-                continue;
-            const float za = ts_to_z_(s.from_ms, origin, mps);
-            const float zb = ts_to_z_(s.to_ms, origin, mps);
-            z_lo = std::min(z_lo, std::min(za, zb));
-            z_hi = std::max(z_hi, std::max(za, zb));
-        }
-    }
-    if (z_hi - z_lo < 1.f)
-    {
-        z_lo = camera_.scroll_z() - 100.f;
-        z_hi = camera_.scroll_z() + 20.f;
-    }
-    // Expand slightly so viewport fits.
-    const float z_pad = 0.05f * (z_hi - z_lo);
-    z_lo -= z_pad;
-    z_hi += z_pad;
-
-    auto z_to_x = [&](float z) -> float {
-        // Newer (more negative Z) → right.
-        const float t = (z_hi - z) / std::max(1e-3f, z_hi - z_lo);
-        return t;
+        int     lookback_k = -1;
+        int     global_g = -1;
+        float   z_new = 0.f;  // min(z_from,z_to) — newer edge
+        float   z_old = 0.f;  // max — past edge (barrier plane)
+        float   load = 0.f;
+        bool    full = false;
+        bool    valid = false;
     };
-    auto x_to_z = [&](float t) -> float {
-        t = std::clamp(t, 0.f, 1.f);
-        return z_hi - t * (z_hi - z_lo);
-    };
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 wp = ImGui::GetCursorScreenPos();
-    const float track_h = 22.f;
-    const float track_y = wp.y + 22.f;
-    const float track_w = ImGui::GetContentRegionAvail().x;
-    const ImVec2 t0(wp.x, track_y);
-    const ImVec2 t1(wp.x + track_w, track_y + track_h);
-
-    dl->AddRectFilled(t0, t1, IM_COL32(20, 20, 24, 220), 4.f);
-
-    // Segment bands.
-    for (int i = 0; i < ui.segment_count; ++i)
+    Slot slots[3]{};
+    int nslot = 0;
+    for (int i = 0; i < ui.segment_count && nslot < 3; ++i)
     {
         const auto& s = ui.segments[i];
         if (s.from_ms <= 0 && s.to_ms <= 0)
             continue;
-        const float za = ts_to_z_(s.from_ms, origin, mps);
-        const float zb = ts_to_z_(s.to_ms, origin, mps);
-        float u0 = z_to_x(std::max(za, zb));
-        float u1 = z_to_x(std::min(za, zb));
-        if (u1 < u0)
-            std::swap(u0, u1);
-        const float x0 = wp.x + u0 * track_w;
-        const float x1 = wp.x + u1 * track_w;
-        const float fill = std::clamp(s.load_ratio, 0.05f, 1.f);
-        const int a = static_cast<int>(40 + 160 * fill);
-        const ImU32 col = (i == 0) ? IM_COL32(255, 92, 0, a) : IM_COL32(80, 140, 200, a);
-        dl->AddRectFilled(ImVec2(x0, track_y), ImVec2(x1, track_y + track_h), col, 2.f);
-        dl->AddLine(ImVec2(x0, track_y), ImVec2(x0, track_y + track_h), IM_COL32(255, 255, 255, 60));
+        const float z_from = ts_to_z_(s.from_ms, origin, mps);
+        const float z_to = ts_to_z_(s.to_ms, origin, mps);
+        Slot sl;
+        sl.lookback_k = s.index;
+        sl.global_g = s.global_index;
+        sl.z_new = std::min(z_from, z_to);
+        sl.z_old = std::max(z_from, z_to);
+        sl.load = s.load_ratio;
+        sl.full = s.confirmed_full != 0;
+        sl.valid = true;
+        slots[nslot++] = sl;
+    }
+    // Sort older (larger z_old) → left.
+    std::sort(slots, slots + nslot, [](const Slot& a, const Slot& b) {
+        return a.z_old > b.z_old;
+    });
+
+    float z_hi = camera_.scroll_z() + 50.f; // oldest edge of track
+    float z_lo = camera_.scroll_z() - 50.f; // newest edge of track
+    if (nslot > 0)
+    {
+        z_hi = slots[0].z_old;
+        z_lo = slots[nslot - 1].z_new;
+        for (int i = 0; i < nslot; ++i)
+        {
+            z_hi = std::max(z_hi, slots[i].z_old);
+            z_lo = std::min(z_lo, slots[i].z_new);
+        }
+    }
+    if (z_hi - z_lo < 1.f)
+    {
+        z_hi = camera_.scroll_z() + 100.f;
+        z_lo = camera_.scroll_z() - 20.f;
+    }
+    const float z_span = std::max(1.f, z_hi - z_lo);
+
+    auto z_to_x = [&](float z) -> float {
+        // older (high Z) → left (x small); newer (low Z) → right
+        return (z_hi - z) / z_span;
+    };
+    auto x_to_z = [&](float t) -> float {
+        t = std::clamp(t, 0.f, 1.f);
+        return z_hi - t * z_span;
+    };
+    auto snap_to_seg_mid = [&](float z) -> float {
+        float best = z;
+        float best_d = 1e30f;
+        for (int i = 0; i < nslot; ++i)
+        {
+            if (!slots[i].valid)
+                continue;
+            const float mid = 0.5f * (slots[i].z_new + slots[i].z_old);
+            const float d = std::abs(mid - z);
+            if (d < best_d)
+            {
+                best_d = d;
+                best = mid;
+            }
+        }
+        return best;
+    };
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetCursorScreenPos();
+    const float track_h = 26.f;
+    const float track_y = wp.y + 22.f;
+    const float track_w = ImGui::GetContentRegionAvail().x;
+
+    dl->AddRectFilled(ImVec2(wp.x, track_y), ImVec2(wp.x + track_w, track_y + track_h),
+                      IM_COL32(20, 20, 24, 220), 4.f);
+
+    // Z-proportional bands (same edges as 3D barrier planes).
+    const ImU32 kRoleCol[3] = {
+        IM_COL32(70, 110, 180, 255),
+        IM_COL32(40, 180, 190, 255),
+        IM_COL32(255, 92, 0, 255),
+    };
+    for (int i = 0; i < nslot; ++i)
+    {
+        if (!slots[i].valid)
+            continue;
+        float t0 = z_to_x(slots[i].z_old);
+        float t1 = z_to_x(slots[i].z_new);
+        if (t1 < t0)
+            std::swap(t0, t1);
+        const float x0 = wp.x + t0 * track_w;
+        const float x1 = wp.x + t1 * track_w;
+        const float fill = std::clamp(slots[i].load, 0.08f, 1.f);
+        const int a = static_cast<int>(50 + 180 * fill);
+        ImU32 col = (slots[i].lookback_k == 0) ? IM_COL32(255, 92, 0, a)
+                                               : ((kRoleCol[std::min(i, 2)] & 0x00FFFFFFu) |
+                                                  (static_cast<ImU32>(a) << 24));
+        dl->AddRectFilled(ImVec2(x0 + 1.f, track_y), ImVec2(x1 - 1.f, track_y + track_h), col,
+                          2.f);
+        // Plane-aligned divider at past edge (left of band).
+        dl->AddLine(ImVec2(x0, track_y - 2.f), ImVec2(x0, track_y + track_h + 2.f),
+                    IM_COL32(180, 220, 255, 160), 1.5f);
+        if (slots[i].full)
+            dl->AddRect(ImVec2(x0 + 1.f, track_y), ImVec2(x1 - 1.f, track_y + track_h),
+                        IM_COL32(255, 255, 255, 160), 2.f, 0, 1.2f);
+        char lab[24];
+        if (slots[i].lookback_k == 0)
+            std::snprintf(lab, sizeof(lab), "Live #%d", slots[i].global_g);
+        else if (slots[i].global_g >= 0)
+            std::snprintf(lab, sizeof(lab), "#%d", slots[i].global_g);
+        else
+            std::snprintf(lab, sizeof(lab), "k%d", slots[i].lookback_k);
+        const ImVec2 ts = ImGui::CalcTextSize(lab);
+        if (ts.x < (x1 - x0) - 4.f)
+            dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts.x, track_y + 5.f),
+                        IM_COL32(255, 255, 255, 230), lab);
     }
 
-    // Camera caret (viewport).
-    const float cam_t = z_to_x(camera_.scroll_z());
+    const float cam_t = std::clamp(z_to_x(camera_.scroll_z()), 0.f, 1.f);
     const float cx = wp.x + cam_t * track_w;
-    dl->AddLine(ImVec2(cx, track_y - 2.f), ImVec2(cx, track_y + track_h + 2.f),
+    dl->AddLine(ImVec2(cx, track_y - 3.f), ImVec2(cx, track_y + track_h + 3.f),
                 IM_COL32(255, 220, 80, 255), 2.f);
-    dl->AddTriangleFilled(ImVec2(cx, track_y - 2.f), ImVec2(cx - 5.f, track_y - 10.f),
-                          ImVec2(cx + 5.f, track_y - 10.f), IM_COL32(255, 220, 80, 255));
+    dl->AddTriangleFilled(ImVec2(cx, track_y - 3.f), ImVec2(cx - 5.f, track_y - 11.f),
+                          ImVec2(cx + 5.f, track_y - 11.f), IM_COL32(255, 220, 80, 255));
 
-    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 4.f));
-    const bool hovered = ImGui::IsItemHovered();
-    const bool active = ImGui::IsItemActive();
-    if (hovered || active)
+    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 6.f));
+    const bool track_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    if (track_hot)
     {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
-            (active && ImGui::IsMouseDragging(ImGuiMouseButton_Left)))
+            (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)))
         {
             minimap_dragging_ = true;
             const float mx = ImGui::GetIO().MousePos.x;
             const float t = (mx - wp.x) / std::max(1.f, track_w);
             camera_.set_scroll_z(x_to_z(t));
         }
+        // Click band (no drag): snap to segment mid on release.
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && minimap_dragging_ &&
+            !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.f))
+        {
+            camera_.set_scroll_z(snap_to_seg_mid(camera_.scroll_z()));
+        }
+        if (ImGui::IsItemHovered() && nslot > 0)
+        {
+            // Tooltip: nearest segment G.
+            const float z = camera_.scroll_z();
+            int best = 0;
+            float bd = 1e30f;
+            for (int i = 0; i < nslot; ++i)
+            {
+                const float mid = 0.5f * (slots[i].z_new + slots[i].z_old);
+                const float d = std::abs(mid - z);
+                if (d < bd)
+                {
+                    bd = d;
+                    best = i;
+                }
+            }
+            if (slots[best].valid)
+                ImGui::SetTooltip("Segment G=%d  lookback k=%d\nClick band / scrub to jump",
+                                  slots[best].global_g, slots[best].lookback_k);
+        }
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
         minimap_dragging_ = false;
 
-    // Jump buttons.
+    // One full segment width in world Z (~lookback window at mps=1).
+    const float seg_step_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
+
     ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y));
     if (ImGui::SmallButton("Live"))
         camera_.reattach_timeline();
     ImGui::SameLine();
-    if (ImGui::SmallButton("< Seg") && ui.segment_count > 0)
+    if (ImGui::SmallButton("< Seg"))
     {
-        // Older = higher lookback index = larger Z.
-        float best_z = camera_.scroll_z() + 1e9f;
-        float pick = camera_.scroll_z();
-        bool found = false;
-        for (int i = 0; i < ui.segment_count; ++i)
+        // Page older by one segment; land on newer edge of new "current" band
+        // so minimap focus wraps toward the right and two buffers stay ahead (left).
+        const float z_before = camera_.scroll_z();
+        camera_.set_scroll_z(z_before + seg_step_z);
+        // After ring slides, place near newer edge of the segment we entered.
+        float target = camera_.scroll_z();
+        for (int i = 0; i < nslot; ++i)
         {
-            const auto& s = ui.segments[i];
-            const float mid =
-                0.5f * (ts_to_z_(s.from_ms, origin, mps) + ts_to_z_(s.to_ms, origin, mps));
-            if (mid > camera_.scroll_z() + 1.f && mid < best_z)
+            if (!slots[i].valid)
+                continue;
+            if (target >= slots[i].z_new - 1.f && target <= slots[i].z_old + 1.f)
             {
-                best_z = mid;
-                pick = mid;
-                found = true;
+                // Right side of this band (newer edge) + small inset.
+                target = slots[i].z_new + 0.05f * (slots[i].z_old - slots[i].z_new);
+                break;
             }
         }
-        if (found)
-            camera_.set_scroll_z(pick);
+        // If band list was pre-page, approximate wrap to right of strip.
+        if (std::abs(target - (z_before + seg_step_z)) < 0.1f && nslot > 0)
+            target = slots[nslot - 1].z_new + 0.08f * std::max(1.f, z_hi - z_lo);
+        camera_.set_scroll_z(target);
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Seg >") && ui.segment_count > 0)
+    if (ImGui::SmallButton("Seg >"))
     {
-        // Newer = smaller Z.
-        float best_z = camera_.scroll_z() - 1e9f;
-        float pick = camera_.scroll_z();
-        bool found = false;
-        for (int i = 0; i < ui.segment_count; ++i)
-        {
-            const auto& s = ui.segments[i];
-            const float mid =
-                0.5f * (ts_to_z_(s.from_ms, origin, mps) + ts_to_z_(s.to_ms, origin, mps));
-            if (mid < camera_.scroll_z() - 1.f && mid > best_z)
-            {
-                best_z = mid;
-                pick = mid;
-                found = true;
-            }
-        }
-        if (found)
-            camera_.set_scroll_z(pick);
+        // Page newer by one segment width.
+        camera_.set_scroll_z(camera_.scroll_z() - seg_step_z);
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("history <  timeline  > live");
+    ImGui::TextDisabled("2 ahead  |  G  |  bands=planes");
 
     ImGui::End();
 }

@@ -114,11 +114,13 @@ public:
     void set_trace_status(int phase, int offset);
     void get_trace_status_locked(int* phase_out, int* offset_out) const;
 
-    // Timeline segment = lookback window [from_ms, to_ms). Index 0 = live.
+    // Timeline segment = lookback window [from_ms, to_ms).
+    // index = lookback k (0 = live); global_index = id from chain genesis → live.
     static constexpr int kMaxTimeSegments = 32;
     struct TimeSegment
     {
-        int     index            = 0;
+        int     index            = 0;  // lookback k
+        int     global_index     = -1; // G from genesis
         int64_t from_ms          = 0;
         int64_t to_ms            = 0; // exclusive
         float   load_ratio       = 0.f;

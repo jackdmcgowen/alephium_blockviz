@@ -1,23 +1,14 @@
 #pragma once
 
-// Sobel highlight request DTOs (frame_loop builds; SobelAsyncPass consumes).
-// No Vulkan device ownership here.
+// Domain-agnostic Sobel outline list. App assigns colors; graphics has no role names.
 
-#include <cstdint>
+#include "graphics/gpu_pub_lib.h"
+
 #include <vector>
 
+// Single pass: all outline cubes (already culled/filtered upstream).
+// Colors are white Sobel edges multiplied by each instance's color.
 struct SobelFrameRequest
 {
-    enum class Mode {
-        SelectionGold,
-        ConfirmedTipsGreen,
-        CyanFrontier, // unconfirmed children of domain frontier
-        IncompleteTraceOrange
-    };
-    struct Layer
-    {
-        Mode mode = Mode::SelectionGold;
-        std::vector<uint32_t> instance_indices;
-    };
-    std::vector<Layer> layers;
+    std::vector<SobelOutlineInstance> instances;
 };

@@ -1,9 +1,9 @@
 #pragma once
 
-// Multi-queue Sobel execution: _3D depth → CMP dispatch → _3D edge overlay (+ present).
+// Multi-queue Sobel execution: _3D outline depth+color → CMP dispatch → _3D edge overlay (+ present).
 // Owns the chain fence (VUID-09600). Does not own PSOs/images — uses SobelPipeline.
+// Single pass: all outline cubes are drawn together; colors come from the outline instance buffer.
 
-#include "graphics/frame/sobel_types.hpp"
 #include "graphics/pipelines/sobel_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
@@ -22,19 +22,19 @@ struct SobelAsyncSubmitContext
     uint32_t width  = 0;
     uint32_t height = 0;
 
-    VkCommandBuffer main_graphics_cb  = VK_NULL_HANDLE; // scene + pick; first layer depth ends here
+    VkCommandBuffer main_graphics_cb  = VK_NULL_HANDLE; // scene + pick + outline depth/color
     VkCommandBuffer compute_cb        = VK_NULL_HANDLE;
     VkCommandBuffer overlay_cb        = VK_NULL_HANDLE;
-    VkCommandBuffer layer_depth_cb    = VK_NULL_HANDLE; // extra layers
 
     VkSemaphore image_available = VK_NULL_HANDLE;
     VkSemaphore render_finished = VK_NULL_HANDLE;
 
     VkDescriptorSet frame_ubo_set = VK_NULL_HANDLE;
-    VkBuffer vertex_buffer   = VK_NULL_HANDLE;
-    VkBuffer instance_buffer = VK_NULL_HANDLE;
-    VkBuffer index_buffer    = VK_NULL_HANDLE;
-    uint32_t index_count     = 36;
+    VkBuffer vertex_buffer            = VK_NULL_HANDLE;
+    VkBuffer outline_instance_buffer  = VK_NULL_HANDLE;
+    VkBuffer index_buffer             = VK_NULL_HANDLE;
+    uint32_t outline_count = 0;
+    uint32_t index_count   = 36;
 
     VkImageView     swapchain_color_view = VK_NULL_HANDLE;
     VkImage         swapchain_image      = VK_NULL_HANDLE;
@@ -53,11 +53,11 @@ public:
     // Wait for in-flight chain before resize/free.
     void wait_idle(VkDevice device);
 
+    // Single-pass: outline depth+color → CMP Sobel → edge×color overlay → present.
     void submit(SobelPipeline& pipe,
                 const SobelAsyncSubmitContext& ctx,
                 uint32_t frame_index,
-                uint32_t image_index,
-                const SobelFrameRequest& req);
+                uint32_t image_index);
 
 private:
     VkFence done_fence_ = VK_NULL_HANDLE;

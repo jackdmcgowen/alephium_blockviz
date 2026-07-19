@@ -89,6 +89,7 @@ void GraphicsSystem::render_loop()
             if (filter_min_alph_local > 0.0)
                 fin.filter_min_alph_atto = alph_from_double_to_atto(filter_min_alph_local);
             fin.selected_detail = selected_detail_local;
+            fin.enable_role_outlines = visualize_confirmed_tips_;
             // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.
             fin.instance_half_extents = glm::vec3(1.05f);
 
@@ -158,8 +159,7 @@ void GraphicsSystem::render_loop()
             submit.instance_count = fout.instances.size();
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes,
-                          fout.cyan_frontier_hashes, fout.incomplete_hashes);
+            publish_frame(submit, fout.pick_map, fout.sobel_outlines);
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -173,8 +173,8 @@ void GraphicsSystem::render_loop()
             FrameSubmit submit{};
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            // Empty frame-source: clear tips for this frame (paired with empty pick_map).
-            publish_frame(submit, frame_pick_map, {}, {}, {});
+            // Empty frame-source: clear outlines for this frame (paired with empty pick_map).
+            publish_frame(submit, frame_pick_map, {});
             frame_ui.selected_hash = selected_hash_local;
             frame_ui.selected_detail = selected_detail_local;
             frame_ui.seq = submit_seq_;
@@ -255,75 +255,9 @@ void GraphicsSystem::render()
     if (!acq.ok)
         return; // OUT_OF_DATE: resize next begin; do not submit/present
 
-    // Sobel mode matrix (K5): selection gold wins; else confirmed-tip green if kill-switch on.
-    SobelFrameRequest sobel_req{};
-    bool want_sobel = false;
-    if (sobel_pipe_.ready())
-    {
-        uint32_t selected_instance = ~0u;
-        {
-            std::lock_guard<std::mutex> slock(selection_mutex_);
-            if (!selected_hash_.empty())
-            {
-                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
-                {
-                    if (pick_id_to_hash_[i] == selected_hash_)
-                    {
-                        selected_instance = static_cast<uint32_t>(i);
-                        break;
-                    }
-                }
-            }
-        }
-
-        auto resolve_hashes = [&](const std::vector<std::string>& hashes) {
-            std::vector<uint32_t> idxs;
-            idxs.reserve(hashes.size());
-            for (const std::string& h : hashes)
-            {
-                for (size_t i = 0; i < pick_id_to_hash_.size(); ++i)
-                {
-                    if (pick_id_to_hash_[i] == h)
-                    {
-                        idxs.push_back(static_cast<uint32_t>(i));
-                        break;
-                    }
-                }
-                if (idxs.size() >= kMaxSobelInstances)
-                    break;
-            }
-            return idxs;
-        };
-
-        // Cubes only. Multi-layer: gold exclusive; else orange then cyan then green (all co-visible).
-        // Cyan = frontier children; green = confirmed frontier tips (H_c).
-        if (selected_instance != ~0u)
-        {
-            SobelFrameRequest::Layer layer;
-            layer.mode = SobelFrameRequest::Mode::SelectionGold;
-            layer.instance_indices = { selected_instance };
-            sobel_req.layers.push_back(std::move(layer));
-            want_sobel = true;
-        }
-        else if (visualize_confirmed_tips_)
-        {
-            auto push_layer = [&](SobelFrameRequest::Mode mode,
-                                  const std::vector<std::string>& hashes) {
-                auto idxs = resolve_hashes(hashes);
-                if (idxs.empty())
-                    return;
-                SobelFrameRequest::Layer layer;
-                layer.mode = mode;
-                layer.instance_indices = std::move(idxs);
-                sobel_req.layers.push_back(std::move(layer));
-            };
-            // Paint order low â†’ high: orange under cyan under green.
-            push_layer(SobelFrameRequest::Mode::IncompleteTraceOrange, sobel_incomplete_hashes_);
-            push_layer(SobelFrameRequest::Mode::CyanFrontier, sobel_cyan_hashes_);
-            push_layer(SobelFrameRequest::Mode::ConfirmedTipsGreen, sobel_tip_hashes_);
-            want_sobel = !sobel_req.layers.empty();
-        }
-    }
+    // App builds colored outline list; graphics draws all in one pass (no role names).
+    const bool want_sobel =
+        sobel_pipe_.ready() && frame_resources_.outline_count() > 0;
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
@@ -342,13 +276,13 @@ void GraphicsSystem::render()
         sctx.main_graphics_cb = commandBuffer;
         sctx.compute_cb = slot.computeCommandBuffer;
         sctx.overlay_cb = slot.overlayCommandBuffer;
-        sctx.layer_depth_cb = slot.layerDepthCommandBuffer;
         sctx.image_available = acq.image_available;
         sctx.render_finished = acq.render_finished;
         sctx.frame_ubo_set = frame_descriptors_.set();
         sctx.vertex_buffer = frame_resources_.vertex_buffer();
-        sctx.instance_buffer = frame_resources_.instance_buffer();
+        sctx.outline_instance_buffer = frame_resources_.outline_instance_buffer();
         sctx.index_buffer = frame_resources_.index_buffer();
+        sctx.outline_count = static_cast<uint32_t>(frame_resources_.outline_count());
         sctx.index_count = 36;
         sctx.swapchain_color_view = swapchain_targets_.color_view(acq.image_index);
         sctx.swapchain_image = swapchainImages[acq.image_index];
@@ -356,7 +290,7 @@ void GraphicsSystem::render()
         sctx.recorder = &frame_recorder_;
         sctx.frame_sync = &frame_sync_;
         sctx.presenter = &frame_presenter_;
-        sobel_async_.submit(sobel_pipe_, sctx, begin.frame_index, acq.image_index, sobel_req);
+        sobel_async_.submit(sobel_pipe_, sctx, begin.frame_index, acq.image_index);
     }
     else
     {

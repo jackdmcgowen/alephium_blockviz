@@ -54,7 +54,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. History **≥2** is gated until Steady and live window 0 is fully chunk-filled.
 
-**Triple-buffer segment ring:** at most **3** absolute lookback indices are active for fetch/HUD/draw: `{k, k+1, k+2}` (or `{0,1}` pre-tip). Chunk cursor advances only on **successful admit** (pending while in-flight). Failed chunks retry (max 3) then skip. Live window freezes an epoch upper bound so keys stay stable. Minimap and presenter cull use the published ring only.
+**Triple-buffer segment ring:** always **current + 2 ahead** `{k_eff, k_eff+1, k_eff+2}` (HUD older→newer). Prefetch hysteresis (~40% into current segment toward older) raises `k_eff` early; pump fills **ahead windows first**. Bootstrap includes index 2 ASAP. **Global index G** from genesis; windows genesis-aligned. Minimap Z-proportional to planes; page-older steps one segment and recenters toward the **right**.
+
+**Cache:** keep graph/detail until process private memory ≈ **2 GB** (or soft node cap); no routine 2×lookback wipe. Evict oldest non-frontier under pressure.
+
+**Timeline origin:** sticky session origin (not min loaded block ts) so attached camera Z does not jump when history admits.
 
 ### Domains
 

@@ -28,9 +28,9 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `frame/` | Sync, resources, recorder, presenter, descriptors, picker, Sobel, swapchain targets, task graph |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
-| `pipelines/sobel_pipeline.*` | Depth-only + compute + overlay PSOs, images, record helpers |
-| `frame/sobel_async_pass.*` | Multi-queue Sobel submit (_3D↔CMP) + fence; context API |
-| `frame/sobel_types.hpp` | `SobelFrameRequest` modes/layers |
+| `pipelines/sobel_pipeline.*` | Outline depth+color + compute + edge×color overlay PSOs |
+| `frame/sobel_async_pass.*` | Single-pass multi-queue Sobel (_3D↔CMP) + fence |
+| `frame/sobel_types.hpp` | Thin request type; outline list is `SobelOutlineInstance` in `gpu_pub_lib.h` |
 | `frame/gpu_frame_publish.cpp` | Triple-buffer `publish_frame` / `apply_published_frame` |
 | `frame/selection_state.cpp` | Selection, hover, multi-tx filter, detail refill pin |
 | `frame/frame_shared_state.*` | Debug drawer / mesh arena / viewProj shared by loop + record |
@@ -58,11 +58,13 @@ render thread (frame_loop.cpp):
   present
 ```
 
-### Sobel modes (product-facing kill-switch)
+### Sobel (domain-agnostic, single pass)
 
-- **Selection gold** when selected instance maps; always attempted if Sobel ready.
-- **Confirmed tips green** when unselected, tips resolve, and `visualize_confirmed_tips` is on (default on).
-- MVP: one highlight color/buffer per frame — **no dual gold+green**.
+- App builds `std::vector<SobelOutlineInstance>` (`instance_index` + `color`); graphics has **no** role names (gold/green/cyan/orange).
+- All outline cubes drawn in **one** depth+color pass (unless culled earlier in presenter).
+- Compute Sobel produces a **white** edge mask; overlay multiplies `edge × instance_color`.
+- Kill-switch `visualize_confirmed_tips` is passed to the presenter as `enable_role_outlines` (selection gold still emitted when selected).
+- Product colors live in `ScenePresenter` (brand palette); see [app.md](app.md).
 
 Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphics changes.
 

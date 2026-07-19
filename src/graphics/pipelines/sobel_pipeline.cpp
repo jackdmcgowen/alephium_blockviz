@@ -20,8 +20,13 @@ struct SobelPC
 
 struct OverlayPC
 {
-    float highlight[4];
+    float intensity;
+    float pad0;
+    float pad1;
+    float pad2;
 };
+
+static constexpr VkFormat kOutlineColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
 } // namespace
 
@@ -35,6 +40,15 @@ void SobelPipeline::create_images(const SobelPipelineCreateInfo& info)
         sel_depth_image_, sel_depth_memory_, info.mem_props);
     sel_depth_view_ = create_image_view(info.device, sel_depth_image_, info.depth_format,
                                         VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    create_image(
+        info.device, info.width, info.height, kOutlineColorFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        outline_color_image_, outline_color_memory_, info.mem_props);
+    outline_color_view_ = create_image_view(info.device, outline_color_image_,
+                                            kOutlineColorFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     create_image(
         info.device, info.width, info.height, VK_FORMAT_R8_UNORM,
@@ -55,7 +69,8 @@ void SobelPipeline::create_descriptors(VkDevice device)
     samp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     if (vkCreateSampler(device, &samp, nullptr, &depth_sampler_) != VK_SUCCESS ||
-        vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS)
+        vkCreateSampler(device, &samp, nullptr, &edge_sampler_) != VK_SUCCESS ||
+        vkCreateSampler(device, &samp, nullptr, &outline_color_sampler_) != VK_SUCCESS)
         throw std::runtime_error("SobelPipeline: samplers");
 
     const DescriptorBinding compute_binds[] = {
@@ -64,13 +79,14 @@ void SobelPipeline::create_descriptors(VkDevice device)
     };
     compute_set_layout_ = create_descriptor_set_layout(device, compute_binds, 2);
 
-    const DescriptorBinding overlay_bind{
-        0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT
+    const DescriptorBinding overlay_binds[] = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
     };
-    overlay_set_layout_ = create_descriptor_set_layout(device, &overlay_bind, 1);
+    overlay_set_layout_ = create_descriptor_set_layout(device, overlay_binds, 2);
 
     const VkDescriptorPoolSize sizes[] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6 },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 },
     };
     descriptor_pool_ = create_descriptor_pool(device, 4, sizes, 2);
@@ -81,7 +97,7 @@ void SobelPipeline::create_descriptors(VkDevice device)
                                   &overlay_set_))
         throw std::runtime_error("SobelPipeline: allocate descriptor sets");
 
-    // Write once at create � never update while CBs are pending (VUID-03047).
+    // Write once at create — never update while CBs are pending (VUID-03047).
     write_static_descriptors_();
 }
 
@@ -96,12 +112,15 @@ void SobelPipeline::write_static_descriptors_()
     };
     write_descriptor_images(device_, compute_imgs, 2);
 
-    const DescriptorImageWrite overlay_img{
-        overlay_set_, 0, edge_view_, edge_sampler_,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+    const DescriptorImageWrite overlay_imgs[] = {
+        { overlay_set_, 0, edge_view_, edge_sampler_,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER },
+        { overlay_set_, 1, outline_color_view_, outline_color_sampler_,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER },
     };
-    write_descriptor_images(device_, &overlay_img, 1);
+    write_descriptor_images(device_, overlay_imgs, 2);
 }
 
 void SobelPipeline::create_compute_pipeline(VkDevice device)
@@ -120,17 +139,17 @@ void SobelPipeline::create_compute_pipeline(VkDevice device)
     pipeline_ = create_pipeline(device, pci);
 }
 
-void SobelPipeline::create_depth_only_pipeline(VkDevice device, VkFormat depth_format,
-                                              VkDescriptorSetLayout ubo_layout)
+void SobelPipeline::create_outline_pipeline(VkDevice device, VkFormat depth_format,
+                                            VkDescriptorSetLayout ubo_layout)
 {
     std::vector<uint8_t> vert_code, frag_code;
     load_shader_source("vert.spv", vert_code);
-    load_shader_source("depth_only_frag.spv", frag_code);
+    load_shader_source("outline_color_frag.spv", frag_code);
     VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
     create_shader_module(device, vert, vert_code);
     create_shader_module(device, frag, frag_code);
 
-    depth_only_layout_ = create_pipeline_layout(device, &ubo_layout, 1);
+    outline_layout_ = create_pipeline_layout(device, &ubo_layout, 1);
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -159,7 +178,7 @@ void SobelPipeline::create_depth_only_pipeline(VkDevice device, VkFormat depth_f
     attrs[5] = { 5, 1, VK_FORMAT_R32_SFLOAT, offsetof(InstanceData, alpha) };
 
     GraphicsPipelineCreateInfo ginfo{};
-    ginfo.layout = depth_only_layout_;
+    ginfo.layout = outline_layout_;
     ginfo.stages = stages;
     ginfo.stage_count = 2;
     ginfo.bindings = binds;
@@ -170,14 +189,15 @@ void SobelPipeline::create_depth_only_pipeline(VkDevice device, VkFormat depth_f
     ginfo.depth_write = true;
     ginfo.depth_compare = VK_COMPARE_OP_LESS;
     ginfo.blend_mode = PipelineBlendMode::None;
-    ginfo.color_attachment_count = 0;
+    ginfo.color_format = kOutlineColorFormat;
+    ginfo.color_attachment_count = 1;
     ginfo.depth_format = depth_format;
     ginfo.dynamic_viewport_scissor = true;
     ginfo.dynamic_primitive_topology = false;
 
     try
     {
-        depth_only_pipeline_ = create_graphics_pipeline(device, ginfo);
+        outline_pipeline_ = create_graphics_pipeline(device, ginfo);
     }
     catch (...)
     {
@@ -278,7 +298,7 @@ void SobelPipeline::create(const SobelPipelineCreateInfo& info)
     create_images(info);
     create_descriptors(info.device);
     create_compute_pipeline(info.device);
-    create_depth_only_pipeline(info.device, info.depth_format, info.frame_ubo_layout);
+    create_outline_pipeline(info.device, info.depth_format, info.frame_ubo_layout);
     create_overlay_pipeline(info.device, VK_FORMAT_R8G8B8A8_SRGB);
     create_sync(info.device);
 }
@@ -304,8 +324,8 @@ void SobelPipeline::destroy(VkDevice device)
 
     if (overlay_pipeline_) { vkDestroyPipeline(device, overlay_pipeline_, nullptr); overlay_pipeline_ = VK_NULL_HANDLE; }
     if (overlay_layout_) { vkDestroyPipelineLayout(device, overlay_layout_, nullptr); overlay_layout_ = VK_NULL_HANDLE; }
-    if (depth_only_pipeline_) { vkDestroyPipeline(device, depth_only_pipeline_, nullptr); depth_only_pipeline_ = VK_NULL_HANDLE; }
-    if (depth_only_layout_) { vkDestroyPipelineLayout(device, depth_only_layout_, nullptr); depth_only_layout_ = VK_NULL_HANDLE; }
+    if (outline_pipeline_) { vkDestroyPipeline(device, outline_pipeline_, nullptr); outline_pipeline_ = VK_NULL_HANDLE; }
+    if (outline_layout_) { vkDestroyPipelineLayout(device, outline_layout_, nullptr); outline_layout_ = VK_NULL_HANDLE; }
     if (pipeline_) { vkDestroyPipeline(device, pipeline_, nullptr); pipeline_ = VK_NULL_HANDLE; }
     if (compute_layout_) { vkDestroyPipelineLayout(device, compute_layout_, nullptr); compute_layout_ = VK_NULL_HANDLE; }
     if (descriptor_pool_) {
@@ -325,8 +345,15 @@ void SobelPipeline::destroy(VkDevice device)
     }
     if (depth_sampler_) { vkDestroySampler(device, depth_sampler_, nullptr); depth_sampler_ = VK_NULL_HANDLE; }
     if (edge_sampler_) { vkDestroySampler(device, edge_sampler_, nullptr); edge_sampler_ = VK_NULL_HANDLE; }
+    if (outline_color_sampler_) { vkDestroySampler(device, outline_color_sampler_, nullptr); outline_color_sampler_ = VK_NULL_HANDLE; }
     if (edge_view_) { destroy_image_view(device, edge_view_); edge_view_ = VK_NULL_HANDLE; }
     if (edge_image_) { destroy_image(device, edge_image_, edge_memory_); edge_image_ = VK_NULL_HANDLE; edge_memory_ = VK_NULL_HANDLE; }
+    if (outline_color_view_) { destroy_image_view(device, outline_color_view_); outline_color_view_ = VK_NULL_HANDLE; }
+    if (outline_color_image_) {
+        destroy_image(device, outline_color_image_, outline_color_memory_);
+        outline_color_image_ = VK_NULL_HANDLE;
+        outline_color_memory_ = VK_NULL_HANDLE;
+    }
     if (sel_depth_view_) { destroy_image_view(device, sel_depth_view_); sel_depth_view_ = VK_NULL_HANDLE; }
     if (sel_depth_image_) { destroy_image(device, sel_depth_image_, sel_depth_memory_); sel_depth_image_ = VK_NULL_HANDLE; sel_depth_memory_ = VK_NULL_HANDLE; }
 }
@@ -337,15 +364,30 @@ void SobelPipeline::recreate(const SobelPipelineCreateInfo& info)
     create(info);
 }
 
-void SobelPipeline::record_selection_depth(const SelectionDepthDrawParams& p)
+void SobelPipeline::record_outline_pass(const OutlinePassDrawParams& p)
 {
-    // sel_depth ? DEPTH_ATTACHMENT
+    // sel_depth → DEPTH_ATTACHMENT
     cmd_image_barrier_aspect(p.cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   0, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_NONE,
                   VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                   VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    // outline_color → COLOR_ATTACHMENT
+    cmd_image_barrier_aspect(p.cmd, outline_color_image_,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_NONE,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VkRenderingAttachmentInfo color_att{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    color_att.imageView = outline_color_view_;
+    color_att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_att.clearValue.color = { { 0.f, 0.f, 0.f, 0.f } };
 
     VkRenderingAttachmentInfo depth_att{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     depth_att.imageView = sel_depth_view_;
@@ -357,11 +399,12 @@ void SobelPipeline::record_selection_depth(const SelectionDepthDrawParams& p)
     VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea = { { 0, 0 }, { p.width, p.height } };
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 0;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color_att;
     ri.pDepthAttachment = &depth_att;
     vkCmdBeginRendering(p.cmd, &ri);
 
-    vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_only_pipeline_);
+    vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outline_pipeline_);
     VkViewport vp{};
     vp.width = static_cast<float>(p.width);
     vp.height = static_cast<float>(p.height);
@@ -371,21 +414,21 @@ void SobelPipeline::record_selection_depth(const SelectionDepthDrawParams& p)
     VkRect2D sc{ { 0, 0 }, { p.width, p.height } };
     vkCmdSetScissor(p.cmd, 0, 1, &sc);
 
-    VkBuffer bufs[] = { p.vertex_buffer, p.instance_buffer };
+    VkBuffer bufs[] = { p.vertex_buffer, p.outline_instance_buffer };
     VkDeviceSize offs[] = { 0, 0 };
     vkCmdBindVertexBuffers(p.cmd, 0, 2, bufs, offs);
     vkCmdBindIndexBuffer(p.cmd, p.index_buffer, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depth_only_layout_,
+    vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outline_layout_,
                             0, 1, &p.ubo_set, 0, nullptr);
 
-    // One clear via LOAD_OP_CLEAR; N cube instance draws (union silhouette). Not arrows.
-    const uint32_t n = (p.instance_indices && p.instance_index_count > 0)
-                           ? (p.instance_index_count < kMaxSobelInstances
-                                  ? p.instance_index_count
+    // One clear; one multi-instance draw of all outline cubes (union silhouette + colors).
+    const uint32_t n = (p.outline_count > 0)
+                           ? (p.outline_count < kMaxSobelInstances
+                                  ? p.outline_count
                                   : kMaxSobelInstances)
                            : 0u;
-    for (uint32_t i = 0; i < n; ++i)
-        vkCmdDrawIndexed(p.cmd, p.index_count, 1, 0, 0, p.instance_indices[i]);
+    if (n > 0)
+        vkCmdDrawIndexed(p.cmd, p.index_count, n, 0, 0, 0);
 
     vkCmdEndRendering(p.cmd);
 }
@@ -395,7 +438,6 @@ void SobelPipeline::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
     const bool split = (graphics_family_ != compute_family_);
     // Execution dependency only for depth write → external/compute. Keep DEPTH_ATTACHMENT
     // layout; compute CB performs ATTACHMENT → SHADER_READ (valid stages on CMP queue).
-    // Avoid dstStage=COMPUTE on a pure-graphics family (can drop the barrier).
     cmd_image_barrier_aspect(cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -407,11 +449,23 @@ void SobelPipeline::record_sel_depth_release_for_compute(VkCommandBuffer cmd)
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
 }
 
+void SobelPipeline::record_outline_color_to_shader_read(VkCommandBuffer cmd)
+{
+    cmd_image_barrier_aspect(cmd, outline_color_image_,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                  VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
 void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float threshold)
 {
     const bool split = (graphics_family_ != compute_family_);
 
-    // Acquire (if split) + layout ATTACHMENT ? SHADER_READ for sampling (CMP-safe stages).
+    // Acquire (if split) + layout ATTACHMENT → SHADER_READ for sampling (CMP-safe stages).
     cmd_image_barrier_aspect(cmd, sel_depth_image_,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -421,9 +475,7 @@ void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float t
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED,
                   split ? compute_family_ : VK_QUEUE_FAMILY_IGNORED);
 
-    // Descriptors written once in create (write_static_descriptors_).
-
-    // Discard prior contents ? GENERAL for storage write (no FRAGMENT stages on CMP).
+    // Discard prior contents → GENERAL for storage write (no FRAGMENT stages on CMP).
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                   0, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
@@ -443,8 +495,7 @@ void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float t
 
     vkCmdDispatch(cmd, (width_ + 7) / 8, (height_ + 7) / 8, 1);
 
-    // Make edge write available; keep GENERAL � graphics does GENERAL?SHADER_READ after wait.
-    // Release ownership to graphics when families differ (dst stages = NONE on CMP queue).
+    // Make edge write available; keep GENERAL — graphics does GENERAL→SHADER_READ after wait.
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, 0,
@@ -454,7 +505,7 @@ void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float t
                   split ? graphics_family_ : VK_QUEUE_FAMILY_IGNORED);
 
     // Return sel_depth ownership to graphics. Layout can stay SHADER_READ; next graphics
-    // pass uses UNDEFINED ? DEPTH_ATTACHMENT (discard).
+    // pass uses UNDEFINED → DEPTH_ATTACHMENT (discard).
     if (split)
     {
         cmd_image_barrier_aspect(cmd, sel_depth_image_,
@@ -470,7 +521,7 @@ void SobelPipeline::record_dispatch(VkCommandBuffer cmd, float strength, float t
 void SobelPipeline::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
 {
     const bool split = (graphics_family_ != compute_family_);
-    // After compute_finished wait: own edge on graphics, GENERAL ? SHADER_READ for sampling.
+    // After compute_finished wait: own edge on graphics, GENERAL → SHADER_READ for sampling.
     cmd_image_barrier_aspect(cmd, edge_image_,
                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   0, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
@@ -481,10 +532,8 @@ void SobelPipeline::record_edge_acquire_for_graphics(VkCommandBuffer cmd)
 }
 
 void SobelPipeline::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t height,
-                                  const float highlight_rgba[4])
+                                  float intensity)
 {
-    // Descriptors written once in create (write_static_descriptors_).
-
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay_pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, overlay_layout_, 0, 1,
                             &overlay_set_, 0, nullptr);
@@ -498,7 +547,7 @@ void SobelPipeline::record_overlay(VkCommandBuffer cmd, uint32_t width, uint32_t
     vkCmdSetScissor(cmd, 0, 1, &sc);
 
     OverlayPC pc{};
-    std::memcpy(pc.highlight, highlight_rgba, sizeof(pc.highlight));
+    pc.intensity = intensity;
     vkCmdPushConstants(cmd, overlay_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }

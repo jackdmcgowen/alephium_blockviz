@@ -380,7 +380,7 @@ void GraphicsSystem::stop()
     running = false;
     if (renderThread.joinable())
         renderThread.join();
-    // Drain in-flight multi-layer Sobel before free() tears down CBs/semaphores.
+    // Drain in-flight Sobel before free() tears down CBs/semaphores.
     sobel_async_.wait_idle(device);
 }
 
@@ -543,9 +543,6 @@ void GraphicsSystem::create_command_pool()
             throw std::runtime_error("Failed to allocate _3D main command buffers");
         if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].overlayCommandBuffer) != VK_SUCCESS)
             throw std::runtime_error("Failed to allocate _3D overlay command buffers");
-        if (vkAllocateCommandBuffers(device, &allocInfo, &inFlightFrames[i].layerDepthCommandBuffer) !=
-            VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate _3D layer-depth command buffers");
     }
 
     allocInfo.commandPool = computeCommandPool;
@@ -721,7 +718,6 @@ void GraphicsSystem::cleanup()
         inFlightFrames[i].commandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].computeCommandBuffer = VK_NULL_HANDLE;
         inFlightFrames[i].overlayCommandBuffer = VK_NULL_HANDLE;
-        inFlightFrames[i].layerDepthCommandBuffer = VK_NULL_HANDLE;
     }
 
     picker_.destroy(device);

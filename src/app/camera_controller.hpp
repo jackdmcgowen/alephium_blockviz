@@ -22,13 +22,13 @@ public:
     // Soft pan bounds only (Z uses timeline limits, not ±2000).
     static constexpr float kPanMin    = -800.f;
     static constexpr float kPanMax    =  800.f;
-    static constexpr float kEyeZStep  = 40.f;    // world units / second while key held
-    static constexpr float kWheelStep = 25.f;    // world units per mouse-wheel notch
+    static constexpr float kEyeZStep  = 200.f;   // world units / second while key held
+    static constexpr float kWheelStep = 100.f;   // world units per mouse-wheel notch
     static constexpr float kLookOmega   = 12.f;
     static constexpr float kPanOmega    = 14.f;
     // Scroll Z: linear approach toward target (not exp spring, not hard snap).
-    // Fast enough to track continuous live tip (~1 m/s) and smooth wheel jumps.
-    static constexpr float kScrollLinearSpeed = 120.f; // world units / second
+    // Fast enough for large segment jumps and wheel/key travel.
+    static constexpr float kScrollLinearSpeed = 500.f; // world units / second
     static constexpr float kLookSens  = 0.0045f;
     static constexpr float kPanSens   = 0.12f;
     static constexpr float kPitchMin  = -1.35f;

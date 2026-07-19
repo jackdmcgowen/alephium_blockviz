@@ -28,6 +28,13 @@ const glm::vec4 kSelectionArrowColor(1.0f, 0.85f, 0.2f, 1.0f);
 const glm::vec4 kHoverArrowColor(1.0f, 0.85f, 0.2f, 0.45f);
 const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
 
+// Sobel outline colors (app/domain product meaning — graphics stays color-agnostic).
+// Matches docs/brand/alephium_palette.md role accents; A = edge intensity.
+const glm::vec4 kSobelSelectGold(0.94f, 0.76f, 0.29f, 1.35f);
+const glm::vec4 kSobelTipGreen(0.24f, 0.86f, 0.52f, 1.35f);
+const glm::vec4 kSobelFrontierCyan(0.18f, 0.90f, 0.94f, 1.35f);
+const glm::vec4 kSobelIncompleteOrange(1.00f, 0.54f, 0.12f, 1.35f);
+
 // Shared helper: layout, planes, and segment cull all use this Z mapping.
 inline float ts_to_z(int64_t ts_ms, int64_t origin_ms, float mps)
 {
@@ -414,22 +421,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot();
 
-    // Shared timeline origin: earliest block timestamp (or now âˆ’ lookback).
-    int64_t timeline_origin_ms = 0;
+    // Sticky session origin: set once. Never recompute from min block ts — that
+    // jumps live_z / attached camera every time older history admits.
+    int64_t timeline_origin_ms = scene_.timeline_origin_ms();
+    if (timeline_origin_ms <= 0)
     {
-        int64_t min_ts = 0;
-        for (const GraphNode& n : graph_nodes)
-        {
-            if (n.timestamp_ms <= 0)
-                continue;
-            if (min_ts == 0 || n.timestamp_ms < min_ts)
-                min_ts = n.timestamp_ms;
-        }
-        if (min_ts > 0)
-            timeline_origin_ms = min_ts;
-        else
-            timeline_origin_ms = static_cast<int64_t>(std::time(nullptr)) * 1000 -
-                                 static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+        timeline_origin_ms = static_cast<int64_t>(std::time(nullptr)) * 1000 -
+                             static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
         scene_.set_timeline_origin_ms(timeline_origin_ms);
     }
 
@@ -791,32 +789,59 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.pick_map.push_back(db.hash);
     }
 
-    // Sobel lists: green tips + cyan frontier children + orange incompletes.
+    // Sobel outlines: app assigns colors; graphics draws all in one pass.
+    // Selection gold is exclusive; else orange then cyan then green (mutually de-duped).
     {
-        std::unordered_set<std::string> pick_set(out.pick_map.begin(), out.pick_map.end());
+        std::unordered_map<std::string, uint32_t> hash_to_idx;
+        hash_to_idx.reserve(out.pick_map.size());
+        for (size_t i = 0; i < out.pick_map.size(); ++i)
+            hash_to_idx.emplace(out.pick_map[i], static_cast<uint32_t>(i));
 
-        for (const std::string& h : green_display)
+        auto push_outline = [&](const std::string& h, const glm::vec4& color) {
+            if (h.empty())
+                return;
+            const auto it = hash_to_idx.find(h);
+            if (it == hash_to_idx.end())
+                return;
+            out.sobel_outlines.push_back(SobelOutlineInstance{ it->second, color });
+        };
+
+        uint32_t selected_idx = ~0u;
+        if (!in.selected_hash.empty())
         {
-            if (h.empty() || !pick_set.count(h))
-                continue;
-            out.confirmed_tip_hashes.push_back(h);
+            const auto it = hash_to_idx.find(in.selected_hash);
+            if (it != hash_to_idx.end())
+                selected_idx = it->second;
         }
 
-        for (const std::string& h : cyan_owners)
+        if (selected_idx != ~0u)
         {
-            if (pick_set.count(h))
-                out.cyan_frontier_hashes.push_back(h);
+            out.sobel_outlines.push_back(
+                SobelOutlineInstance{ selected_idx, kSobelSelectGold });
         }
-
-        std::unordered_set<std::string> highlight_set(out.confirmed_tip_hashes.begin(),
-                                                     out.confirmed_tip_hashes.end());
-        for (const auto& h : out.cyan_frontier_hashes)
-            highlight_set.insert(h);
-        for (const auto& h : incomplete_pool)
+        else if (in.enable_role_outlines)
         {
-            if (!pick_set.count(h) || highlight_set.count(h))
-                continue;
-            out.incomplete_hashes.push_back(h);
+            std::unordered_set<std::string> claimed;
+            claimed.reserve(green_display.size() + cyan_owners.size() + incomplete_pool.size());
+
+            for (const std::string& h : green_display)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, kSobelTipGreen);
+            }
+            for (const std::string& h : cyan_owners)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, kSobelFrontierCyan);
+            }
+            for (const std::string& h : incomplete_pool)
+            {
+                if (h.empty() || !hash_to_idx.count(h) || !claimed.insert(h).second)
+                    continue;
+                push_outline(h, kSobelIncompleteOrange);
+            }
         }
     }
 
@@ -975,16 +1000,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
         }
 
-        // Progressive barrier plane: only the past edge of the segment the camera is
-        // still "in" (most recent uncrossed boundary). Next older plane appears only
-        // after the eye crosses this one. Blocks still use multi-segment cull above.
+        // Barrier planes at ring segment boundaries (same Z as minimap edges).
+        // Lighter dividers for all past edges in the ring; bold progressive plane =
+        // past edge of the segment containing the camera.
         if (n_eligible > 0)
         {
             const float plane_half = kLayoutBaseRadius * 8.f;
-            // Hysteresis so the plane does not flicker when eye sits on the boundary.
             const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
-            float plane_z = 0.f;
-            bool  have_plane = false;
+            const glm::vec4 kDivider(0.35f, 0.75f, 0.95f, 0.06f);
+            float past_zs[8]{};
+            int n_past = 0;
+            float bold_z = 0.f;
+            bool have_bold = false;
             for (int i = 0; i < n_eligible; ++i)
             {
                 const auto& s = hud.segments[i];
@@ -992,18 +1019,36 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     continue;
                 const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
                 const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
-                // Layout: older = larger Z → past boundary is max(z_from, z_to).
                 const float past_z = std::max(z_from, z_to);
-                // Still on the live/newer side of this past edge → draw it and stop.
-                if (eye_z <= past_z + cross_eps)
+                const float new_z  = std::min(z_from, z_to);
+                if (n_past < 8)
+                    past_zs[n_past++] = past_z;
+                // Camera inside this slab (newer ≤ eye ≤ older).
+                if (!have_bold && eye_z >= new_z - cross_eps && eye_z <= past_z + cross_eps)
                 {
-                    plane_z = past_z;
-                    have_plane = true;
-                    break;
+                    bold_z = past_z;
+                    have_bold = true;
                 }
             }
-            if (have_plane)
-                debug->add_z_plane_quad(plane_z, plane_half, kBarrierPlaneColor);
+            if (!have_bold)
+            {
+                // Fallback: progressive oldest uncrossed past edge.
+                for (int i = 0; i < n_past; ++i)
+                {
+                    if (eye_z <= past_zs[i] + cross_eps)
+                    {
+                        bold_z = past_zs[i];
+                        have_bold = true;
+                        break;
+                    }
+                }
+            }
+            for (int i = 0; i < n_past; ++i)
+            {
+                const bool bold = have_bold && std::abs(past_zs[i] - bold_z) < 0.25f;
+                debug->add_z_plane_quad(past_zs[i], plane_half,
+                                       bold ? kBarrierPlaneColor : kDivider);
+            }
         }
     }
 
@@ -1128,6 +1173,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const auto& s = hud.segments[i];
             auto& d = out.ui.segments[i];
             d.index = s.index;
+            d.global_index = s.global_index;
             d.from_ms = s.from_ms;
             d.to_ms = s.to_ms;
             d.load_ratio = s.load_ratio;

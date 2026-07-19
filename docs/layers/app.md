@@ -25,9 +25,9 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/main.cpp` | Window, config boot, system register, message pump; F11/Esc fullscreen |
 | `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (save style + placement) |
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
-| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, highlight hash lists, `UiSnapshot` |
+| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
-| Timeline minimap (overlay) | Ringbuffer of active segments (≤3); viewport caret; Live / scrub / prev-next |
+| Timeline minimap (overlay) | 3 ring segments Z-aligned to barrier planes; global `#G` labels; Live / scrub / page |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |
@@ -49,6 +49,10 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | **Red** | Removal death fade |
 
 Presentation only — confirmation marks come from **network** into `BlockScene`.
+
+### Sobel colors (app → graphics)
+
+Graphics is domain-agnostic: the presenter emits `std::vector<SobelOutlineInstance>` with `instance_index` + `rgba` (intensity in **a**). Product roles map to palette constants in `scene_presenter.cpp` (gold / tip green / frontier cyan / incomplete orange). Selection is exclusive (gold only); otherwise role outlines are co-visible in **one** GPU pass. Kill-switch arrives as `FrameSourceInput::enable_role_outlines`.
 
 ## Goals
 
@@ -84,7 +88,9 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 | **P2** | Confirm polish | Feed-row confirmed badge; eye-check green vs shard palette; dual outline only if product asks |
 | **P2** | History / LOD presentation | Modes on top of segment cull / barrier planes |
 
-**Layout convention:** camera `up=(0,-1,0)` makes world **+X** screen-left; polar placement uses **−r·cos(θ)** so chain **0→0** sits on the viewer’s **right**. |
+**Layout convention:** camera `up=(0,-1,0)` makes world **+X** screen-left; polar placement uses **−r·cos(θ)** so chain **0→0** sits on the viewer’s **right**.
+
+**Timeline origin:** set once per session (`now − lookback`); never rewrite from earliest block (avoids attached-camera Z snaps on load).
 
 ## Interfaces
 

@@ -30,6 +30,8 @@ struct FrameSourceInput
     bool      filter_txn_gt_1 = false;
     // Min block output ALPH (atto digit string); empty or "0" = off.
     std::string filter_min_alph_atto;
+    // When false, presenter omits role outlines (tips/cyan/orange); selection gold still emitted.
+    bool      enable_role_outlines = true;
 };
 
 struct FrameSourceOutput
@@ -40,9 +42,9 @@ struct FrameSourceOutput
     glm::vec3 look_target_pos{ 0.f };
     UiSnapshot ui{};
 
-    std::vector<std::string> confirmed_tip_hashes;
-    std::vector<std::string> cyan_frontier_hashes;
-    std::vector<std::string> incomplete_hashes;
+    // App-built Sobel list: instance_index into instances/pick_map + outline color.
+    // Graphics draws all in one pass (white edge × instance color). No role names.
+    std::vector<SobelOutlineInstance> sobel_outlines;
 
     // Dynamic camera clip from visible segment span (applied after prepare for UBO).
     bool  has_clip_suggestion = false;
