@@ -81,7 +81,8 @@ struct UiSnapshot
         int   height     = -1;
         int   chain_from = -1;
         int   chain_to   = -1;
-        int   txn_count  = -1; // -1 = unknown (no detail yet)
+        int   txn_count  = -1; // -1 = unknown (never parsed); survives detail slim
+        int   is_uncle   = 0;  // 0/1 ghost uncle
     };
     BlockBillboardUi block_billboard{};
 

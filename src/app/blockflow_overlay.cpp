@@ -179,6 +179,7 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
         billboard_chain_from_ = src.chain_from;
         billboard_chain_to_ = src.chain_to;
         billboard_txn_count_ = src.txn_count;
+        billboard_is_uncle_ = src.is_uncle != 0;
     }
 
     const float target = want ? 1.f : 0.f;
@@ -245,6 +246,9 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
         float ny = std::clamp(pos.y, min_y, std::max(min_y, max_y - size.y));
         if (nx != pos.x || ny != pos.y)
             ImGui::SetWindowPos(ImVec2(nx, ny));
+
+        if (billboard_is_uncle_)
+            ImGui::TextColored(ImVec4(0.78f, 0.45f, 1.f, 1.f), "uncle");
 
         if (billboard_height_ >= 0)
             ImGui::Text("H  %d", billboard_height_);
@@ -596,10 +600,15 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             ImGui::TextDisabled("time %s", tbuf);
         }
 
-        ImGui::TextDisabled("%d tx Â· %d deps Â· %d uncles",
-                            static_cast<int>(inspector.txns.size()),
-                            static_cast<int>(inspector.deps.size()),
-                            static_cast<int>(inspector.uncles.size()));
+        {
+            const int tx_n = (inspector.txn_count >= 0)
+                                 ? inspector.txn_count
+                                 : static_cast<int>(inspector.txns.size());
+            ImGui::TextDisabled("%d tx · %d deps · %d uncles",
+                                tx_n,
+                                static_cast<int>(inspector.deps.size()),
+                                static_cast<int>(inspector.uncles.size()));
+        }
 
         // â”€â”€ Dependencies (collapsed by default) â”€â”€
         if (!inspector.deps.empty() &&

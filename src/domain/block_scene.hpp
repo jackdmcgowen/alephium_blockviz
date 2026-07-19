@@ -99,6 +99,11 @@ public:
     int confirmed_height_locked(uint32_t lane) const;
     void copy_confirmed_heights_locked(int out[kLaneCount]) const;
 
+    // Ghost uncle / not-main competitor kept for visualization (not confirm tip).
+    void mark_uncle(const NodeId& hash);
+    bool is_uncle(const NodeId& hash) const;
+    bool is_uncle_locked(const NodeId& hash) const;
+
     void set_trace_status(int phase, int offset);
     void get_trace_status_locked(int* phase_out, int* offset_out) const;
 
@@ -157,6 +162,7 @@ private:
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
     std::unordered_set<NodeId> confirmed_;
+    std::unordered_set<NodeId> uncle_set_;
     std::atomic<float> camera_scroll_z_{ 0.f };
     std::atomic<int64_t> genesis_ms_{ ALPH_GENESIS_TIMESTAMP_MS_FALLBACK };
     std::atomic<int64_t> timeline_origin_ms_{ 0 };

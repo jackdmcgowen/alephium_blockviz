@@ -58,4 +58,5 @@ private:
     int         billboard_chain_from_ = -1;
     int         billboard_chain_to_   = -1;
     int         billboard_txn_count_  = -1;
+    bool        billboard_is_uncle_   = false;
 };

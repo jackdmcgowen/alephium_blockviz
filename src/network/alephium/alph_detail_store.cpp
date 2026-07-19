@@ -3,7 +3,8 @@
 
 void AlphDetailStore::slim_inplace(AlphBlock& block)
 {
-    // Keep hash/height/deps/uncles for layout arrows and feed; drop bulk UTXO trees.
+    // Keep hash/height/deps/uncles/txn_count for layout + billboard; drop bulk UTXO trees.
+    // txn_count is set at parse time and must survive slim (txns vector becomes empty).
     block.txns.clear();
     block.txns.shrink_to_fit();
 }
@@ -13,7 +14,22 @@ void AlphDetailStore::upsert(const AlphBlock& block)
     if (block.hash.empty())
         return;
     std::lock_guard<std::mutex> lock(mu_);
-    by_id_[block.hash] = block;
+    auto it = by_id_.find(block.hash);
+    if (it == by_id_.end())
+    {
+        by_id_[block.hash] = block;
+        return;
+    }
+    AlphBlock merged = block;
+    // Preserve known txn_count when re-upsert is slim or missing the field.
+    if (merged.txn_count < 0 && it->second.txn_count >= 0)
+        merged.txn_count = it->second.txn_count;
+    else if (it->second.txn_count >= 0 && merged.txn_count >= 0)
+        merged.txn_count = (std::max)(merged.txn_count, it->second.txn_count);
+    // Prefer non-empty txn payload if incoming is empty (e.g. race with slim).
+    if (merged.txns.empty() && !it->second.txns.empty())
+        merged.txns = it->second.txns;
+    it->second = std::move(merged);
 }
 
 void AlphDetailStore::remove(const NodeId& id)

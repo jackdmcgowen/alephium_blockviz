@@ -23,6 +23,7 @@ void BlockScene::reset()
     feed_.clear();
     total_blocks_ = 0;
     confirmed_.clear();
+    uncle_set_.clear();
     for (int i = 0; i < kLaneCount; ++i)
     {
         confirmed_height_[i] = -1;
@@ -60,9 +61,8 @@ bool BlockScene::add_block(cJSON* block)
     if (graph_.contains(alph_block.hash))
         return false;
 
-    // Uncles are NOT auto-evicted here â€” adapter verifies is-in-main-chain and
-    // removes only non-main uncles (main uncles may remain but are not Sobel tips
-    // unless they are the current confirmed-height frontier).
+    // Uncles are NOT auto-evicted here — adapter verifies is-in-main-chain and
+    // marks non-main ghost uncles with BlockRole::Uncle (kept for viz).
 
     GraphDelta delta;
     GraphNode node;
@@ -75,6 +75,9 @@ bool BlockScene::add_block(cJSON* block)
     node.lane_count_hint = 16;
     node.chain_label =
         std::to_string(alph_block.chainFrom) + "->" + std::to_string(alph_block.chainTo);
+    node.txn_count = alph_block.txn_count;
+    if (uncle_set_.count(alph_block.hash))
+        node.role = BlockRole::Uncle;
     delta.upsert_nodes.push_back(std::move(node));
 
     graph_.apply(delta);
@@ -108,11 +111,43 @@ bool BlockScene::remove_block(const std::string& hash)
     graph_.apply(delta);
     detail_store_.remove(hash);
     erase_confirmed_unlocked_(hash);
+    uncle_set_.erase(hash);
 
     feed_.erase(std::remove_if(feed_.begin(), feed_.end(),
                                [&](const RecentFeedItem& b) { return b.hash == hash; }),
                 feed_.end());
     return true;
+}
+
+void BlockScene::mark_uncle(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    uncle_set_.insert(hash);
+    erase_confirmed_unlocked_(hash);
+    auto node = graph_.get(hash);
+    if (!node)
+        return;
+    node->role = BlockRole::Uncle;
+    GraphDelta delta;
+    delta.upsert_nodes.push_back(*node);
+    graph_.apply(delta);
+}
+
+bool BlockScene::is_uncle(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    return uncle_set_.count(hash) != 0;
+}
+
+bool BlockScene::is_uncle_locked(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    return uncle_set_.count(hash) != 0;
 }
 
 void BlockScene::mark_confirmed(const NodeId& hash)
@@ -264,6 +299,17 @@ void BlockScene::mark_confirmed_unlocked_(const NodeId& hash, uint32_t lane, int
         return;
     // Always record bag membership (solid cubes / free-main labels).
     confirmed_.insert(hash);
+    uncle_set_.erase(hash);
+    if (auto n = graph_.get(hash))
+    {
+        if (n->role != BlockRole::Main)
+        {
+            n->role = BlockRole::Main;
+            GraphDelta delta;
+            delta.upsert_nodes.push_back(*n);
+            graph_.apply(delta);
+        }
+    }
     if (lane >= static_cast<uint32_t>(kLaneCount) || height < 0)
         return;
 

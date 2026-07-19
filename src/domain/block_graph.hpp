@@ -18,6 +18,14 @@ enum class EdgeKind : uint8_t
     Reference
 };
 
+// Visual / consensus role for draw + confirm policy.
+enum class BlockRole : uint8_t
+{
+    Unknown = 0,
+    Main    = 1, // proven or assumed main-path
+    Uncle   = 2  // ghost uncle / not-main competitor (kept for viz)
+};
+
 struct GraphNode
 {
     NodeId   id;
@@ -28,6 +36,8 @@ struct GraphNode
     uint32_t lane           = 0; // e.g. chainFrom*4+chainTo
     uint32_t lane_count_hint = 1;
     std::string chain_label;
+    int       txn_count     = -1; // from API; survives detail slim
+    BlockRole role          = BlockRole::Unknown;
 };
 
 struct GraphEdge

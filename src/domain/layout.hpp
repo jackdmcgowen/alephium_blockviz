@@ -36,6 +36,8 @@ struct PlacedBlock
     uint8_t     lane = 0;
     int         height = 0;
     int64_t     timestamp_ms = 0;
+    int         txn_count = -1;
+    bool        is_uncle = false;
     glm::vec3   pos{ 0.0f };
     glm::vec3   color{ 1.0f };
 };

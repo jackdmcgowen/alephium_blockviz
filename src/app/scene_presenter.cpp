@@ -473,6 +473,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
     if (green_display.empty())
         green_display = frontier_domain;
+    // Uncles must never be green tips.
+    for (auto it = green_display.begin(); it != green_display.end(); )
+    {
+        if (scene_.is_uncle_locked(*it))
+            it = green_display.erase(it);
+        else
+            ++it;
+    }
 
     int hc_by_lane[BlockScene::kLaneCount];
     scene_.copy_confirmed_heights_locked(hc_by_lane);
@@ -483,7 +491,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     {
         if (n.id.empty() || live_nodes.count(n.id) == 0)
             continue;
-        if (scene_.is_confirmed_locked(n.id))
+        if (scene_.is_confirmed_locked(n.id) || scene_.is_uncle_locked(n.id) ||
+            n.role == BlockRole::Uncle)
             continue;
         if (n.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
             continue;
@@ -668,7 +677,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         else if (!in.hovered_hash.empty() && placed.hash == in.hovered_hash)
             color = glm::mix(color, glm::vec3(1.f, 0.9f, 0.4f), 0.35f);
 
-        const float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+        float alpha = is_solid(placed.hash) ? 1.0f : kUnconfirmedAlpha;
+        if (placed.is_uncle || scene_.is_uncle_locked(placed.hash))
+            alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
@@ -954,10 +965,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 bb.world_pos[1] = world.y;
                 bb.world_pos[2] = world.z;
 
-                // Prefer placement height/lane; fall back to detail store.
+                // Prefer placement height/lane/txn_count; fall back to detail store.
                 int height = -1;
                 int chain_from = -1;
                 int chain_to = -1;
+                int txn_count = -1;
+                bool is_uncle = scene_.is_uncle_locked(in.hovered_hash);
                 for (const PlacedBlock& p : layout.placements)
                 {
                     if (p.hash != in.hovered_hash)
@@ -965,9 +978,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     height = p.height;
                     chain_from = static_cast<int>(p.lane / ALPH_NUM_GROUPS);
                     chain_to = static_cast<int>(p.lane % ALPH_NUM_GROUPS);
+                    txn_count = p.txn_count;
+                    is_uncle = is_uncle || p.is_uncle;
                     break;
                 }
-                int txn_count = -1;
                 if (auto d = scene_.detail_store().get(in.hovered_hash))
                 {
                     if (height < 0)
@@ -977,13 +991,17 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                         chain_from = d->chainFrom;
                         chain_to = d->chainTo;
                     }
-                    // Detail present: report txn size (0 is valid).
-                    txn_count = static_cast<int>(d->txns.size());
+                    // Prefer preserved parse-time count (survives slim); not txns.size().
+                    if (d->txn_count >= 0)
+                        txn_count = d->txn_count;
+                    else if (txn_count < 0 && !d->txns.empty())
+                        txn_count = static_cast<int>(d->txns.size());
                 }
                 bb.height = height;
                 bb.chain_from = chain_from;
                 bb.chain_to = chain_to;
                 bb.txn_count = txn_count;
+                bb.is_uncle = is_uncle ? 1 : 0;
             }
         }
     }
