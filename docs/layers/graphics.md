@@ -96,7 +96,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 | **Done (P2)** | Pipeline/descriptor/barrier modularization | `PipelineType`, `descriptor.cpp`, `cmd_image_barrier`, MeshArena shared PSOs |
 | **Done (P2)** | Split `GraphicsSystem` orchestration | `frame_loop`, `async_sobel_submit`, `gpu_frame_publish`, `selection_state` |
 | **P2** | Always-on tip Sobel perf budget | Soft median regression target from historical design; kill-switch escape hatch |
-| **P1 (V1 landed)** | Visual regression harness | `tests/visual/` + `scripts/run_visual_tests.ps1` (BitBlt + golden compare); V2/V3: determinism + GPU readback |
+| **P1 (V1 landed)** | Visual regression harness | `vnv/int/tests/visual/` + `run_vnv.ps1 -Int` (BitBlt + golden); V2/V3: determinism + GPU readback |
 | **P3** | Full PIMPL of `GraphicsSystem` | Only if external includes force it |
 
 ## Interfaces

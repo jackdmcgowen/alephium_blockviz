@@ -27,9 +27,10 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | Living layer docs (app, engine, graphics, network) | [layers/](layers/README.md) |
 | Scene UX + graphics pipeline modular work (feature branch) | multi-tx filter, billboards, dep hover, PSO/frame split — on `feature/graphics-pipeline-descriptor-modular` |
 | Offline **Debug / FakeChain** simulator | [network](layers/network.md) `fake/fake_chain_simulator.*`; Network panel Debug selectable |
-| Domain / detail **unit tests** | `tests/domain_tests.cpp` · `sln/blockviz_tests.vcxproj` |
+| Domain / detail **unit tests** | `vnv/mod/tests/` · `mod_domain` |
 | Borderless **fullscreen** (F11 / Esc exit FS) | App `window_fullscreen.hpp`; graphics resizes only |
-| Graphics **visual regression** harness (V1) | `tests/visual/` + `run_visual_tests.ps1`; golden PNG compare |
+| Graphics **visual regression** harness (V1) | `vnv/int/tests/visual/` · `int_visual` |
+| **VnV framework** (mod/int/bench layout + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `scripts/run_vnv.ps1` |
 
 ---
 
@@ -60,7 +61,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | 7 | Richer **dep-viz modes** (selection / frontier / LOD) | [app](layers/app.md) | Product decision first; avoid full edge soup by default |
 | 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
 | 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
-| 10 | **History depth + LOD** presentation | app · network | Builds on segment cull / camera history |
+| 10 | **History depth + LOD** presentation | app · network | Network half: chunked timeline ingest done on branch; presentation LOD still open |
 | 11 | **Second real chain** adapter | [network](layers/network.md) | Only after FakeChain proves multi-adapter wiring |
 | 12 | Headless / client-driven **frame test seam** | [engine](layers/engine.md) · [graphics](layers/graphics.md) | Only if automated GPU / CI tests become a goal |
 

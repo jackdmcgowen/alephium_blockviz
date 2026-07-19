@@ -74,4 +74,4 @@ Domain holds chain-agnostic graph metadata, the live scene (confirmed frontiers,
 
 - [layers/README.md](README.md)
 - [network.md](network.md) · [app.md](app.md)
-- Tests: `tests/domain_tests.cpp`
+- VnV mod: `vnv/mod/tests/domain_tests.cpp` · `.\scripts\run_vnv.ps1`

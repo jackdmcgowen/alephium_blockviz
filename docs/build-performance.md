@@ -75,9 +75,12 @@ powershell -ExecutionPolicy Bypass -File scripts/include_audit.ps1
 
 1. Copy `sln/_template_system.vcxproj.example` → `sln/mysystem.vcxproj`.
 2. Create `src/mysystem/pch.h`, `pch.cpp`, sources.
-3. Add project to `alephium_visualizer.sln` and `ProjectReference` from the app (or engine).
-4. Link library in app `AdditionalDependencies`.
-5. Run bench once to confirm no large regression.
+3. Register in `vnv/manifest/libraries.json` (id, path, guid, depends_on, `in_product_sln` / `in_vnv_sln`).
+4. Run `.\scripts\sync_solutions.ps1` (updates `alephium_visualizer.sln` + `blockviz_vnv.sln`).
+5. Add `ProjectReference` from the app and/or engine; link in `AdditionalDependencies` as needed.
+6. `.\scripts\run_vnv.ps1 -All` then run bench once to confirm no large compile regression.
+
+See `vnv/README.md` for the full VnV layout (mod / int / bench).
 
 ## Related
 

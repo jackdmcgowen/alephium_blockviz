@@ -7,7 +7,7 @@ Windows Vulkan + ImGui visualizer for **Alephium BlockFlow** — sixteen shards 
 | **Host** | Alephium BlockFlow **0.4.0** (`app_identity`) |
 | **Engine** | BlockvizEngine **0.5.0** (`engine_identity`) |
 | **Solution** | `sln/alephium_visualizer.sln` |
-| **Tests** | `sln/blockviz_tests.vcxproj` (domain/detail, no GPU) |
+| **VnV** | `vnv/` · `sln/blockviz_vnv.sln` · `.\scripts\run_vnv.ps1` (mod/int) |
 
 ## Architecture
 

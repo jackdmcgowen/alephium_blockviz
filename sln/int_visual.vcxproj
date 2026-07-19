@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Visual regression harness: FakeChain + fixed camera + screenshot capture. -->
+<!-- VnV int: visual regression harness (FakeChain + screenshot + golden compare). -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -15,7 +15,7 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{C8D3E4F5-A1B2-4C5D-9E0F-1A2B3C4D5E6F}</ProjectGuid>
-    <RootNamespace>graphics_visual_tests</RootNamespace>
+    <RootNamespace>int_visual</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -94,7 +94,7 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
       <PrecompiledHeaderFile>app/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="..\tests\visual\graphics_visual_tests.cpp" />
+    <ClCompile Include="..\vnv\int\tests\visual\graphics_visual_tests.cpp" />
     <ClCompile Include="..\src\app\scene_presenter.cpp" />
     <ClCompile Include="..\src\domain\block_graph.cpp" />
     <ClCompile Include="..\src\domain\block_scene.cpp" />

@@ -68,7 +68,8 @@ debug.log
 *.ini
 user_prefs.json
 
-# Visual regression capture artifacts (goldens are tracked)
+# VnV visual capture artifacts (goldens are tracked)
+vnv/int/tests/visual/out/
 tests/visual/out/
 
 # OS junk

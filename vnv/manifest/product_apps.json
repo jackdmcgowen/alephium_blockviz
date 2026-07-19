@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "id": "alephium_visualizer",
+      "vcxproj": "sln/alephium_visualizer.vcxproj",
+      "guid": "{A5B1EED0-31AA-4165-9324-30D76C33CE3B}",
+      "depends_on": ["blockviz_engine", "graphics", "network"]
+    }
+  ]
+}

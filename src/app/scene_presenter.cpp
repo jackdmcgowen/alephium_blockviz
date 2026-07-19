@@ -943,29 +943,35 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
         }
 
-        // Barrier planes last: alpha-blend over blocks/arrows (debug depth write is off).
+        // Progressive barrier plane: only the past edge of the segment the camera is
+        // still "in" (most recent uncrossed boundary). Next older plane appears only
+        // after the eye crosses this one. Blocks still use multi-segment cull above.
         if (n_eligible > 0)
         {
             const float plane_half = kLayoutBaseRadius * 8.f;
-            float boundary_z[kMaxVisibleTimeSegments * 2 + 2]{};
-            int nbound = 0;
-            auto push_bound_z = [&](float z) {
-                for (int i = 0; i < nbound; ++i)
-                    if (std::abs(boundary_z[i] - z) < 0.25f)
-                        return;
-                if (nbound < static_cast<int>(sizeof(boundary_z) / sizeof(boundary_z[0])))
-                    boundary_z[nbound++] = z;
-            };
+            // Hysteresis so the plane does not flicker when eye sits on the boundary.
+            const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
+            float plane_z = 0.f;
+            bool  have_plane = false;
             for (int i = 0; i < n_eligible; ++i)
             {
-                if (!seg_visible[i] && n_eligible > 1)
-                    continue;
                 const auto& s = hud.segments[i];
-                push_bound_z(ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second));
-                push_bound_z(ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second));
+                if (s.from_ms <= 0 && s.to_ms <= 0)
+                    continue;
+                const float z_from = ts_to_z(s.from_ms, timeline_origin_ms, meters_per_second);
+                const float z_to   = ts_to_z(s.to_ms, timeline_origin_ms, meters_per_second);
+                // Layout: older = larger Z → past boundary is max(z_from, z_to).
+                const float past_z = std::max(z_from, z_to);
+                // Still on the live/newer side of this past edge → draw it and stop.
+                if (eye_z <= past_z + cross_eps)
+                {
+                    plane_z = past_z;
+                    have_plane = true;
+                    break;
+                }
             }
-            for (int i = 0; i < nbound; ++i)
-                debug->add_z_plane_quad(boundary_z[i], plane_half, kBarrierPlaneColor);
+            if (have_plane)
+                debug->add_z_plane_quad(plane_z, plane_half, kBarrierPlaneColor);
         }
     }
 

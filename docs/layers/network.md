@@ -48,6 +48,10 @@ BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady
 
 Additional policy themes (see header comments on `AlephiumAdapter`): sequential frontier height `H_c`, free-main dep propagation, chain-walk multi-step confirm, live vs historical fetch rules (history may restrict hash fetches).
 
+**Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
+
+**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
+
 ### Domains
 
 | Domain | Selectable | Notes |
@@ -94,14 +98,16 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| **P0** | Keep phases, dual-write rules, and thread contract accurate | Update when adapter policy shifts |
-| **P0** | Document `INetworkSystem` + domain enums | `configure`, `switch_domain`, status |
 | **Done** | Offline Debug / FakeChain simulator | `src/network/fake/fake_chain_simulator.*` |
-| **Done** | Unit tests (no GPU) | `tests/domain_tests.cpp` / `blockviz_tests` |
+| **Done** | Unit tests (no GPU) | `vnv/mod/tests/` / `mod_domain` via `run_vnv.ps1` |
+| **Done** | Live poll vs camera lookback `k` | Skip window 0 while `k>0`; resync on return |
+| **Done** | Chunked timeline interval polls | ~60s chunks, budgeted pump, newest-first |
+| **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |
+| **Standing** | Keep phases, dual-write, thread contract accurate | Hygiene when adapter policy shifts |
 | **P1** | Config / URL resolution notes | `config.json` array + `network_domain_resolve_url` |
-| **P2** | Retention / prune policy | Graph + detail vs lookback + camera history |
 | **P2** | Optional websocket tip stream | Focused feature, not a networking rewrite |
 | **P2** | Second real chain adapter | After FakeChain proves wiring |
+| **P2** | Eye-centered chunk priority / adaptive chunk size | Optional polish on top of newest-first |
 
 ## Interfaces
 

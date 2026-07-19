@@ -1,0 +1,28 @@
+{
+  "libraries": [
+    {
+      "id": "graphics",
+      "vcxproj": "sln/graphics.vcxproj",
+      "guid": "{6D69B7F2-ED37-4EAE-AF2A-0ABEEF80B4AF}",
+      "in_product_sln": true,
+      "in_vnv_sln": true,
+      "depends_on": []
+    },
+    {
+      "id": "network",
+      "vcxproj": "sln/network.vcxproj",
+      "guid": "{8F3A2B1C-9D4E-4F5A-A6B7-C8D9E0F1A2B3}",
+      "in_product_sln": true,
+      "in_vnv_sln": true,
+      "depends_on": []
+    },
+    {
+      "id": "blockviz_engine",
+      "vcxproj": "sln/blockviz_engine.vcxproj",
+      "guid": "{4C1AA4B2-BC4E-4DD5-8E48-D0967106857D}",
+      "in_product_sln": true,
+      "in_vnv_sln": true,
+      "depends_on": ["graphics", "network"]
+    }
+  ]
+}

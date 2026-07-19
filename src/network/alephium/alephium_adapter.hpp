@@ -10,8 +10,9 @@
 //
 // Phases: BootstrapPoll → IdentifyTips → DfsTrace (confirm walk) → Steady.
 // Live chain (base lookback window): per-hash fetches allowed to fill confirmed deps.
-// Historical (below base floor / camera unlock): time-slot interval polls only — no
-// hash fetches from confirm walk. Free main for in-pool deps of confirmed blocks.
+// Historical (below base floor / camera unlock): chunked time-slot interval polls only —
+// no hash fetches from confirm walk. Free main for in-pool deps of confirmed blocks.
+// Timeline GETs are ~60s chunks (newest-first, budgeted); Steady live refreshes tip chunk only.
 // Presentation (solid/green/cyan/orange/gold) lives in ScenePresenter — not here.
 #include "network/alephium/block_fetch_pool.hpp"
 #include "network/alephium/main_chain_cache.hpp"
@@ -126,11 +127,21 @@ private:
 
     // Genesis timestamp + discrete lookback windows (index 0 = live tip window).
     void resolve_genesis_ms_();
-    void ensure_lookback_window_(int index);
+    // Register / refresh window bounds; HTTP work is budgeted in pump_timeline_chunks_.
+    // allow_live_poll: window 0 only scheduled when true (false while camera in history).
+    void ensure_lookback_window_(int index, bool allow_live_poll = true);
     void ensure_windows_for_camera_();
     int  max_lookback_index_() const;
     int  camera_lookback_index_() const;
     int64_t window_ms_() const;
+    int64_t chunk_ms_() const;
+    // Budgeted newest-first chunk GETs for needed windows. Returns chunks fetched.
+    int  pump_timeline_chunks_(int max_chunks);
+    // Fetch one chunk of a window (newest incomplete, or force newest for live).
+    bool fetch_window_chunk_(int window_index, bool force_newest);
+    void recompute_window_chunk_stats_(int window_index);
+    // Force live newest chunk(s) + tip reseed after returning from history.
+    void resync_live_chain_();
 
     void drain_fetch_results_(int max_admits);
     // Live-chain only: per-hash GET /blocks/{hash}.
@@ -196,17 +207,32 @@ private:
     float initial_camera_scroll_z_ = 0.f;
     int64_t base_lookback_ms_ = 0;
     // Lookback windows: index 0 = [now-W, now], higher = older toward genesis.
+    // HTTP fills are chunked (kTimelineChunkMs); polled = all chunks in span done.
     struct LookbackWindowSlot
     {
         int     index = 0;
         int64_t from_ms = 0;
         int64_t to_ms = 0;
-        bool    polled = false;
+        bool    polled = false;           // all chunks fetched once
+        int     chunks_done = 0;
+        int     chunks_total = 0;
+        // Newest-first fill cursor: exclusive end of next chunk to request.
+        // 0 = start at to_ms. Decreases toward from_ms as chunks complete.
+        int64_t next_fill_to_ms = 0;
+        // Live Steady: re-request newest chunk only (not full window).
+        bool    want_newest_refresh = false;
     };
     std::vector<LookbackWindowSlot> lookback_windows_;
     int64_t genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     bool    genesis_resolved_ = false;
-    // Quantized from_ts of history interval polls already issued (dedupe).
+    // Live-chain poll gate: skip window-0 API while camera lookback k > 0; on return
+    // to live tip, force live resync if poll_interval has elapsed.
+    int64_t last_live_window_poll_ms_ = 0;
+    int     last_cam_lookback_k_ = 0;
+    bool    live_poll_deferred_ = false;
+    // Rate-limit chunk pumps on the drain path (ms wall clock).
+    int64_t last_chunk_pump_ms_ = 0;
+    // Quantized chunk from_ts of interval polls already issued (dedupe).
     std::unordered_set<int64_t> history_slots_fetched_;
 
     int poll_count_ = 0;
@@ -229,4 +255,10 @@ private:
     static constexpr int kMaxFloodPerSeed = 256;
     static constexpr int kMaxFetchAdmitsPerDrain = 4; // selection path only
     static constexpr int kMaxDfsNodes = 256;
+    // Sub-interval for blocks-with-events GETs (~10 chunks per 10 min segment).
+    static constexpr int64_t kTimelineChunkMs = 60'000;
+    // drain_verify: at most one chunk every this many ms.
+    static constexpr int64_t kChunkPumpIntervalMs = 400;
+    static constexpr int kMaxChunksPerPoll = 2;
+    static constexpr int kMaxChunksPerDrain = 1;
 };

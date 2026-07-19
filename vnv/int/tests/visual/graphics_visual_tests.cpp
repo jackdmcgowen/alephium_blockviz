@@ -3,8 +3,8 @@
 // Working directory must be the repo root.
 //
 // Usage:
-//   graphics_visual_tests.exe --case fake_overview --out tests/visual/out/fake_overview/actual.png
-//   graphics_visual_tests.exe --list
+//   int_visual.exe --case fake_overview --out vnv/int/tests/visual/out/fake_overview/actual.png
+//   int_visual.exe --list
 
 #include "app/pch.h"
 
@@ -95,7 +95,7 @@ static void print_usage()
     std::printf(
         "graphics_visual_tests — capture deterministic FakeChain frame\n"
         "  --case <id>     Case id (default: fake_overview)\n"
-        "  --out <path>    Output PNG path (default: tests/visual/out/<case>/actual.png)\n"
+        "  --out <path>    Output PNG path (default: vnv/int/tests/visual/out/<case>/actual.png)\n"
         "  --warmup-ms N   Override warmup milliseconds\n"
         "  --width N --height N\n"
         "  --list\n");
@@ -144,7 +144,7 @@ int main(int argc, char** argv)
     }
 
     if (out_path.empty())
-        out_path = "tests/visual/out/" + case_id + "/actual.png";
+        out_path = "vnv/int/tests/visual/out/" + case_id + "/actual.png";
 
     if (case_id != "fake_overview")
     {
