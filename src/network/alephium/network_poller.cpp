@@ -41,12 +41,15 @@ void NetworkPoller::stop()
     running_ = false;
     if (thread_.joinable())
         thread_.join();
+    // After loop exits: write all windows with blocks (escape / domain switch / exit).
+    adapter_.flush_disk_cache();
     adapter_.set_fetch_pool(nullptr);
     fetch_pool_.stop();
 }
 
 void NetworkPoller::prepare_domain_switch()
 {
+    adapter_.flush_disk_cache();
     adapter_.full_reset();
 }
 

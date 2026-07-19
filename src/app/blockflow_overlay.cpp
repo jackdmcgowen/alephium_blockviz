@@ -798,12 +798,19 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::ProgressBar(pool_frac, ImVec2(-1.f, 0.f));
     ImGui::TextDisabled("pool blocks %d", ui.total_blocks);
     ImGui::TextDisabled("fetches admitted %d", ui.stats_fetch_admitted);
-    if (ui.disk_cache_segments > 0 || ui.disk_cache_boot_blocks > 0)
-        ImGui::TextDisabled("Disk cache: %d G-seg · %d MB · boot %d blocks",
-                            ui.disk_cache_segments, ui.disk_cache_mb,
-                            ui.disk_cache_boot_blocks);
+    ImGui::Separator();
+    ImGui::Text("Disk cache");
+    if (ui.disk_cache_path[0] != '\0')
+        ImGui::TextWrapped("%s", ui.disk_cache_path);
     else
-        ImGui::TextDisabled("Disk cache: empty (writes after Steady fills a whole G-seg)");
+        ImGui::TextDisabled("path: (domain not ready)");
+    ImGui::TextDisabled("on disk: %d G-seg · %d MB", ui.disk_cache_segments, ui.disk_cache_mb);
+    if (ui.disk_cache_boot_blocks > 0)
+        ImGui::TextDisabled("boot: %d blocks from cache", ui.disk_cache_boot_blocks);
+    if (ui.disk_cache_last_event[0] != '\0')
+        ImGui::TextWrapped("last: %s", ui.disk_cache_last_event);
+    else
+        ImGui::TextDisabled("last: (waiting for Steady / stop flush)");
     if (ui.cache_pressure_level >= 2)
         ImGui::TextColored(ImVec4(1.f, 0.45f, 0.2f, 1.f),
                            "Timeline RAM HARD — oldest blocks may drop");

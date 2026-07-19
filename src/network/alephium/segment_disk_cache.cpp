@@ -9,6 +9,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
@@ -50,6 +51,29 @@ SegmentDiskCache::SegmentDiskCache(std::string domain_key)
     set_domain(std::move(domain_key));
 }
 
+void SegmentDiskCache::log_event(const char* fmt, ...) const
+{
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+
+    std::printf("%s\n", line);
+    std::fflush(stdout);
+
+    if (!enabled())
+        return;
+    // Best-effort file log next to cache (survives GUI with no console).
+    ensure_dirs_();
+    const std::string path = root_dir_() + "\\cache.log";
+    std::ofstream out(path, std::ios::app);
+    if (!out)
+        return;
+    const auto t = static_cast<long long>(std::time(nullptr));
+    out << t << ' ' << line << '\n';
+}
+
 void SegmentDiskCache::set_domain(std::string domain_key)
 {
     domain_key_ = std::move(domain_key);
@@ -61,10 +85,21 @@ void SegmentDiskCache::set_domain(std::string domain_key)
             c = '_';
     }
     if (enabled())
-        std::printf("[disk-cache] domain=%s root=%s enabled=1\n", domain_key_.c_str(),
-                    root_dir_().c_str());
+    {
+        // Create folder immediately so user can find the path.
+        ensure_dirs_();
+        std::vector<SegmentMeta> segs;
+        int64_t gen = 0;
+        if (!load_manifest_(segs, gen))
+            save_manifest_(segs, 0);
+        log_event("[disk-cache] domain=%s root=%s enabled=1", domain_key_.c_str(),
+                  root_dir_().c_str());
+    }
     else
+    {
         std::printf("[disk-cache] domain=%s enabled=0\n", domain_key_.c_str());
+        std::fflush(stdout);
+    }
 }
 
 std::string SegmentDiskCache::domain_key_from_int(int domain)
@@ -120,10 +155,17 @@ bool SegmentDiskCache::ensure_dirs_() const
 {
     if (!enabled())
         return false;
-    std::error_code ec;
-    fs::create_directories(root_dir_() + "\\segments", ec);
-    fs::create_directories(root_dir_() + "\\blocks", ec);
-    return !ec;
+    std::error_code ec1, ec2;
+    fs::create_directories(root_dir_() + "\\segments", ec1);
+    fs::create_directories(root_dir_() + "\\blocks", ec2);
+    if (ec1 || ec2)
+    {
+        std::printf("[disk-cache] create_directories failed root=%s ec1=%s ec2=%s\n",
+                    root_dir_().c_str(), ec1.message().c_str(), ec2.message().c_str());
+        std::fflush(stdout);
+        return false;
+    }
+    return true;
 }
 
 bool SegmentDiskCache::write_text_file_(const std::string& path, const std::string& body) const
@@ -531,7 +573,7 @@ bool SegmentDiskCache::load_segment(int g_seg, std::vector<CachedBlock>& out, in
         std::printf("[disk-cache] load_segment G=%d no blocks readable\n", g_seg);
         return false;
     }
-    std::printf("[disk-cache] load_segment G=%d blocks=%d complete=1\n", g_seg, got);
+    log_event("[disk-cache] load_segment G=%d blocks=%d complete=1", g_seg, got);
     return true;
 }
 
@@ -644,8 +686,8 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         segs.push_back(m);
     }
     enforce_disk_budget_(segs, man_gen);
-    std::printf("[disk-cache] saved G=%d blocks=%d complete=%d domain=%s root=%s\n", g_seg,
-                written, complete ? 1 : 0, domain_key_.c_str(), root_dir_().c_str());
+    log_event("[disk-cache] saved G=%d blocks=%d complete=%d domain=%s root=%s", g_seg, written,
+              complete ? 1 : 0, domain_key_.c_str(), root_dir_().c_str());
     return true;
 }
 

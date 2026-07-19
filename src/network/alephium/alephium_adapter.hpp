@@ -58,6 +58,8 @@ public:
     void set_fetch_pool(BlockFetchPool* pool) { fetch_pool_ = pool; }
     // Domain id for disk cache (mainnet/testnet); Debug disables cache.
     void set_disk_cache_domain(int domain);
+    // Persist all windows with blocks (call on stop / domain switch / Esc path).
+    void flush_disk_cache();
 
     void on_start();
     // Publish loading/activity HUD into BlockScene (call after poll/drain).
@@ -120,10 +122,11 @@ private:
     void refresh_lookback_floors_();
     // Disk cache: whole G_seg units replace network interval fills.
     void bootstrap_disk_cache_();
-    void maybe_persist_verified_segments_();
+    void maybe_persist_verified_segments_(bool force = false);
     bool try_fill_window_from_disk_(int lookback_k);
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
                                           int64_t to_ms);
+    void set_disk_cache_event_(const char* fmt, ...);
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     // Extra older history unlocked by camera Z, in milliseconds (time, not heights).
@@ -321,9 +324,11 @@ private:
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;
     int  disk_cache_bootstrap_blocks_ = 0;
-    std::unordered_set<int> disk_segment_admitted_; // G fully admitted (disk or just saved)
+    std::unordered_set<int> disk_segment_admitted_; // G complete on disk / admitted
     std::unordered_map<int, int> disk_cache_saved_count_; // G → last saved block count
     int64_t disk_cache_last_live_save_ms_ = 0;
+    int64_t disk_cache_last_persist_ms_ = 0;
+    char disk_cache_last_event_[160] = {};
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
     // Deferred non-interval results when interval budget is preferred.

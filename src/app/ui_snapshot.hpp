@@ -63,6 +63,8 @@ struct UiSnapshot
     int         disk_cache_segments   = 0;
     int         disk_cache_mb         = 0;
     int         disk_cache_boot_blocks = 0;
+    char        disk_cache_path[200]  = {};
+    char        disk_cache_last_event[160] = {};
 
     // Timeline segments (mirror BlockScene::TimeSegment).
     static constexpr int kMaxTimeSegments = 32;

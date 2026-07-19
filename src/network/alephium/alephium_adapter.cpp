@@ -7,6 +7,7 @@
 #include <climits>
 #include <cstdio>
 #include <ctime>
+#include <cstdarg>
 #include <deque>
 #include <queue>
 #include <unordered_map>
@@ -219,6 +220,10 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
         hud.disk_cache_mb =
             static_cast<int>((cs.bytes + 1024 * 1024 - 1) / (1024 * 1024));
         hud.disk_cache_boot_blocks = disk_cache_bootstrap_blocks_;
+        std::snprintf(hud.disk_cache_path, sizeof(hud.disk_cache_path), "%.199s",
+                      cs.root.c_str());
+        std::snprintf(hud.disk_cache_last_event, sizeof(hud.disk_cache_last_event), "%.159s",
+                      disk_cache_last_event_);
     }
 
     // Timeline segments: only the active triple-buffer ring (scrolling minimap).
@@ -594,8 +599,8 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
             scene_.mark_confirmed(cb.block.hash);
     }
     mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms);
-    std::printf("[disk-cache] fill G=%d k=%d blocks=%d (skip network)\n", G, lookback_k,
-                admitted);
+    set_disk_cache_event_("loaded G=%d from cache n=%d k=%d (skip net)", G, admitted,
+                          lookback_k);
     return admitted > 0 || !blocks.empty();
 }
 
@@ -657,56 +662,116 @@ void AlephiumAdapter::bootstrap_disk_cache_()
     }
 
     disk_cache_bootstrap_blocks_ = lr.blocks_loaded;
-    std::printf("[adapter] disk-cache bootstrap segments=%d blocks=%d path=%s\n",
-                lr.segments_loaded, lr.blocks_loaded, disk_cache_.root_dir().c_str());
+    set_disk_cache_event_("boot loaded %d G-seg · %d blocks from cache", lr.segments_loaded,
+                          lr.blocks_loaded);
 }
 
-void AlephiumAdapter::maybe_persist_verified_segments_()
+void AlephiumAdapter::set_disk_cache_event_(const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(disk_cache_last_event_, sizeof(disk_cache_last_event_), fmt, ap);
+    va_end(ap);
+    disk_cache_.log_event("%s", disk_cache_last_event_);
+}
+
+void AlephiumAdapter::flush_disk_cache()
 {
     if (!disk_cache_.enabled())
         return;
-    if (phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
+    set_disk_cache_event_("flush: persisting windows on stop/switch");
+    maybe_persist_verified_segments_(/*force=*/true);
+}
+
+void AlephiumAdapter::maybe_persist_verified_segments_(bool force)
+{
+    if (!disk_cache_.enabled())
+        return;
+    if (!force && phase_ != Phase::Steady && phase_ != Phase::BfsTrace)
         return;
 
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    const auto nodes = scene_.nodes_snapshot();
-
-    for (const LookbackWindowSlot& slot : lookback_windows_)
+    // Periodic warm persist in Steady (even if not complete).
+    if (!force && phase_ == Phase::Steady && disk_cache_last_persist_ms_ > 0 &&
+        now_ms - disk_cache_last_persist_ms_ < 15000)
     {
-        if (slot.to_ms <= slot.from_ms)
-            continue;
+        // Still allow complete saves below; only throttle pure warm rewrites via per-G count.
+    }
+    disk_cache_last_persist_ms_ = now_ms;
 
-        recompute_window_chunk_stats_(slot.index);
-        const LookbackWindowSlot& s = lookback_windows_[static_cast<size_t>(slot.index)];
+    constexpr int kMinBlocksWarm = 16;
+    const auto nodes = scene_.nodes_snapshot();
+    if (lookback_windows_.empty() && !nodes.empty() && force)
+    {
+        // Shutdown with no slots: group by global segment id.
+        std::unordered_map<int, std::vector<SegmentDiskCache::CachedBlock>> by_g;
+        for (const GraphNode& n : nodes)
+        {
+            if (n.timestamp_ms <= 0)
+                continue;
+            const int G = genesis_resolved_ ? global_segment_id_(n.timestamp_ms) : 0;
+            SegmentDiskCache::CachedBlock cb;
+            if (auto d = scene_.detail_store().get(n.id))
+                cb.block = *d;
+            else
+            {
+                cb.block.hash = n.id;
+                cb.block.height = static_cast<int>(n.height);
+                cb.block.timestamp = n.timestamp_ms;
+                cb.block.chainFrom = static_cast<uint8_t>(n.group_from);
+                cb.block.chainTo = static_cast<uint8_t>(n.group_to);
+            }
+            if (cb.block.hash.empty())
+                continue;
+            {
+                std::lock_guard<std::mutex> lock(scene_.mutex());
+                cb.confirmed = scene_.is_confirmed_locked(cb.block.hash);
+            }
+            by_g[G].push_back(std::move(cb));
+        }
+        for (auto& kv : by_g)
+        {
+            if (kv.second.empty())
+                continue;
+            int64_t from_ms = 0, to_ms = 0;
+            bounds_for_global_(kv.first, from_ms, to_ms);
+            const bool ok = disk_cache_.save_segment(kv.first, from_ms, to_ms, genesis_ms_,
+                                                     kv.second, /*complete=*/false);
+            if (ok)
+            {
+                disk_cache_saved_count_[kv.first] = static_cast<int>(kv.second.size());
+                set_disk_cache_event_("saved G=%d complete=0 n=%d (flush)", kv.first,
+                                      static_cast<int>(kv.second.size()));
+            }
+        }
+        return;
+    }
+
+    for (size_t wi = 0; wi < lookback_windows_.size(); ++wi)
+    {
+        recompute_window_chunk_stats_(static_cast<int>(wi));
+        const LookbackWindowSlot& s = lookback_windows_[wi];
+        if (s.to_ms <= s.from_ms)
+            continue;
 
         const int G = (s.global_index >= 0) ? s.global_index : lookback_to_global_(s.index);
         if (G < 0)
             continue;
 
-        // Complete = all interval chunks fetched for this window.
-        const bool complete =
-            s.chunks_total > 0 && s.chunks_done >= s.chunks_total && s.pending_from_ms == 0;
-        // Allow warm save of live window after BFS once in Steady even if not fully polled,
-        // but only as complete when polled.
-        if (s.index == 0)
+        // Complete = all interval chunks for this window already admitted.
+        bool complete = false;
+        if (s.chunks_total > 0 && s.pending_from_ms == 0)
         {
-            if (phase_ != Phase::Steady || bfs_generation_ < 1)
-                continue;
-            // Rate-limit live re-saves.
-            if (disk_cache_last_live_save_ms_ > 0 &&
-                now_ms - disk_cache_last_live_save_ms_ < 120000 && complete)
+            complete = true;
+            for (int64_t key :
+                 SegmentDiskCache::chunk_keys_for_window(s.from_ms, s.to_ms))
             {
-                // allow rewrite only if block count grew a lot
+                if (history_slots_fetched_.count(key) == 0)
+                {
+                    complete = false;
+                    break;
+                }
             }
-            else if (!complete && disk_cache_last_live_save_ms_ > 0 &&
-                     now_ms - disk_cache_last_live_save_ms_ < 120000)
-                continue;
-        }
-        else
-        {
-            // History: require complete chunks (network-replaceable).
-            if (!complete)
-                continue;
         }
 
         std::vector<SegmentDiskCache::CachedBlock> blocks;
@@ -743,36 +808,44 @@ void AlephiumAdapter::maybe_persist_verified_segments_()
             }
             blocks.push_back(std::move(cb));
         }
+
         if (blocks.empty())
-            continue;
-
-        // Skip rewrite if same count already saved as complete.
-        const int prev = disk_cache_saved_count_.count(G) ? disk_cache_saved_count_[G] : -1;
-        if (complete && prev == static_cast<int>(blocks.size()) &&
-            disk_segment_admitted_.count(G) != 0)
-            continue;
-        // Partial live: only if we have never saved or block count grew by 25+.
-        if (!complete && prev >= 0 &&
-            static_cast<int>(blocks.size()) < prev + 25)
-            continue;
-
-        const bool save_complete = complete || (s.index == 0 && s.chunks_done >= s.chunks_total);
-        // For network replace, require complete. Live warm may save complete when polled.
-        if (!save_complete && s.index != 0)
-            continue;
-
-        // Force complete=true when chunks full; live may save complete=false only for debug
-        // — product: only write complete segments so load can replace network.
-        if (!save_complete)
-            continue;
-
-        if (disk_cache_.save_segment(G, s.from_ms, s.to_ms, genesis_ms_, blocks,
-                                     /*complete=*/true))
         {
-            disk_cache_saved_count_[G] = static_cast<int>(blocks.size());
-            disk_segment_admitted_.insert(G);
+            if (force)
+                disk_cache_.log_event("[disk-cache] skip G=%d k=%d no_blocks", G, s.index);
+            continue;
+        }
+
+        const int n = static_cast<int>(blocks.size());
+        const int prev = disk_cache_saved_count_.count(G) ? disk_cache_saved_count_[G] : -1;
+
+        if (!force)
+        {
+            if (complete && prev == n)
+                continue; // unchanged complete snapshot
+            if (!complete && n < kMinBlocksWarm)
+                continue; // too small to warm-write
+            if (!complete && prev >= 0 && n < prev + 16)
+                continue; // warm rewrite only when grown
+            // Live window: rate-limit warm saves.
+            if (!complete && s.index == 0 && disk_cache_last_live_save_ms_ > 0 &&
+                now_ms - disk_cache_last_live_save_ms_ < 45000 && n < prev + 32)
+                continue;
+        }
+
+        if (disk_cache_.save_segment(G, s.from_ms, s.to_ms, genesis_ms_, blocks, complete))
+        {
+            disk_cache_saved_count_[G] = n;
+            if (complete)
+                disk_segment_admitted_.insert(G);
             if (s.index == 0)
                 disk_cache_last_live_save_ms_ = now_ms;
+            set_disk_cache_event_("saved G=%d complete=%d n=%d k=%d", G, complete ? 1 : 0, n,
+                                  s.index);
+        }
+        else
+        {
+            set_disk_cache_event_("save FAIL G=%d n=%d (see cache.log)", G, n);
         }
     }
 }

@@ -13,9 +13,13 @@
 
 ### Debug checklist
 
-1. After Steady: `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\` + `saved G=… complete=1`.  
-2. Restart: `fill G=… (skip network)` / `bootstrap segments=…`.  
-3. Network panel: `Disk cache: N G-seg · …`.
+1. **Folder appears on domain start** (empty manifest) under  
+   `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\`  
+2. **Network panel → Disk cache**: path, last event, on-disk counts.  
+3. **`cache.log`** in that folder: save/load/fill/flush lines.  
+4. Warm save after ~16+ blocks in a G (Steady); complete when all 60s chunks present.  
+5. **Close app / switch domain** → `flush` writes remaining windows.  
+6. Restart: boot event + `loaded G=… from cache (skip net)` for complete G.
 
 ## Intent
 

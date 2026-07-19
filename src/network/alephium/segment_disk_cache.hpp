@@ -84,6 +84,9 @@ public:
 
     CacheStats stats() const;
 
+    // Append line to cache.log + printf/fflush (visible without console).
+    void log_event(const char* fmt, ...) const;
+
     static std::vector<int64_t> chunk_keys_for_window(int64_t from_ms, int64_t to_ms);
     static std::string domain_key_from_int(int domain);
 

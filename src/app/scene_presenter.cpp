@@ -1582,6 +1582,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.disk_cache_segments = hud.disk_cache_segments;
         out.ui.disk_cache_mb = hud.disk_cache_mb;
         out.ui.disk_cache_boot_blocks = hud.disk_cache_boot_blocks;
+        std::snprintf(out.ui.disk_cache_path, sizeof(out.ui.disk_cache_path), "%s",
+                      hud.disk_cache_path);
+        std::snprintf(out.ui.disk_cache_last_event, sizeof(out.ui.disk_cache_last_event), "%s",
+                      hud.disk_cache_last_event);
         out.ui.timeline_origin_ms = timeline_origin_ms;
         out.ui.genesis_ms =
             scene_.genesis_ms() > 0 ? scene_.genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
