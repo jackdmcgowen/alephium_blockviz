@@ -178,11 +178,17 @@ void GraphicsSystem::render_loop()
         publish_ui_snapshot(std::move(frame_ui));
         apply_published_frame();
 
+        // F12 → screenshot of full client (scene + ImGui).
+        if (ImGui::IsKeyPressed(ImGuiKey_F12, false))
+            request_screenshot(nullptr);
+
         if (overlay_)
             overlay_->draw();
 
         ImGui::Render();
         render();
+        // Capture after present path paints ImGui (end of frame content).
+        consume_and_save_screenshot_();
 
         do
         {

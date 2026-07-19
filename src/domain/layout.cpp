@@ -13,23 +13,30 @@
 
 LanePalette LanePalette::default_alephium()
 {
+    // Brand-aligned 16-lane set (docs/brand/alephium_palette.md).
+    // Ordered cool slate → brand orange → warm sand; no pure white/neon green
+    // (reserved for semantic roles). 4 groups × 4 chains.
     LanePalette p;
-    p.colors[0]  = glm::vec3(1.00f, 0.34f, 0.20f);
-    p.colors[1]  = glm::vec3(0.20f, 1.00f, 0.34f);
-    p.colors[2]  = glm::vec3(0.20f, 0.34f, 1.00f);
-    p.colors[3]  = glm::vec3(1.00f, 0.20f, 1.00f);
-    p.colors[4]  = glm::vec3(1.00f, 0.76f, 0.00f);
-    p.colors[5]  = glm::vec3(0.85f, 0.97f, 0.65f);
-    p.colors[6]  = glm::vec3(0.78f, 0.00f, 0.22f);
-    p.colors[7]  = glm::vec3(0.34f, 0.09f, 0.27f);
-    p.colors[8]  = glm::vec3(1.00f, 1.00f, 1.00f);
-    p.colors[9]  = glm::vec3(0.50f, 0.50f, 0.00f);
-    p.colors[10] = glm::vec3(0.00f, 1.00f, 1.00f);
-    p.colors[11] = glm::vec3(1.00f, 0.75f, 0.80f);
-    p.colors[12] = glm::vec3(0.50f, 0.00f, 0.50f);
-    p.colors[13] = glm::vec3(1.00f, 1.00f, 0.00f);
-    p.colors[14] = glm::vec3(0.50f, 0.50f, 0.50f);
-    p.colors[15] = glm::vec3(0.00f, 1.00f, 0.00f);
+    // Group 0 (chains 0→*) — slate / steel
+    p.colors[0]  = glm::vec3(0.45f, 0.52f, 0.62f);
+    p.colors[1]  = glm::vec3(0.55f, 0.60f, 0.72f);
+    p.colors[2]  = glm::vec3(0.38f, 0.48f, 0.58f);
+    p.colors[3]  = glm::vec3(0.62f, 0.68f, 0.78f);
+    // Group 1 — teal / cyan-muted
+    p.colors[4]  = glm::vec3(0.25f, 0.58f, 0.62f);
+    p.colors[5]  = glm::vec3(0.32f, 0.68f, 0.70f);
+    p.colors[6]  = glm::vec3(0.20f, 0.50f, 0.58f);
+    p.colors[7]  = glm::vec3(0.40f, 0.72f, 0.68f);
+    // Group 2 — brand orange family
+    p.colors[8]  = glm::vec3(1.00f, 0.36f, 0.00f); // brand orange
+    p.colors[9]  = glm::vec3(1.00f, 0.48f, 0.15f);
+    p.colors[10] = glm::vec3(0.90f, 0.32f, 0.05f);
+    p.colors[11] = glm::vec3(1.00f, 0.55f, 0.28f);
+    // Group 3 — warm sand / amber (distinct from tip green / select gold)
+    p.colors[12] = glm::vec3(0.78f, 0.62f, 0.38f);
+    p.colors[13] = glm::vec3(0.85f, 0.70f, 0.45f);
+    p.colors[14] = glm::vec3(0.70f, 0.55f, 0.32f);
+    p.colors[15] = glm::vec3(0.92f, 0.78f, 0.52f);
     return p;
 }
 
@@ -116,7 +123,7 @@ LayoutResult PolarShardLayout::build(const std::vector<GraphNode>& nodes, const 
                 placed.color = palette_.color_for(static_cast<uint32_t>(shardId));
                 if (placed.is_uncle)
                 {
-                    // Violet tint for ghost uncles (lost main-chain race).
+                    // Brand palette uncle_violet.
                     const glm::vec3 uncle_tint(0.72f, 0.28f, 0.95f);
                     placed.color = glm::mix(placed.color, uncle_tint, 0.72f);
                 }

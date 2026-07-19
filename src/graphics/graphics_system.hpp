@@ -81,6 +81,8 @@ public:
     AlphBlock copy_selected_block() const override;
     void set_ui_dep_hover(const std::string& hash) override;
     void set_scene_filter_multi_tx(bool enabled) override;
+    // Capture client area (scene + ImGui) to PNG. Empty path → docs/images/capture_*.png
+    void request_screenshot(const char* path_utf8) override;
     std::string consume_detail_refill_request() override;
     void publish_ui_snapshot(UiSnapshot snap) override;
     UiSnapshot copy_ui_snapshot() const override;
@@ -255,6 +257,11 @@ private:
     bool inited_ = false;
 
     void cleanup();
+
+    // Screenshot (Win32 client capture → PNG). Processed on render thread.
+    mutable std::mutex screenshot_mutex_;
+    std::string        screenshot_pending_path_;
+    bool consume_and_save_screenshot_();
 };
 
 #endif /* GRAPHICS_SYSTEM_HPP */

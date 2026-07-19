@@ -176,6 +176,12 @@ public:
             graphics_->set_scene_filter_multi_tx(enabled);
     }
 
+    void request_screenshot(const char* path_utf8) override
+    {
+        if (graphics_)
+            graphics_->request_screenshot(path_utf8);
+    }
+
     std::string consume_detail_refill_request() override
     {
         return graphics_ ? graphics_->consume_detail_refill_request() : std::string{};

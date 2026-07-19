@@ -29,10 +29,11 @@ void GraphicsSystem::submit_frame_with_async_sobel(uint32_t frame_index, uint32_
     const VkSemaphore g2c = sobel_.graphics_to_compute(frame_index);
     const VkSemaphore cfin = sobel_.compute_finished(frame_index);
 
-    static const float kGoldHighlight[4]   = { 1.0f, 0.85f, 0.15f, 1.35f };
-    static const float kGreenHighlight[4]  = { 0.25f, 0.95f, 0.40f, 1.35f };
-    static const float kCyanHighlight[4]   = { 0.15f, 0.95f, 1.0f, 1.35f };
-    static const float kOrangeHighlight[4] = { 1.0f, 0.45f, 0.08f, 1.35f };
+    // Role accents for dark brand canvas (docs/brand/alephium_palette.md).
+    static const float kGoldHighlight[4]   = { 0.94f, 0.76f, 0.29f, 1.35f }; // select_gold
+    static const float kGreenHighlight[4]  = { 0.24f, 0.86f, 0.52f, 1.35f }; // tip_green
+    static const float kCyanHighlight[4]   = { 0.18f, 0.90f, 0.94f, 1.35f }; // frontier_cyan
+    static const float kOrangeHighlight[4] = { 1.00f, 0.54f, 0.12f, 1.35f }; // incomplete_amber
 
     auto highlight_for = [&](SobelFrameRequest::Mode mode) -> const float* {
         if (mode == SobelFrameRequest::Mode::ConfirmedTipsGreen)

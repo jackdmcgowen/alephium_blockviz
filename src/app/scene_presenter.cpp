@@ -560,7 +560,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     out.instances.reserve(layout.placements.size());
     out.pick_map.reserve(layout.placements.size());
-    constexpr float kUnconfirmedAlpha = 0.38f;
+    // Slightly higher on dark canvas so unconfirmed cubes remain readable.
+    constexpr float kUnconfirmedAlpha = 0.48f;
     const float scale = kDefaultBlockScale;
 
     // ------------------------------------------------------------------

@@ -141,6 +141,7 @@
     <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp" />
     <ClCompile Include="..\src\graphics\frame\async_sobel_submit.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp" />
+    <ClCompile Include="..\src\graphics\frame\screenshot.cpp" />
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
     <ClCompile Include="..\src\graphics\frame\picker.cpp" />
     <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp" />

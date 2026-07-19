@@ -74,6 +74,7 @@
     <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\async_sobel_submit.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\screenshot.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\picker.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\sobel_compute.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>

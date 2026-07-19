@@ -252,16 +252,34 @@ void GraphicsSystem::init()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 
     ImGuiStyle& style = ImGui::GetStyle();
-
-    // Set background color to dark grey
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
-
-    // Set text color to light grey
-    style.Colors[ImGuiCol_Text] = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
-
-    // Set button color
-    style.Colors[ImGuiCol_Button] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f); // Dark button color
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f); // Slightly lighter on hover
+    // Alephium-aligned chrome: black panels, white type, brand orange accents.
+    // Tokens: docs/brand/alephium_palette.md
+    style.WindowRounding = 4.f;
+    style.FrameRounding = 3.f;
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.102f, 0.106f, 0.118f, 0.96f); // panel #1A1B1E
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.08f, 0.09f, 0.94f);
+    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.12f, 0.14f, 0.98f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.165f, 0.173f, 0.192f, 1.f); // #2A2C31
+    style.Colors[ImGuiCol_Text] = ImVec4(0.96f, 0.96f, 0.96f, 1.f);
+    style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.62f, 1.f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.18f, 0.18f, 0.20f, 1.f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(1.f, 0.36f, 0.0f, 0.35f); // brand orange
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(1.f, 0.36f, 0.0f, 0.55f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.16f, 0.16f, 0.18f, 1.f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1.f, 0.36f, 0.0f, 0.45f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(1.f, 0.36f, 0.0f, 0.70f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.18f, 0.16f, 1.f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.20f, 0.14f, 1.f);
+    style.Colors[ImGuiCol_CheckMark] = ImVec4(1.f, 0.36f, 0.0f, 1.f);
+    style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.f, 0.36f, 0.0f, 0.9f);
+    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.f, 0.45f, 0.1f, 1.f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.10f, 0.09f, 1.f);
+    style.Colors[ImGuiCol_Separator] = ImVec4(0.22f, 0.22f, 0.24f, 1.f);
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.08f, 0.08f, 0.09f, 0.8f);
+    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.28f, 0.30f, 1.f);
+    style.Colors[ImGuiCol_PlotHistogram] = ImVec4(1.f, 0.36f, 0.0f, 0.85f);
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplVulkan_InitInfo imgui_vk = {};

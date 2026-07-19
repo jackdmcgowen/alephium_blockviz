@@ -31,6 +31,7 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `frame/gpu_frame_publish.cpp` | Triple-buffer `publish_frame` / `apply_published_frame` |
 | `frame/selection_state.cpp` | Selection, hover, multi-tx filter, detail refill pin |
 | `frame/frame_shared_state.*` | Debug drawer / mesh arena / viewProj shared by loop + record |
+| `frame/screenshot.cpp` | Client-area PNG capture (F12 / request_screenshot) |
 | `pipelines/` | Cube + picker pipeline objects |
 | `mesh_arena.*`, `buffer_manager.*` | Mesh / buffer pooling |
 | `debug/debug_drawer.*` | Arrows and debug geometry |

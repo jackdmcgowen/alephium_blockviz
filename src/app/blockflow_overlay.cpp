@@ -457,6 +457,10 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+        if (ImGui::Button("Screenshot (F12)"))
+            engine_.request_screenshot(nullptr);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Save client PNG under docs/images/capture_*.png");
 
         const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const float elapsed_ms = static_cast<float>(now - session_start_ms_) + 1e-3f;
