@@ -530,11 +530,11 @@ size_t BlockScene::unconfirmed_live_count() const
     return n;
 }
 
-void BlockScene::request_block_fetch(const NodeId& hash)
+void BlockScene::request_block_fetch_locked(const NodeId& hash)
 {
+    // Requires mu_ held by caller (e.g. ScenePresenter::prepare).
     if (hash.empty())
         return;
-    std::lock_guard<std::mutex> lock(mu_);
     if (block_fetch_pending_.count(hash) != 0)
         return;
     if (graph_.contains(hash))
@@ -543,6 +543,14 @@ void BlockScene::request_block_fetch(const NodeId& hash)
         return;
     block_fetch_pending_.insert(hash);
     block_fetch_q_.push_back(hash);
+}
+
+void BlockScene::request_block_fetch(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    request_block_fetch_locked(hash);
 }
 
 std::vector<NodeId> BlockScene::drain_block_fetch_requests(size_t max_n)

@@ -105,6 +105,8 @@ public:
     // UI / presenter: request adapter to fetch a missing block (hash GET or history).
     // Thread-safe; adapter drains with drain_block_fetch_requests.
     void request_block_fetch(const NodeId& hash);
+    // Caller already holds mutex() — do not re-lock (presenter prepare path).
+    void request_block_fetch_locked(const NodeId& hash);
     std::vector<NodeId> drain_block_fetch_requests(size_t max_n = 32);
 
     // Overlay → presenter: bump to re-run dep walk on current selection.

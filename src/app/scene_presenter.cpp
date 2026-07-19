@@ -291,7 +291,7 @@ void ScenePresenter::restart_dep_walk_(
             s.to_pos = fit->second + glm::vec3(0.f, 0.f, 8.f);
             s.has_pos = true;
             s.ghost_target = true;
-            scene_.request_block_fetch(dep0);
+            scene_.request_block_fetch_locked(dep0);
         }
     }
 }
@@ -368,7 +368,7 @@ void ScenePresenter::tick_dep_walk_(
                     }
                 }
                 if (!s.to_hash.empty())
-                    scene_.request_block_fetch(s.to_hash);
+                    scene_.request_block_fetch_locked(s.to_hash);
                 continue;
             }
             s.state = WalkSlotState::Flying;
@@ -406,7 +406,7 @@ void ScenePresenter::tick_dep_walk_(
                 s.state_start_sec = now;
                 s.die_alpha = 1.f;
                 if (s.ghost_target && !s.to_hash.empty())
-                    scene_.request_block_fetch(s.to_hash);
+                    scene_.request_block_fetch_locked(s.to_hash);
                 continue;
             }
             s.visited.insert(s.to_hash);
@@ -436,7 +436,7 @@ void ScenePresenter::tick_dep_walk_(
                 s.to_pos = s.from_pos + glm::vec3(0.f, 0.f, 8.f);
                 s.has_pos = true;
                 s.ghost_target = true;
-                scene_.request_block_fetch(next);
+                scene_.request_block_fetch_locked(next);
             }
             s.state = WalkSlotState::Flying;
             s.state_start_sec = now;
