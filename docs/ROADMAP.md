@@ -4,7 +4,7 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).
 
 **Last updated:** 2026-07-19  
-**Versions:** app **0.6.0** · engine **0.7.0** (see identity headers)
+**Versions:** app **0.7.0** · engine **0.8.0** (see identity headers)
 
 | Status | Meaning |
 |--------|---------|
@@ -38,7 +38,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| — | *(empty — p1 branch release: timeline ring, BFS confirm, minimap histogram)* | | Merge to `main` + `app-v0.6.0` / `engine-v0.7.0` tags ([AGENTS.md](../AGENTS.md)) |
+| — | *(empty — sliding history ring + minimap on feature branch)* | | Merge to `main` + `app-v0.7.0` / `engine-v0.8.0` tags ([AGENTS.md](../AGENTS.md)) |
 
 ---
 
