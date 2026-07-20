@@ -384,7 +384,7 @@ public:
 					}
 
 					txn.alph_out_atto = alph_sum_txn_outputs(txn);
-					this->txns.push_back(txn);
+					this->txns.push_back(std::move(txn));
 
 				}
 				// Block total ALPH out (all txn outputs); kept when txns slimmed.

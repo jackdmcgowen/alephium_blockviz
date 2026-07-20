@@ -63,13 +63,19 @@ std::optional<GraphNode> BlockGraph::get(const NodeId& id) const
 
 std::vector<GraphNode> BlockGraph::nodes_snapshot() const
 {
+    std::vector<GraphNode> out = nodes_snapshot_unsorted();
+    std::sort(out.begin(), out.end(),
+              [](const GraphNode& a, const GraphNode& b) { return a.id < b.id; });
+    return out;
+}
+
+std::vector<GraphNode> BlockGraph::nodes_snapshot_unsorted() const
+{
     std::lock_guard<std::mutex> lock(mu_);
     std::vector<GraphNode> out;
     out.reserve(nodes_.size());
     for (const auto& kv : nodes_)
         out.push_back(kv.second);
-    std::sort(out.begin(), out.end(),
-              [](const GraphNode& a, const GraphNode& b) { return a.id < b.id; });
     return out;
 }
 

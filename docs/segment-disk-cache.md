@@ -27,7 +27,7 @@
 |------|----------|
 | Segment becomes **fully verifiable** via adapter **BFS walk** | Persist segment + block payloads to disk (per domain) |
 | **Startup** or **domain reload** | Load verified cached segments first (graph + detail + interval dedupe), then network for live/holes/uncached |
-| Live tip (`k=0` open window) | Prefer network; do not treat incomplete live window as verified cache |
+| Live tip (`k=0` open window) | Prefer network; **never** treat open live G as interval-complete from disk. Bootstrap may **paint** live-G blocks (bag-only confirmed), but must force-refresh the **topmost 60s subsegment** before IdentifyTips. Sequential frontiers are cleared after disk boot so `H_c` resolves from live data. |
 
 This is a **bootstrap** layer, not a full archive and not a substitute for main-chain API trust without optional re-verify.
 
@@ -100,10 +100,12 @@ Then:
 3. Pick recent verified segments (nearest G_live, up to startup N)
 4. For each segment (oldest→newest or newest-first for UI feel):
      - Load block gzip → detail upsert + graph admit
-     - Mark interval keys as fetched (history_slots_fetched_ / chunk keys)
-     - Restore confirmation marks if stored (or light re-seed BFS)
+     - **Historical G (`G < G_live`)**: mark interval keys fetched; skip network body
+     - **Live G (`G == G_live`)**: paint only; leave chunk load-once empty; `want_newest_refresh`
+     - Restore confirmation as **bag-only** (no sequential `H_c`); clear frontiers after boot
 5. Then start normal poll:
-     - Live tip / k=0 always network
+     - Force topmost live 60s subsegment from network (even pre-Steady)
+     - Live tip / k=0 always network for open edge
      - Ring holes only if not satisfied by cache
      - Older uncached segments on demand (user pages minimap)
 ```

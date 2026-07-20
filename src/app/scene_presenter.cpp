@@ -609,7 +609,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     std::unique_lock<std::mutex> lock(scene_.mutex());
 
-    const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot();
+    // Unsorted: layout groups by lane/ts itself; avoid O(N log N) id sort every frame.
+    const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot_unsorted();
 
     // Sticky session origin: set once. Never recompute from min block ts — that
     // jumps live_z / attached camera every time older history admits.
@@ -694,18 +695,17 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (hc < 0 || n.height <= hc)
             continue;
 
-        auto d = scene_.detail_store().get(n.id);
-        if (!d)
-            continue;
         bool refs_frontier = false;
-        for (const std::string& dep : d->deps)
-        {
-            if (!dep.empty() && frontier_domain.count(dep) != 0)
+        scene_.detail_store().visit(n.id, [&](const AlphBlock& d) {
+            for (const std::string& dep : d.deps)
             {
-                refs_frontier = true;
-                break;
+                if (!dep.empty() && frontier_domain.count(dep) != 0)
+                {
+                    refs_frontier = true;
+                    break;
+                }
             }
-        }
+        });
         if (refs_frontier)
             cyan_owners.insert(n.id);
     }
@@ -717,9 +717,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     for (const GraphNode& n : graph_nodes)
     {
         bool missing = false;
-        if (auto d = scene_.detail_store().get(n.id))
-        {
-            for (const std::string& dep : d->deps)
+        scene_.detail_store().visit(n.id, [&](const AlphBlock& d) {
+            for (const std::string& dep : d.deps)
             {
                 if (dep.empty())
                     continue;
@@ -729,7 +728,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     break;
                 }
             }
-        }
+        });
         missing_dep[n.id] = missing;
         if (missing && green_display.count(n.id) == 0 && cyan_owners.count(n.id) == 0)
             incomplete_pool.push_back(n.id);

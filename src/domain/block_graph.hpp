@@ -66,6 +66,8 @@ public:
 
     // Sorted by id for layout / tooling
     std::vector<GraphNode> nodes_snapshot() const;
+    // Unsorted snapshot (cheaper per-frame layout path).
+    std::vector<GraphNode> nodes_snapshot_unsorted() const;
     std::vector<GraphEdge> edges_from(const NodeId& id) const;
 
     void prune(int64_t min_timestamp_ms, size_t max_nodes);

@@ -60,6 +60,13 @@ bool BlockScene::add_block(cJSON* block)
 
 bool BlockScene::add_block(const AlphBlock& alph_block)
 {
+    if (alph_block.hash.empty())
+        return false;
+    return add_block(AlphBlock(alph_block));
+}
+
+bool BlockScene::add_block(AlphBlock&& alph_block)
+{
     std::lock_guard<std::mutex> lock(mu_);
 
     if (alph_block.hash.empty())
@@ -90,7 +97,6 @@ bool BlockScene::add_block(const AlphBlock& alph_block)
     delta.upsert_nodes.push_back(std::move(node));
 
     graph_.apply(delta);
-    detail_store_.upsert(alph_block);
 
     RecentFeedItem item;
     item.hash = alph_block.hash;
@@ -98,6 +104,8 @@ bool BlockScene::add_block(const AlphBlock& alph_block)
     item.chainTo = alph_block.chainTo;
     item.height = alph_block.height;
     feed_.push_back(std::move(item));
+
+    detail_store_.upsert(std::move(alph_block));
 
     ++total_blocks_;
     if (feed_.size() > 120)
@@ -255,6 +263,39 @@ void BlockScene::mark_confirmed(const NodeId& hash, uint32_t lane, int height, b
         return;
     std::lock_guard<std::mutex> lock(mu_);
     mark_confirmed_unlocked_(hash, lane, height, chain_walk);
+}
+
+void BlockScene::mark_confirmed_bag_only(const NodeId& hash)
+{
+    if (hash.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mu_);
+    confirmed_.insert(hash);
+    uncle_set_.erase(hash);
+    if (auto n = graph_.get(hash))
+    {
+        if (n->role != BlockRole::Main)
+        {
+            n->role = BlockRole::Main;
+            GraphDelta delta;
+            delta.upsert_nodes.push_back(*n);
+            graph_.apply(delta);
+        }
+    }
+    // Intentionally leave confirmed_height_ / confirmed_hash_ / frontier_valid_ alone.
+}
+
+void BlockScene::clear_sequential_frontiers()
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    for (int i = 0; i < kLaneCount; ++i)
+    {
+        confirmed_height_[i] = -1;
+        confirmed_hash_[i].clear();
+        frontier_valid_[i] = false;
+        pending_hash_[i].clear();
+        frontier_walk_[i].clear();
+    }
 }
 
 void BlockScene::set_frontier_walk(uint32_t lane, std::vector<NodeId> path_old_to_new)

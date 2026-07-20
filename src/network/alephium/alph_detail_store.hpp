@@ -7,10 +7,12 @@
 #include "domain/block_graph.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct DetailStoreStats
@@ -25,12 +27,18 @@ class AlphDetailStore
 {
 public:
     void upsert(const AlphBlock& block);
+    void upsert(AlphBlock&& block);
     void remove(const NodeId& id);
     void remove_many(const std::vector<NodeId>& ids);
     void clear();
 
+    // Full copy (inspector / pin paths). Prefer visit() on hot loops.
     std::optional<AlphBlock> get(const NodeId& id) const;
     AlphBlock get_or_empty(const NodeId& id) const;
+
+    // Call fn(const AlphBlock&) under the store lock — no AlphBlock deep copy.
+    // Do not call back into AlphDetailStore from fn (re-entrancy / deadlock).
+    bool visit(const NodeId& id, const std::function<void(const AlphBlock&)>& fn) const;
 
     size_t size() const;
     DetailStoreStats stats() const;

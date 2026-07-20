@@ -43,6 +43,7 @@ public:
     bool add_block(cJSON* block);
     // Synthetic / FakeChain path (no cJSON). Same semantics as JSON add.
     bool add_block(const AlphBlock& alph_block);
+    bool add_block(AlphBlock&& alph_block);
     bool remove_block(const std::string& hash);
 
     // Retention: drop old/excess nodes from graph, detail store, confirmed bag, feed.
@@ -54,6 +55,10 @@ public:
     // Bag membership always records proven main for solid drawing.
     void mark_confirmed(const NodeId& hash);
     void mark_confirmed(const NodeId& hash, uint32_t lane, int height, bool chain_walk = false);
+    // Disk bootstrap / lagging history: solid bag only — do not move sequential H_c.
+    void mark_confirmed_bag_only(const NodeId& hash);
+    // Drop per-lane sequential frontiers (keep bag). Live tip pipeline re-seeds H_c.
+    void clear_sequential_frontiers();
 
     // Green-tip walk path (old frontier → new tip); presenter animates.
     void set_frontier_walk(uint32_t lane, std::vector<NodeId> path_old_to_new);
@@ -99,6 +104,11 @@ public:
     int total_blocks() const { return total_blocks_; }
 
     std::vector<GraphNode> nodes_snapshot() const { return graph_.nodes_snapshot(); }
+    // Prefer for per-frame layout (no id sort).
+    std::vector<GraphNode> nodes_snapshot_unsorted() const
+    {
+        return graph_.nodes_snapshot_unsorted();
+    }
     std::vector<NodeId> tip_ids() const;
     size_t unconfirmed_live_count() const;
 

@@ -13,26 +13,35 @@ void AlphDetailStore::upsert(const AlphBlock& block)
 {
     if (block.hash.empty())
         return;
+    upsert(AlphBlock(block));
+}
+
+void AlphDetailStore::upsert(AlphBlock&& block)
+{
+    if (block.hash.empty())
+        return;
     std::lock_guard<std::mutex> lock(mu_);
-    auto it = by_id_.find(block.hash);
+    // Key must outlive any move of `block` into the map.
+    std::string hash = block.hash;
+    auto it = by_id_.find(hash);
     if (it == by_id_.end())
     {
-        by_id_[block.hash] = block;
+        by_id_.emplace(std::move(hash), std::move(block));
         return;
     }
-    AlphBlock merged = block;
+    AlphBlock& existing = it->second;
     // Preserve known txn_count when re-upsert is slim or missing the field.
-    if (merged.txn_count < 0 && it->second.txn_count >= 0)
-        merged.txn_count = it->second.txn_count;
-    else if (it->second.txn_count >= 0 && merged.txn_count >= 0)
-        merged.txn_count = (std::max)(merged.txn_count, it->second.txn_count);
+    if (block.txn_count < 0 && existing.txn_count >= 0)
+        block.txn_count = existing.txn_count;
+    else if (existing.txn_count >= 0 && block.txn_count >= 0)
+        block.txn_count = (std::max)(block.txn_count, existing.txn_count);
     // Preserve ALPH out total across slim / empty re-upserts.
-    if (merged.alph_out_atto.empty() && !it->second.alph_out_atto.empty())
-        merged.alph_out_atto = it->second.alph_out_atto;
+    if (block.alph_out_atto.empty() && !existing.alph_out_atto.empty())
+        block.alph_out_atto = std::move(existing.alph_out_atto);
     // Prefer non-empty txn payload if incoming is empty (e.g. race with slim).
-    if (merged.txns.empty() && !it->second.txns.empty())
-        merged.txns = it->second.txns;
-    it->second = std::move(merged);
+    if (block.txns.empty() && !existing.txns.empty())
+        block.txns = std::move(existing.txns);
+    existing = std::move(block);
 }
 
 void AlphDetailStore::remove(const NodeId& id)
@@ -76,6 +85,19 @@ AlphBlock AlphDetailStore::get_or_empty(const NodeId& id) const
     if (opt)
         return *opt;
     return AlphBlock{};
+}
+
+bool AlphDetailStore::visit(const NodeId& id,
+                            const std::function<void(const AlphBlock&)>& fn) const
+{
+    if (!fn || id.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = by_id_.find(id);
+    if (it == by_id_.end())
+        return false;
+    fn(it->second);
+    return true;
 }
 
 size_t AlphDetailStore::size() const

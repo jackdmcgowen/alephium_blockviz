@@ -124,8 +124,9 @@ private:
     void bootstrap_disk_cache_();
     void maybe_persist_verified_segments_(bool force = false);
     bool try_fill_window_from_disk_(int lookback_k);
+    // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
-                                          int64_t to_ms);
+                                          int64_t to_ms, bool open_live_edge = false);
     void set_disk_cache_event_(const char* fmt, ...);
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
@@ -331,6 +332,8 @@ private:
     char disk_cache_last_event_[160] = {};
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
+    // Topmost live 60s subsegment has been force-refreshed at least once this session.
+    bool live_edge_refreshed_ = false;
     // Deferred non-interval results when interval budget is preferred.
     std::deque<HttpIoPool::Result> deferred_fetch_results_;
 

@@ -111,6 +111,7 @@ void AlephiumAdapter::reset_stats()
     history_slots_fetched_.clear();
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
+    live_edge_refreshed_ = false;
     disk_cache_bootstrapped_ = false;
     disk_cache_bootstrap_blocks_ = 0;
     disk_segment_admitted_.clear();
@@ -320,7 +321,23 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, i
     {
         if (try_chain_walk_confirm_(hash, lane, height))
             return;
-        // No clean path: bag-only confirm (no frontier jump).
+        // Lagging disk H_c → live network tip: intermediates may be missing in pool.
+        // Prefer jumping the sequential frontier to the network tip rather than
+        // bag-only forever (green tips never resolve from live data).
+        const int net = main_chain_cache_.tip(from, to);
+        const bool at_live_tip = (net >= 0 && height >= net);
+        if (at_live_tip)
+        {
+            scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/true);
+            ++stats_confirmed_marks_;
+            const int n = enqueue_confirm_deps_(hash);
+            if (n == 0)
+                propagate_main_from_confirmed_deps_(hash);
+            adapter_vlog("[adapter] frontier jump to live tip lane=%u h=%d (was H_c=%d)\n",
+                         lane, height, hc);
+            return;
+        }
+        // No clean path and not network tip: bag-only confirm (no frontier jump).
         scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/false);
         ++stats_confirmed_marks_;
         const int n = enqueue_confirm_deps_(hash);
@@ -365,18 +382,17 @@ bool AlephiumAdapter::try_chain_walk_confirm_(const std::string& tip_hash, uint3
             found = true;
             break;
         }
-        auto detail = scene_.detail_store().get(cur);
-        if (!detail)
-            continue;
-        for (const std::string& dep : detail->deps)
-        {
-            if (dep.empty() || !scene_.graph().contains(dep))
-                continue;
-            if (!seen.insert(dep).second)
-                continue;
-            parent[dep] = cur; // dep is older; came from cur (newer)
-            q.push_back(dep);
-        }
+        scene_.detail_store().visit(cur, [&](const AlphBlock& detail) {
+            for (const std::string& dep : detail.deps)
+            {
+                if (dep.empty() || !scene_.graph().contains(dep))
+                    continue;
+                if (!seen.insert(dep).second)
+                    continue;
+                parent[dep] = cur; // dep is older; came from cur (newer)
+                q.push_back(dep);
+            }
+        });
     }
     if (!found)
         return false;
@@ -536,7 +552,8 @@ void AlephiumAdapter::on_start()
 }
 
 void AlephiumAdapter::mark_window_complete_from_cache_(int lookback_k, int g_seg,
-                                                      int64_t from_ms, int64_t to_ms)
+                                                      int64_t from_ms, int64_t to_ms,
+                                                      bool open_live_edge)
 {
     if (lookback_k < 0)
         return;
@@ -555,12 +572,35 @@ void AlephiumAdapter::mark_window_complete_from_cache_(int lookback_k, int g_seg
         slot.to_ms = to_ms;
         slot.epoch_to_ms = to_ms;
     }
-    for (int64_t key : SegmentDiskCache::chunk_keys_for_window(slot.from_ms, slot.to_ms))
-        history_slots_fetched_.insert(key);
-    slot.pending_from_ms = 0;
-    slot.next_fill_to_ms = slot.from_ms;
-    recompute_window_chunk_stats_(lookback_k);
-    slot.polled = true;
+
+    // Open live segment: paint from disk, but never claim interval load-once for
+    // the open window — topmost 60s (and live fill) must come from network.
+    const int G_live = live_global_segment_id_();
+    const bool leave_live_edge =
+        open_live_edge || lookback_k == 0 || (G_live >= 0 && g_seg == G_live);
+
+    auto keys = SegmentDiskCache::chunk_keys_for_window(slot.from_ms, slot.to_ms);
+    // keys are newest-first (first = topmost subsegment toward to_ms).
+    if (leave_live_edge)
+    {
+        // Drop any stale complete marks for this live window's chunks.
+        for (int64_t key : keys)
+            history_slots_fetched_.erase(key);
+        slot.pending_from_ms = 0;
+        slot.next_fill_to_ms = slot.to_ms; // newest-first from tip
+        slot.want_newest_refresh = true;
+        slot.polled = false;
+        recompute_window_chunk_stats_(lookback_k);
+    }
+    else
+    {
+        for (int64_t key : keys)
+            history_slots_fetched_.insert(key);
+        slot.pending_from_ms = 0;
+        slot.next_fill_to_ms = slot.from_ms;
+        recompute_window_chunk_stats_(lookback_k);
+        slot.polled = true;
+    }
     disk_segment_admitted_.insert(g_seg);
 }
 
@@ -572,12 +612,18 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
     if (G < 0)
         return false;
 
+    const int G_live = live_global_segment_id_();
+    const bool is_open_live = (lookback_k == 0) || (G_live >= 0 && G == G_live);
+
     if (disk_segment_admitted_.count(G) != 0)
     {
-        // Already admitted this session — mark window complete, skip HTTP body.
         int64_t from_ms = 0, to_ms = 0;
         bounds_for_global_(G, from_ms, to_ms);
-        mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms);
+        // Historical: skip HTTP. Live open edge: re-apply open-edge marks and
+        // return false so force_newest / chunk pump can still hit the network.
+        mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live);
+        if (is_open_live)
+            return false;
         return true;
     }
     if (!disk_cache_.has_segment(G))
@@ -595,12 +641,16 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
             continue;
         scene_.add_block(cb.block);
         ++admitted;
+        // Bag only — sequential H_c must come from live tip pipeline, not lagging disk.
         if (cb.confirmed)
-            scene_.mark_confirmed(cb.block.hash);
+            scene_.mark_confirmed_bag_only(cb.block.hash);
     }
-    mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms);
-    set_disk_cache_event_("loaded G=%d from cache n=%d k=%d (skip net)", G, admitted,
-                          lookback_k);
+    mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live);
+    set_disk_cache_event_("loaded G=%d from cache n=%d k=%d live_edge=%d", G, admitted,
+                          lookback_k, is_open_live ? 1 : 0);
+    // Open live: blocks painted, but do not claim "skip net" for the tip edge.
+    if (is_open_live)
+        return false;
     return admitted > 0 || !blocks.empty();
 }
 
@@ -633,6 +683,9 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         genesis_ms_ = lr.genesis_ms;
         genesis_resolved_ = true;
         scene_.set_genesis_ms(genesis_ms_);
+        // Recompute g_live with resolved genesis if needed.
+        if (w > 0 && now_ms > genesis_ms_)
+            g_live = static_cast<int>((now_ms - genesis_ms_) / w);
     }
     if (lr.blocks_loaded <= 0)
     {
@@ -646,24 +699,29 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         if (cb.block.hash.empty())
             continue;
         scene_.add_block(cb.block);
+        // Bag-only: do not lock sequential frontiers to lagging disk heights.
         if (cb.confirmed)
-            scene_.mark_confirmed(cb.block.hash);
+            scene_.mark_confirmed_bag_only(cb.block.hash);
     }
-    for (int64_t key : lr.chunk_keys)
-        history_slots_fetched_.insert(key);
+    // Live tip pipeline owns H_c after topmost subsegment + network tips.
+    scene_.clear_sequential_frontiers();
+
     for (int G : lr.segment_ids)
     {
         disk_segment_admitted_.insert(G);
-        // Materialize lookback windows as polled so pump skips HTTP.
         const int k = global_to_lookback_(G);
         int64_t from_ms = 0, to_ms = 0;
         bounds_for_global_(G, from_ms, to_ms);
-        mark_window_complete_from_cache_(k, G, from_ms, to_ms);
+        const bool open_live = (g_live >= 0 && G == g_live) || k == 0;
+        mark_window_complete_from_cache_(k, G, from_ms, to_ms, open_live);
     }
 
     disk_cache_bootstrap_blocks_ = lr.blocks_loaded;
-    set_disk_cache_event_("boot loaded %d G-seg · %d blocks from cache", lr.segments_loaded,
-                          lr.blocks_loaded);
+    set_disk_cache_event_("boot loaded %d G-seg · %d blocks (live edge open)",
+                          lr.segments_loaded, lr.blocks_loaded);
+    std::printf("[adapter] disk-cache bootstrap: %d segs %d blocks; frontiers cleared; "
+                "live G=%d topmost subsegment requires network\n",
+                lr.segments_loaded, lr.blocks_loaded, g_live);
 }
 
 void AlephiumAdapter::set_disk_cache_event_(const char* fmt, ...)
@@ -1255,48 +1313,45 @@ int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, i
         if (already && cur != main_hash && earliest != INT_MAX && height >= earliest)
             continue;
 
-        auto detail = scene_.detail_store().get(cur);
-        if (!detail)
-            continue;
-
         // Terminate BFS when any dependency cannot be found in the live pool.
         // Do not walk past a broken link (no further same-chain expansion).
         bool any_missing = false;
-        for (const std::string& dep : detail->deps)
-        {
-            if (dep.empty())
-                continue;
-            if (!scene_.graph().contains(dep))
+        const bool had_detail = scene_.detail_store().visit(cur, [&](const AlphBlock& detail) {
+            for (const std::string& dep : detail.deps)
             {
-                any_missing = true;
-                break;
+                if (dep.empty())
+                    continue;
+                if (!scene_.graph().contains(dep))
+                {
+                    any_missing = true;
+                    return;
+                }
             }
-        }
-        if (any_missing)
-            continue; // stop this branch; do not enqueue children
+            // All deps present — expand same-chain deps already in pool.
+            for (const std::string& dep : detail.deps)
+            {
+                if (dep.empty() || !seen.insert(dep).second)
+                    continue;
 
-        // All deps present â€” main path may expand same-chain deps already in pool.
-        for (const std::string& dep : detail->deps)
-        {
-            if (dep.empty() || !seen.insert(dep).second)
-                continue;
+                auto dn = scene_.graph().get(dep);
+                if (!dn)
+                    continue;
 
-            auto dn = scene_.graph().get(dep);
-            if (!dn)
-                continue;
-
-            if (dn->lane != chain_lane ||
-                static_cast<int>(dn->group_from) != chain_from ||
-                static_cast<int>(dn->group_to) != chain_to)
-                continue;
-            const int dh = static_cast<int>(dn->height);
-            if (dh >= 0 && dh < floor_h)
-                continue; // past beginning of unlocked window â€” terminate
-            if (main_chain_cache_.is_cached_main(dep) &&
-                earliest != INT_MAX && dh >= earliest)
-                continue;
-            q.push(dep);
-        }
+                if (dn->lane != chain_lane ||
+                    static_cast<int>(dn->group_from) != chain_from ||
+                    static_cast<int>(dn->group_to) != chain_to)
+                    continue;
+                const int dh = static_cast<int>(dn->height);
+                if (dh >= 0 && dh < floor_h)
+                    continue; // past beginning of unlocked window
+                if (main_chain_cache_.is_cached_main(dep) &&
+                    earliest != INT_MAX && dh >= earliest)
+                    continue;
+                q.push(dep);
+            }
+        });
+        if (!had_detail || any_missing)
+            continue;
     }
 
     // Record earliest height labeled this run (terminate point for next flood).
@@ -1384,23 +1439,26 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
 int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
 {
     // When a confirmed block has missing deps:
-    //   live chain  â†’ per-hash fetch (build the live pool tightly)
-    //   historical  â†’ time-slot interval poll (no hash crawl)
+    //   live chain  → per-hash fetch (build the live pool tightly)
+    //   historical  → time-slot interval poll (no hash crawl)
     if (parent_hash.empty())
-        return 0;
-    auto detail = scene_.detail_store().get(parent_hash);
-    if (!detail)
         return 0;
 
     int missing = 0;
-    for (const std::string& dep : detail->deps)
-    {
-        if (dep.empty())
-            continue;
-        if (scene_.graph().contains(dep))
-            continue;
-        ++missing;
-    }
+    std::vector<std::string> missing_deps;
+    const bool had = scene_.detail_store().visit(parent_hash, [&](const AlphBlock& detail) {
+        for (const std::string& dep : detail.deps)
+        {
+            if (dep.empty())
+                continue;
+            if (scene_.graph().contains(dep))
+                continue;
+            ++missing;
+            missing_deps.push_back(dep);
+        }
+    });
+    if (!had)
+        return 0;
     if (missing == 0)
     {
         pending_fill_parents_.erase(parent_hash);
@@ -1419,7 +1477,7 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
     }
 
     int enqueued = 0;
-    for (const std::string& dep : detail->deps)
+    for (const std::string& dep : missing_deps)
     {
         if (dep.empty())
             continue;
@@ -1764,34 +1822,34 @@ int AlephiumAdapter::expand_bfs_thread_(int thread_id, int node_budget)
                 mark_scene_confirmed_(cur, chain_from, chain_to, height);
         }
 
-        auto detail = scene_.detail_store().get(cur);
-        if (!detail)
-            continue;
-
         bool any_missing = false;
-        for (const std::string& dep : detail->deps)
-        {
-            if (dep.empty())
-                continue;
-            if (!scene_.graph().contains(dep))
+        const bool had_detail = scene_.detail_store().visit(cur, [&](const AlphBlock& detail) {
+            for (const std::string& dep : detail.deps)
             {
-                any_missing = true;
-                continue;
+                if (dep.empty())
+                    continue;
+                if (!scene_.graph().contains(dep))
+                {
+                    any_missing = true;
+                    continue;
+                }
+                auto dn = scene_.graph().get(dep);
+                if (!dn)
+                    continue;
+                const int dh = static_cast<int>(dn->height);
+                const int dep_floor = effective_lookback_floor_(dn->lane);
+                if (dh >= 0 && dh < dep_floor)
+                    continue;
+                // Cross-shard: claim once; owner thread paints the edge.
+                if (claim_bfs_visit_(dep, thread_id))
+                {
+                    thr.queue.push_back(dep);
+                    push_bfs_edge_(thread_id, cur, dep);
+                }
             }
-            auto dn = scene_.graph().get(dep);
-            if (!dn)
-                continue;
-            const int dh = static_cast<int>(dn->height);
-            const int dep_floor = effective_lookback_floor_(dn->lane);
-            if (dh >= 0 && dh < dep_floor)
-                continue;
-            // Cross-shard: claim once; owner thread paints the edge.
-            if (claim_bfs_visit_(dep, thread_id))
-            {
-                thr.queue.push_back(dep);
-                push_bfs_edge_(thread_id, cur, dep);
-            }
-        }
+        });
+        if (!had_detail)
+            continue;
 
         if (any_missing)
         {
@@ -2018,29 +2076,34 @@ int AlephiumAdapter::admit_blocks_with_events_(cJSON* obj, int* seen_out, int* a
                 const int cf = chainFrom->valueint;
                 const int ct = chainTo->valueint;
 
-                if (proven_not_main_.count(block_hash))
+                // Parse once — avoid double AlphBlock(cJSON*) for admit + uncles.
+                AlphBlock alph(block);
+                if (alph.hash.empty())
                 {
-                    // Keep ghost uncles for visualization (distinct color); not confirm tips.
-                    if (scene_.add_block(block))
-                        ++added;
-                    if (scene_.graph().contains(block_hash))
-                        scene_.mark_uncle(block_hash);
-                    {
-                        AlphBlock alph(block);
-                        if (!alph.hash.empty())
-                            enqueue_uncles_from_block_(alph);
-                    }
+                    ++skipped_bad;
                     continue;
                 }
 
-                if (scene_.add_block(block))
+                if (proven_not_main_.count(block_hash))
+                {
+                    // Keep ghost uncles for visualization (distinct color); not confirm tips.
+                    if (scene_.add_block(std::move(alph)))
+                        ++added;
+                    if (scene_.graph().contains(block_hash))
+                        scene_.mark_uncle(block_hash);
+                    // Uncles list was moved into store; re-fetch deps path via graph only.
+                    // Ghost uncle enqueue needs uncle hashes — load from store if present.
+                    scene_.detail_store().visit(block_hash, [&](const AlphBlock& b) {
+                        enqueue_uncles_from_block_(b);
+                    });
+                    continue;
+                }
+
+                // Copy uncles/deps needed before move into scene.
+                enqueue_uncles_from_block_(alph);
+                if (scene_.add_block(std::move(alph)))
                     ++added;
 
-                {
-                    AlphBlock alph(block);
-                    if (!alph.hash.empty())
-                        enqueue_uncles_from_block_(alph);
-                }
                 if (main_chain_cache_.is_cached_main(block_hash))
                     mark_scene_confirmed_(block_hash, cf, ct, h);
             }
@@ -2472,7 +2535,10 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
     {
         live_poll_deferred_ = false;
         if (force_newest)
+        {
             slot.want_newest_refresh = false;
+            live_edge_refreshed_ = true;
+        }
     }
 
     adapter_vlog("[adapter] chunk enqueue win=%d [%lld,%lld) pending=%lld done=%d/%d\n",
@@ -2505,6 +2571,10 @@ bool AlephiumAdapter::dual_initial_complete_() const
             return false;
     }
     if (fetch_pool_ && fetch_pool_->io().inflight_intervals() > 0)
+        return false;
+    // After disk paint of open live G, require at least one topmost-subsegment
+    // force refresh so IdentifyTips is not built solely on lagging cache.
+    if (disk_cache_bootstrap_blocks_ > 0 && !live_edge_refreshed_)
         return false;
     return true;
 }
@@ -2676,8 +2746,10 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     // Tip-backward load only (lookback k from live tip — never genesis-forward).
     // Live mode: k=0 first, then k=1, k=2.
     // History mode: camera window first, then older pad.
-    if (live_cam && tip_ready && !lookback_windows_.empty() &&
-        lookback_windows_[0].want_newest_refresh)
+    // Force topmost live 60s even before Steady (disk bootstrap sets want_newest_refresh
+    // so tips resolve from network, not lagging cache). tip_ready is not required here.
+    (void)tip_ready;
+    if (live_cam && !lookback_windows_.empty() && lookback_windows_[0].want_newest_refresh)
         try_win(0, /*force_newest=*/true);
 
     if (live_cam)
