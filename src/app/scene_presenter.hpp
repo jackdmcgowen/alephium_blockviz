@@ -148,6 +148,22 @@ private:
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
 
+    // Rebuild layout only when graph generation / timeline origin change.
+    struct LayoutCache
+    {
+        uint64_t graph_gen = 0;
+        int64_t  origin_ms = 0;
+        int64_t  genesis_ms = 0;
+        int64_t  window_ms = 0;
+        LayoutResult layout;
+        std::unordered_set<std::string> live_nodes;
+        // G_seg → indices into layout.placements
+        std::unordered_map<int, std::vector<size_t>> by_g;
+        // hash → placement index (force-draw without full scan)
+        std::unordered_map<std::string, size_t> by_hash;
+    };
+    LayoutCache layout_cache_;
+
     // Selection full BFS block-dep fan.
     SelectionDepTrace sel_dep_;
     uint64_t          last_walk_replay_gen_ = 0;

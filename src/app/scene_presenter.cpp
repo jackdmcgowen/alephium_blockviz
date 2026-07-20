@@ -609,9 +609,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     std::unique_lock<std::mutex> lock(scene_.mutex());
 
-    // Unsorted: layout groups by lane/ts itself; avoid O(N log N) id sort every frame.
-    const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot_unsorted();
-
     // Sticky session origin: set once. Never recompute from min block ts — that
     // jumps live_z / attached camera every time older history admits.
     int64_t timeline_origin_ms = scene_.timeline_origin_ms();
@@ -622,23 +619,55 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         scene_.set_timeline_origin_ms(timeline_origin_ms);
     }
 
-    // Spacing unchanged: base_radius=20, meters_per_second=1, 16 lanes.
-    LayoutParams layout_params;
-    layout_params.meters_per_second = meters_per_second;
-    layout_params.base_radius = kLayoutBaseRadius;
-    layout_params.lane_count = 16;
-    layout_params.timeline_origin_ms = timeline_origin_ms;
+    const int64_t window_ms =
+        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const int64_t genesis_ms = scene_.genesis_ms() > 0
+                                   ? scene_.genesis_ms()
+                                   : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const uint64_t graph_gen = scene_.graph_generation();
 
-    LayoutResult layout = layout_.build(graph_nodes, layout_params);
+    // Rebuild layout only when graph or timeline mapping changes (camera-only frames reuse).
+    if (layout_cache_.graph_gen != graph_gen || layout_cache_.origin_ms != timeline_origin_ms ||
+        layout_cache_.genesis_ms != genesis_ms || layout_cache_.window_ms != window_ms)
+    {
+        const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot_unsorted();
+        LayoutParams layout_params;
+        layout_params.meters_per_second = meters_per_second;
+        layout_params.base_radius = kLayoutBaseRadius;
+        layout_params.lane_count = 16;
+        layout_params.timeline_origin_ms = timeline_origin_ms;
+
+        layout_cache_.layout = layout_.build(graph_nodes, layout_params);
+        layout_cache_.live_nodes.clear();
+        layout_cache_.live_nodes.reserve(graph_nodes.size());
+        layout_cache_.by_g.clear();
+        layout_cache_.by_hash.clear();
+        layout_cache_.by_hash.reserve(layout_cache_.layout.placements.size() * 2 + 1);
+
+        auto g_of = [&](int64_t ts_ms) -> int {
+            if (window_ms <= 0 || ts_ms <= genesis_ms)
+                return 0;
+            return static_cast<int>((ts_ms - genesis_ms) / window_ms);
+        };
+        for (size_t i = 0; i < layout_cache_.layout.placements.size(); ++i)
+        {
+            const PlacedBlock& p = layout_cache_.layout.placements[i];
+            layout_cache_.live_nodes.insert(p.hash);
+            layout_cache_.by_hash[p.hash] = i;
+            layout_cache_.by_g[g_of(p.timestamp_ms)].push_back(i);
+        }
+        layout_cache_.graph_gen = graph_gen;
+        layout_cache_.origin_ms = timeline_origin_ms;
+        layout_cache_.genesis_ms = genesis_ms;
+        layout_cache_.window_ms = window_ms;
+    }
+
+    const LayoutResult& layout = layout_cache_.layout;
     const auto& block_positions = layout.positions;
+    const std::unordered_set<std::string>& live_nodes = layout_cache_.live_nodes;
 
     // Network HUD (segments) — already under scene mutex.
     const BlockScene::NetworkHud hud = scene_.network_hud_locked();
-
-    std::unordered_set<std::string> live_nodes;
-    live_nodes.reserve(graph_nodes.size());
-    for (const GraphNode& n : graph_nodes)
-        live_nodes.insert(n.id);
 
     const float now = now_sec_();
     update_death_and_walk_(live_nodes, block_positions, now);
@@ -680,67 +709,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     int hc_by_lane[BlockScene::kLaneCount];
     scene_.copy_confirmed_heights_locked(hc_by_lane);
 
-    std::unordered_set<std::string> cyan_owners;
-    cyan_owners.reserve(32);
-    for (const GraphNode& n : graph_nodes)
-    {
-        if (n.id.empty() || live_nodes.count(n.id) == 0)
-            continue;
-        if (scene_.is_confirmed_locked(n.id) || scene_.is_uncle_locked(n.id) ||
-            n.role == BlockRole::Uncle)
-            continue;
-        if (n.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
-            continue;
-        const int hc = hc_by_lane[n.lane];
-        if (hc < 0 || n.height <= hc)
-            continue;
-
-        bool refs_frontier = false;
-        scene_.detail_store().visit(n.id, [&](const AlphBlock& d) {
-            for (const std::string& dep : d.deps)
-            {
-                if (!dep.empty() && frontier_domain.count(dep) != 0)
-                {
-                    refs_frontier = true;
-                    break;
-                }
-            }
-        });
-        if (refs_frontier)
-            cyan_owners.insert(n.id);
-    }
-
-    std::unordered_map<std::string, bool> missing_dep;
-    missing_dep.reserve(graph_nodes.size());
-    std::vector<std::string> incomplete_pool;
-    incomplete_pool.reserve(64);
-    for (const GraphNode& n : graph_nodes)
-    {
-        bool missing = false;
-        scene_.detail_store().visit(n.id, [&](const AlphBlock& d) {
-            for (const std::string& dep : d.deps)
-            {
-                if (dep.empty())
-                    continue;
-                if (live_nodes.count(dep) == 0)
-                {
-                    missing = true;
-                    break;
-                }
-            }
-        });
-        missing_dep[n.id] = missing;
-        if (missing && green_display.count(n.id) == 0 && cyan_owners.count(n.id) == 0)
-            incomplete_pool.push_back(n.id);
-    }
-
-    auto is_solid = [&](const std::string& h) -> bool {
-        if (!scene_.is_confirmed_locked(h))
-            return false;
-        auto it = missing_dep.find(h);
-        return !(it != missing_dep.end() && it->second);
-    };
-
     if (!in.selected_hash.empty())
     {
         auto lit = block_positions.find(in.selected_hash);
@@ -751,8 +719,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    out.instances.reserve(layout.placements.size());
-    out.pick_map.reserve(layout.placements.size());
     // Slightly higher on dark canvas so unconfirmed cubes remain readable.
     constexpr float kUnconfirmedAlpha = 0.48f;
     const float scale = kDefaultBlockScale;
@@ -764,15 +730,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     constexpr int kRingSize = 3;
     const float eye_z = scene_.camera_scroll_z();
     const float R_cull = kLayoutBaseRadius * 1.35f;
-    const int64_t window_ms =
-        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     float seg_width_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * meters_per_second;
 
     const int64_t now_ms =
         static_cast<int64_t>(std::time(nullptr)) * 1000;
-    const int64_t genesis_ms = scene_.genesis_ms() > 0
-                                   ? scene_.genesis_ms()
-                                   : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     const int G_live =
         window_ms > 0 && now_ms > genesis_ms
             ? static_cast<int>((now_ms - genesis_ms) / window_ms)
@@ -948,7 +909,97 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
     // Small pad for boundary jitter only — not a second full-segment draw range.
     const float ring_z_pad = std::max(8.f, seg_width_z * 0.02f);
-    (void)R_cull;
+
+    // G_seg set for client ring + fading lookbacks — role/instance work stays O(ring).
+    std::unordered_set<int> active_g;
+    active_g.reserve(16);
+    for (int i = 0; i < n_client; ++i)
+        active_g.insert(std::max(0, G_live - client_ring[i].k));
+    for (const auto& kv : seg_fade_alpha_)
+    {
+        if (kv.second <= 0.02f)
+            continue;
+        if (kv.first > G_live)
+            continue;
+        active_g.insert(std::max(0, G_live - kv.first));
+    }
+    std::vector<size_t> ring_indices;
+    ring_indices.reserve(4096);
+    for (int G : active_g)
+    {
+        auto it = layout_cache_.by_g.find(G);
+        if (it == layout_cache_.by_g.end())
+            continue;
+        ring_indices.insert(ring_indices.end(), it->second.begin(), it->second.end());
+    }
+
+    // Role classification only over ring placements (not full graph N).
+    std::unordered_set<std::string> cyan_owners;
+    cyan_owners.reserve(32);
+    std::unordered_map<std::string, bool> missing_dep;
+    missing_dep.reserve(ring_indices.size() + 32);
+    std::vector<std::string> incomplete_pool;
+    incomplete_pool.reserve(64);
+    for (size_t idx : ring_indices)
+    {
+        if (idx >= layout.placements.size())
+            continue;
+        const PlacedBlock& p = layout.placements[idx];
+        if (p.hash.empty())
+            continue;
+        if (scene_.is_confirmed_locked(p.hash) || scene_.is_uncle_locked(p.hash) ||
+            p.is_uncle)
+        {
+            // Still need missing_dep for solids on confirmed ring blocks.
+        }
+        else if (p.lane < static_cast<uint8_t>(BlockScene::kLaneCount))
+        {
+            const int hc = hc_by_lane[p.lane];
+            if (hc >= 0 && p.height > hc)
+            {
+                bool refs_frontier = false;
+                scene_.detail_store().visit(p.hash, [&](const AlphBlock& d) {
+                    for (const std::string& dep : d.deps)
+                    {
+                        if (!dep.empty() && frontier_domain.count(dep) != 0)
+                        {
+                            refs_frontier = true;
+                            break;
+                        }
+                    }
+                });
+                if (refs_frontier)
+                    cyan_owners.insert(p.hash);
+            }
+        }
+
+        bool missing = false;
+        scene_.detail_store().visit(p.hash, [&](const AlphBlock& d) {
+            for (const std::string& dep : d.deps)
+            {
+                if (dep.empty())
+                    continue;
+                if (live_nodes.count(dep) == 0)
+                {
+                    missing = true;
+                    break;
+                }
+            }
+        });
+        missing_dep[p.hash] = missing;
+        if (missing && green_display.count(p.hash) == 0 && cyan_owners.count(p.hash) == 0)
+            incomplete_pool.push_back(p.hash);
+    }
+
+    auto is_solid = [&](const std::string& h) -> bool {
+        if (!scene_.is_confirmed_locked(h))
+            return false;
+        auto it = missing_dep.find(h);
+        // Off-ring confirmed: treat complete if not classified this frame.
+        if (it == missing_dep.end())
+            return true;
+        return !it->second;
+    };
 
     auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
         if (n_merged <= 0 && n_client <= 0)
@@ -995,6 +1046,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
+        // Cheap Z-slab reject before frustum (ring pad already tight).
+        if (!force && have_vis_z)
+        {
+            if (placed.pos.z < vis_z_lo - ring_z_pad || placed.pos.z > vis_z_hi + ring_z_pad)
+                return false;
+        }
+        // Lateral distance cull when free-looking away from the ring.
+        if (!force)
+        {
+            const float lat2 = placed.pos.x * placed.pos.x + placed.pos.y * placed.pos.y;
+            const float rmax = R_cull + 8.f;
+            if (lat2 > rmax * rmax)
+                return false;
+        }
         const glm::vec3 half = in.instance_half_extents * scale;
         if (!force && in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
             return false;
@@ -1010,8 +1075,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         float seg_a = fade_for_ts(placed.timestamp_ms);
         // No forced floor — off-ring / faded blocks stay hidden.
-        if (seg_a < 0.02f)
+        if (seg_a < 0.02f && !force)
             return false;
+        if (force && seg_a < 0.02f)
+            seg_a = 1.f; // selection/walk always visible when forced
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
@@ -1048,9 +1115,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     std::unordered_set<std::string> walk_force;
     collect_selection_dep_force_(walk_force);
 
+    out.instances.reserve(std::min(ring_indices.size() + 64, size_t(kMaxInstances)));
+    out.pick_map.reserve(out.instances.capacity());
+
     std::unordered_set<std::string> drawn;
-    for (const PlacedBlock& placed : layout.placements)
+    drawn.reserve(ring_indices.size() + 32);
+    for (size_t idx : ring_indices)
     {
+        if (idx >= layout.placements.size())
+            continue;
+        const PlacedBlock& placed = layout.placements[idx];
         if (!block_in_visible_segment(placed.timestamp_ms))
             continue;
         if (!passes_txn_filter(placed))
@@ -1061,29 +1135,31 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Force-draw highlight roles so Sobel can resolve them — only if segment
-    // is in the draw set (or selection/hover, always).
-    for (const PlacedBlock& placed : layout.placements)
-    {
-        if (drawn.count(placed.hash))
-            continue;
-        const bool is_sel =
-            (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
-            (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
-        const bool is_walk = walk_force.count(placed.hash) != 0;
-        if (!is_sel && !is_walk && !block_in_visible_segment(placed.timestamp_ms))
-            continue;
-        // Multi-tx filter: still force selected/hovered/walk; other force roles must pass.
-        if (!is_sel && !is_walk && !passes_txn_filter(placed))
-            continue;
-        const bool force = is_sel || is_walk || missing_dep[placed.hash] ||
-                           green_display.count(placed.hash) ||
-                           cyan_owners.count(placed.hash);
-        if (!force)
-            continue;
+    // Force-draw highlight roles via hash map (no full placement scan).
+    auto try_force_hash = [&](const std::string& h, bool always) {
+        if (h.empty() || drawn.count(h))
+            return;
+        auto it = layout_cache_.by_hash.find(h);
+        if (it == layout_cache_.by_hash.end())
+            return;
+        const PlacedBlock& placed = layout.placements[it->second];
+        if (!always && !block_in_visible_segment(placed.timestamp_ms))
+            return;
+        if (!always && !passes_txn_filter(placed))
+            return;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
-    }
+    };
+    try_force_hash(in.selected_hash, /*always=*/true);
+    try_force_hash(in.hovered_hash, /*always=*/true);
+    for (const std::string& h : walk_force)
+        try_force_hash(h, /*always=*/true);
+    for (const std::string& h : green_display)
+        try_force_hash(h, /*always=*/false);
+    for (const std::string& h : cyan_owners)
+        try_force_hash(h, /*always=*/false);
+    for (const std::string& h : incomplete_pool)
+        try_force_hash(h, /*always=*/false);
 
     // Dynamic near/far from visible segment Z span (+ lateral pad).
     {

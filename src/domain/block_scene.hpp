@@ -109,6 +109,8 @@ public:
     {
         return graph_.nodes_snapshot_unsorted();
     }
+    // Layout cache key — bumps on admit/remove/prune/role upsert.
+    uint64_t graph_generation() const { return graph_.generation(); }
     std::vector<NodeId> tip_ids() const;
     size_t unconfirmed_live_count() const;
 

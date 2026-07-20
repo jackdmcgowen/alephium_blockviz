@@ -76,8 +76,12 @@ public:
     size_t node_count() const;
     std::vector<NodeId> live_ids_sorted() const;
 
+    // Bumped on any structural mutate (admit/remove/prune/role upsert). Layout cache key.
+    uint64_t generation() const;
+
 private:
     mutable std::mutex mu_;
     std::unordered_map<NodeId, GraphNode> nodes_;
     std::unordered_map<NodeId, std::vector<GraphEdge>> out_edges_;
+    uint64_t generation_ = 1;
 };
