@@ -1,24 +1,27 @@
 #pragma once
 
-// Segment-indexed disk cache: unit of storage/load is genesis segment G_seg.
-// One gzip pack per G (meta + all blocks). Complete segments replace network fills.
+// Segment-indexed disk cache: unit of storage is genesis segment G_seg.
+// Schema v3: hierarchical multi-entry under G_<id>/ — one gzip file per 60s chunk.
+// Complete historical segments replace network interval fills.
 // Design: docs/segment-disk-cache.md
 //
 // Layout under %LOCALAPPDATA%/AlephiumBlockViz/cache/<domain>/:
-//   manifest.json
+//   manifest.json              # schema 3 index (RAM-cached after open)
 //   cache.log
-//   segments/G_<id>.json.gz   // single compressed pack for that G
+//   segments/G_<id>/meta.json  # bounds + complete + block_count
+//   segments/G_<id>/c_<from>.json.gz  # chunk entry: { blocks: [...] }
 
 #include "domain/alph_block.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 class SegmentDiskCache
 {
 public:
-    static constexpr int      kSchemaVersion  = 2; // pack-per-segment (no per-block files)
+    static constexpr int      kSchemaVersion  = 3; // G_dir + multi-chunk entries
     static constexpr int      kMaxSegments    = 48;
     static constexpr int      kStartupLoadMax = 12;
     static constexpr int64_t  kChunkMs        = 60 * 1000;
@@ -72,6 +75,9 @@ public:
     bool has_segment(int g_seg) const;
     bool load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
                       int64_t& to_ms) const;
+    // Stream blocks without requiring a giant intermediate vector (caller may still collect).
+    bool load_segment_visit(int g_seg, int64_t& from_ms, int64_t& to_ms,
+                            const std::function<void(CachedBlock&&)>& on_block) const;
     std::vector<int> list_segment_ids(bool complete_only = true) const;
 
     bool save_segment(int g_seg, int64_t from_ms, int64_t to_ms, int64_t genesis_ms,
@@ -89,25 +95,37 @@ public:
 private:
     std::string root_dir_() const;
     std::string manifest_path_() const;
-    std::string segment_pack_path_(int g_seg) const; // segments/G_<id>.json.gz
+    std::string segment_dir_(int g_seg) const;          // segments/G_<id>/
+    std::string segment_meta_path_(int g_seg) const;    // .../meta.json
+    std::string segment_chunk_path_(int g_seg, int64_t chunk_from) const;
+    std::string legacy_v2_pack_path_(int g_seg) const;  // segments/G_<id>.json.gz
 
     bool ensure_dirs_() const;
     void wipe_legacy_v1_layout_() const;
+    void migrate_v2_packs_if_needed_() const;
     bool write_text_file_(const std::string& path, const std::string& body) const;
     bool read_text_file_(const std::string& path, std::string& out) const;
     bool write_gzip_file_(const std::string& path, const std::string& body) const;
     bool read_gzip_file_(const std::string& path, std::string& out) const;
 
-    bool load_manifest_(std::vector<SegmentMeta>& segs, int64_t& genesis_ms) const;
+    bool ensure_manifest_loaded_() const;
+    void invalidate_manifest_cache_() const;
+    bool load_manifest_from_disk_(std::vector<SegmentMeta>& segs, int64_t& genesis_ms) const;
     bool save_manifest_(const std::vector<SegmentMeta>& segs, int64_t genesis_ms) const;
     void enforce_lru_(std::vector<SegmentMeta>& segs) const;
     void garbage_collect_orphans_(const std::vector<SegmentMeta>& keep) const;
     void enforce_disk_budget_(std::vector<SegmentMeta>& segs, int64_t genesis_ms) const;
     uint64_t approx_disk_bytes_() const;
     bool find_meta_(int g_seg, SegmentMeta& out) const;
+    void remove_segment_files_(int g_seg) const;
 
     static cJSON* block_to_cjson_(const CachedBlock& b);
     static bool   cjson_to_block_(cJSON* o, CachedBlock& out);
+    static int64_t chunk_floor_(int64_t ts_ms, int64_t from_ms);
 
     std::string domain_key_;
+    // RAM-resident manifest (mutable for const loaders).
+    mutable bool manifest_loaded_ = false;
+    mutable int64_t cached_genesis_ms_ = 0;
+    mutable std::vector<SegmentMeta> cached_segs_;
 };

@@ -3457,17 +3457,17 @@ void AlephiumAdapter::maybe_memory_pressure_prune()
 
 void AlephiumAdapter::maybe_memory_pressure_prune_()
 {
-    // Sliding ring is view/fetch only — do NOT drop graph nodes when the camera
-    // leaves a segment. Blocks stay so revisiting redraws without re-GET.
-    // Sole hard-prune owner (poller calls public maybe_memory_pressure_prune).
-    // Soft pressure: set HUD warning only.
+    // Soft: segment-aware RAM eviction outside camera ring (disk can re-admit).
+    // Hard: last-resort oldest-node cap. Sole hard-prune owner (poller).
     if (phase_ != Phase::Steady)
         return;
 
     static constexpr size_t kSoftMemBytes = 1536ull * 1024 * 1024; // 1.5 GB
     static constexpr size_t kHardMemBytes = 2ull * 1024 * 1024 * 1024;
-    static constexpr size_t kSoftMaxNodes = 200000;
+    static constexpr size_t kSoftMaxNodes = 80000;  // earlier soft eviction with disk
     static constexpr size_t kHardMaxNodes = 250000;
+    // Keep live + ring + 1 hysteresis lookback in RAM (k = 0..cam+3).
+    static constexpr int kRamKeepLookbacks = 4;
 
     size_t private_bytes = 0;
 #if defined(_WIN32)
@@ -3477,7 +3477,7 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
                              sizeof(pmc)))
         private_bytes = static_cast<size_t>(pmc.PrivateUsage);
 #endif
-    const size_t nodes = scene_.total_blocks();
+    const size_t nodes = scene_.graph().node_count();
     const bool soft =
         (private_bytes > 0 && private_bytes >= kSoftMemBytes) || nodes >= kSoftMaxNodes;
     const bool hard =
@@ -3493,24 +3493,61 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
     {
         last_warn_ms = now;
         std::printf("[adapter] timeline cache pressure level=%d mem=%zu MB nodes=%zu "
-                    "(retain all loaded segs until hard cap; future: disk cache)\n",
+                    "(soft=evict off-ring; hard=cap)\n",
                     cache_pressure_level_, private_bytes / (1024 * 1024), nodes);
+    }
+
+    // Soft segment eviction: drop timestamps older than camera ring + hysteresis.
+    // Disk-complete segments re-admit via try_fill_window_from_disk_ on re-enter.
+    if (soft && genesis_resolved_ && genesis_ms_ > 0)
+    {
+        const int64_t w = window_ms_();
+        if (w > 0)
+        {
+            const int cam_k = camera_lookback_index_();
+            const int keep_k = cam_k + kRamKeepLookbacks; // older pad
+            const int G_live = live_global_segment_id_();
+            const int G_keep_min = std::max(0, G_live - keep_k);
+            // Keep [G_keep_min, G_live] in RAM; prune timestamps before G_keep_min.
+            const int64_t min_keep_ts = genesis_ms_ + static_cast<int64_t>(G_keep_min) * w;
+            if (min_keep_ts > genesis_ms_)
+            {
+                const size_t removed = scene_.prune(min_keep_ts, /*max_nodes=*/0);
+                if (removed > 0)
+                {
+                    stats_removed_ += static_cast<int>(removed);
+                    invalidate_interval_dedupe_before_(min_keep_ts);
+                    // Allow disk re-fill for evicted G range.
+                    for (auto it = disk_segment_admitted_.begin();
+                         it != disk_segment_admitted_.end();)
+                    {
+                        if (*it < G_keep_min)
+                            it = disk_segment_admitted_.erase(it);
+                        else
+                            ++it;
+                    }
+                    std::printf("[adapter] soft segment eviction removed=%zu keep_G>=%d "
+                                "min_ts=%lld (disk re-admit on revisit)\n",
+                                removed, G_keep_min, static_cast<long long>(min_keep_ts));
+                }
+            }
+        }
     }
 
     if (!hard)
         return;
 
-    // Last resort: drop oldest nodes only (not ring-based discard).
+    // Last resort: drop oldest nodes to cap.
     size_t cap = kHardMaxNodes * 9 / 10;
-    if (private_bytes >= kHardMemBytes && nodes > 1000)
-        cap = (std::min)(cap, nodes * 85 / 100);
+    const size_t n_now = scene_.graph().node_count();
+    if (private_bytes >= kHardMemBytes && n_now > 1000)
+        cap = (std::min)(cap, n_now * 85 / 100);
     const size_t removed = scene_.prune(/*min_timestamp_ms=*/0, cap);
     if (removed > 0)
     {
         stats_removed_ += static_cast<int>(removed);
-        // Oldest remaining node ts — invalidate load-once keys older than that.
         int64_t min_keep = 0;
-        const auto snap = scene_.nodes_snapshot();
+        const auto snap = scene_.nodes_snapshot_unsorted();
         for (const auto& n : snap)
         {
             if (n.timestamp_ms <= 0)
@@ -3519,8 +3556,8 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
                 min_keep = n.timestamp_ms;
         }
         invalidate_interval_dedupe_before_(min_keep);
-        std::printf("[adapter] memory pressure prune removed=%zu (cap=%zu) — "
-                    "chunk dedupe invalidated before ts=%lld; re-visit may re-fetch\n",
+        std::printf("[adapter] memory pressure hard prune removed=%zu (cap=%zu) — "
+                    "chunk dedupe invalidated before ts=%lld\n",
                     removed, cap, static_cast<long long>(min_keep));
     }
 }

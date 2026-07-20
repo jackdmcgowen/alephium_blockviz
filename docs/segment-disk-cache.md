@@ -1,15 +1,15 @@
 # Segment disk cache (design)
 
-**Status:** **Segment pack cache (v2)** — one `G_<id>.json.gz` per genesis segment.  
-**Goal:** Bootstrap recent sessions; complete G packs replace network body loads.
+**Status:** **Segment hierarchy cache (v3)** — `G_<id>/` directory with multi-chunk gzip entries.  
+**Goal:** Bootstrap recent sessions; complete historical G packs replace network body loads; live edge stays network-first.
 
 ### Unit of work
 
-| Key | `G_seg` genesis index |
-|-----|------------------------|
-| Save | Build JSON `{meta, blocks:[…]}` → **one gzip write** per G |
-| Load | **One gzip read** → parse all blocks; mark window `polled` if complete |
-| Network | `try_fill_window_from_disk_(k)` before interval GET; live tip still `force_newest` |
+| Key | `G_seg` genesis index → 60s chunk files |
+|-----|----------------------------------------|
+| Save | Bucket blocks by 60s → `segments/G_<id>/c_<from>.json.gz` + `meta.json` |
+| Load | Stream chunk files under G dir; mark historical windows complete; live open edge network |
+| Network | `try_fill_window_from_disk_(k)` before interval GET; live tip always `force_newest` |
 
 ### Debug checklist
 
@@ -40,24 +40,27 @@ This is a **bootstrap** layer, not a full archive and not a substitute for main-
 | **Verified** | Parallel BFS confirm (`N=2G−1`) has completed for that window’s frontier/bag such that blocks in the window are admitted and confirmation marks are stable enough to skip re-poll of the interval body |
 | **Cacheable** | Historical (closed) window preferred; live open edge stays network-first until the window freezes (`k≥1`) |
 
-## Disk layout (schema **v2** — one gzip pack per G)
+## Disk layout (schema **v3** — G directory + multi-chunk entries)
 
 ```text
 %LOCALAPPDATA%/AlephiumBlockViz/cache/<domain_id>/
-  manifest.json                 # small index only (g_seg, bounds, complete, count)
+  manifest.json                 # schema 3 index (RAM-cached after open)
   cache.log                     # save/load/fill/flush events
-  segments/G_<id>.json.gz       # ONE gzip: { meta + blocks: [ … ] }
+  segments/G_<id>/
+    meta.json                   # from_ms, to_ms, complete, block_count, chunk_count
+    c_<chunk_from_ms>.json.gz   # one entry per 60s subsegment: { blocks: [ … ] }
 ```
 
-**Removed (v1):** per-block `blocks/<hh>/<hash>.json.gz` (wiped on domain open).
+**Removed (v1):** per-block `blocks/<hh>/<hash>.json.gz` (wiped on domain open).  
+**Migrated (v2):** flat `segments/G_<id>.json.gz` → v3 hierarchy on domain open.
 
 | Field (manifest segment) | Role |
 |--------------------------|------|
 | `g_seg` | Genesis segment id |
 | `from_ms` / `to_ms` | Window bounds |
-| `complete` | Safe to skip network body for this G |
-| `block_count` | Blocks inside the pack |
-| `schema_version` | **2** required |
+| `complete` | Safe to skip network body for this G (historical only) |
+| `block_count` | Blocks across chunk entries |
+| `schema_version` | **3** (v2 packs auto-migrated) |
 
 **Domain ids:** `mainnet` / `testnet` / `debug` (match `NetworkDomain`).
 

@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace fs = std::filesystem;
@@ -75,15 +76,16 @@ void SegmentDiskCache::set_domain(std::string domain_key)
         if (c == ' ' || c == '/' || c == '\\')
             c = '_';
     }
+    invalidate_manifest_cache_();
     if (enabled())
     {
         ensure_dirs_();
         wipe_legacy_v1_layout_();
-        std::vector<SegmentMeta> segs;
-        int64_t gen = 0;
-        if (!load_manifest_(segs, gen))
-            save_manifest_(segs, 0);
-        log_event("[disk-cache] domain=%s root=%s schema=%d (pack-per-G)", domain_key_.c_str(),
+        migrate_v2_packs_if_needed_();
+        ensure_manifest_loaded_();
+        if (!manifest_loaded_)
+            save_manifest_({}, 0);
+        log_event("[disk-cache] domain=%s root=%s schema=%d (G_dir+chunks)", domain_key_.c_str(),
                   root_dir_().c_str(), kSchemaVersion);
     }
     else
@@ -122,6 +124,14 @@ std::vector<int64_t> SegmentDiskCache::chunk_keys_for_window(int64_t from_ms, in
     return keys;
 }
 
+int64_t SegmentDiskCache::chunk_floor_(int64_t ts_ms, int64_t from_ms)
+{
+    if (ts_ms < from_ms)
+        return from_ms;
+    const int64_t rel = ts_ms - from_ms;
+    return from_ms + (rel / kChunkMs) * kChunkMs;
+}
+
 std::string SegmentDiskCache::root_dir_() const
 {
     return local_app_data_() + "\\AlephiumBlockViz\\cache\\" + domain_key_;
@@ -132,7 +142,22 @@ std::string SegmentDiskCache::manifest_path_() const
     return root_dir_() + "\\manifest.json";
 }
 
-std::string SegmentDiskCache::segment_pack_path_(int g_seg) const
+std::string SegmentDiskCache::segment_dir_(int g_seg) const
+{
+    return root_dir_() + "\\segments\\G_" + std::to_string(g_seg);
+}
+
+std::string SegmentDiskCache::segment_meta_path_(int g_seg) const
+{
+    return segment_dir_(g_seg) + "\\meta.json";
+}
+
+std::string SegmentDiskCache::segment_chunk_path_(int g_seg, int64_t chunk_from) const
+{
+    return segment_dir_(g_seg) + "\\c_" + std::to_string(chunk_from) + ".json.gz";
+}
+
+std::string SegmentDiskCache::legacy_v2_pack_path_(int g_seg) const
 {
     return root_dir_() + "\\segments\\G_" + std::to_string(g_seg) + ".json.gz";
 }
@@ -155,7 +180,6 @@ bool SegmentDiskCache::ensure_dirs_() const
 
 void SegmentDiskCache::wipe_legacy_v1_layout_() const
 {
-    // v1 used blocks/<hh>/<hash>.json.gz + plain segments/G_*.json
     std::error_code ec;
     const fs::path blocks = root_dir_() + "\\blocks";
     if (fs::exists(blocks, ec))
@@ -163,19 +187,13 @@ void SegmentDiskCache::wipe_legacy_v1_layout_() const
         fs::remove_all(blocks, ec);
         log_event("[disk-cache] removed legacy v1 blocks/ tree");
     }
-    // Remove plain .json segment sidecars (not .json.gz packs).
-    const fs::path segs = root_dir_() + "\\segments";
-    if (!fs::exists(segs, ec))
-        return;
-    for (fs::directory_iterator it(segs, ec), end; it != end && !ec; it.increment(ec))
-    {
-        if (!it->is_regular_file(ec))
-            continue;
-        const std::string name = it->path().filename().string();
-        if (name.size() > 5 && name.compare(name.size() - 5, 5, ".json") == 0 &&
-            name.find(".json.gz") == std::string::npos)
-            fs::remove(it->path(), ec);
-    }
+}
+
+void SegmentDiskCache::invalidate_manifest_cache_() const
+{
+    manifest_loaded_ = false;
+    cached_segs_.clear();
+    cached_genesis_ms_ = 0;
 }
 
 bool SegmentDiskCache::write_text_file_(const std::string& path, const std::string& body) const
@@ -204,7 +222,7 @@ bool SegmentDiskCache::write_gzip_file_(const std::string& path, const std::stri
 {
     std::error_code ec;
     fs::create_directories(fs::path(path).parent_path(), ec);
-    gzFile gz = gzopen(path.c_str(), "wb6"); // level 6 default-ish
+    gzFile gz = gzopen(path.c_str(), "wb6");
     if (!gz)
         return false;
     const int n = static_cast<int>(body.size());
@@ -262,7 +280,6 @@ bool SegmentDiskCache::cjson_to_block_(cJSON* o, CachedBlock& out)
     AlphBlock b(o);
     if (b.hash.empty())
     {
-        // Fallback minimal parse if AlphBlock ctor rejected shape.
         cJSON* h = cJSON_GetObjectItem(o, "hash");
         if (!h || !cJSON_IsString(h) || !h->valuestring)
             return false;
@@ -294,7 +311,8 @@ bool SegmentDiskCache::cjson_to_block_(cJSON* o, CachedBlock& out)
     return !out.block.hash.empty();
 }
 
-bool SegmentDiskCache::load_manifest_(std::vector<SegmentMeta>& segs, int64_t& genesis_ms) const
+bool SegmentDiskCache::load_manifest_from_disk_(std::vector<SegmentMeta>& segs,
+                                               int64_t& genesis_ms) const
 {
     segs.clear();
     genesis_ms = 0;
@@ -305,10 +323,10 @@ bool SegmentDiskCache::load_manifest_(std::vector<SegmentMeta>& segs, int64_t& g
     if (!root)
         return false;
     const cJSON* ver = cJSON_GetObjectItem(root, "schema_version");
-    if (!ver || ver->valueint != kSchemaVersion)
+    if (!ver || (ver->valueint != kSchemaVersion && ver->valueint != 2))
     {
         cJSON_Delete(root);
-        return false; // v1 or unknown → empty; v2 packs only
+        return false;
     }
     if (cJSON* g = cJSON_GetObjectItem(root, "genesis_ms"))
         genesis_ms = static_cast<int64_t>(g->valuedouble);
@@ -339,6 +357,22 @@ bool SegmentDiskCache::load_manifest_(std::vector<SegmentMeta>& segs, int64_t& g
     return true;
 }
 
+bool SegmentDiskCache::ensure_manifest_loaded_() const
+{
+    if (manifest_loaded_)
+        return true;
+    if (!enabled())
+        return false;
+    int64_t gen = 0;
+    std::vector<SegmentMeta> segs;
+    if (!load_manifest_from_disk_(segs, gen))
+        return false;
+    cached_segs_ = std::move(segs);
+    cached_genesis_ms_ = gen;
+    manifest_loaded_ = true;
+    return true;
+}
+
 bool SegmentDiskCache::save_manifest_(const std::vector<SegmentMeta>& segs,
                                       int64_t genesis_ms) const
 {
@@ -366,7 +400,20 @@ bool SegmentDiskCache::save_manifest_(const std::vector<SegmentMeta>& segs,
         return false;
     const bool ok = write_text_file_(manifest_path_(), printed);
     cJSON_free(printed);
+    if (ok)
+    {
+        cached_segs_ = segs;
+        cached_genesis_ms_ = genesis_ms;
+        manifest_loaded_ = true;
+    }
     return ok;
+}
+
+void SegmentDiskCache::remove_segment_files_(int g_seg) const
+{
+    std::error_code ec;
+    fs::remove_all(segment_dir_(g_seg), ec);
+    fs::remove(legacy_v2_pack_path_(g_seg), ec);
 }
 
 void SegmentDiskCache::enforce_lru_(std::vector<SegmentMeta>& segs) const
@@ -379,8 +426,7 @@ void SegmentDiskCache::enforce_lru_(std::vector<SegmentMeta>& segs) const
     {
         const SegmentMeta drop = segs.back();
         segs.pop_back();
-        std::error_code ec;
-        fs::remove(segment_pack_path_(drop.g_seg), ec);
+        remove_segment_files_(drop.g_seg);
     }
 }
 
@@ -397,19 +443,16 @@ void SegmentDiskCache::garbage_collect_orphans_(const std::vector<SegmentMeta>& 
     int removed = 0;
     for (fs::directory_iterator it(segs, ec), end; it != end && !ec; it.increment(ec))
     {
-        if (!it->is_regular_file(ec))
-            continue;
         const std::string name = it->path().filename().string();
-        // G_<id>.json.gz
-        if (name.size() < 8 || name.rfind("G_", 0) != 0)
-            continue;
-        const auto dot = name.find('.');
-        if (dot == std::string::npos)
+        if (name.rfind("G_", 0) != 0)
             continue;
         int g = -1;
         try
         {
-            g = std::stoi(name.substr(2, dot - 2));
+            // G_123 or G_123.json.gz
+            const auto rest = name.substr(2);
+            const auto dot = rest.find('.');
+            g = std::stoi(dot == std::string::npos ? rest : rest.substr(0, dot));
         }
         catch (...)
         {
@@ -417,11 +460,14 @@ void SegmentDiskCache::garbage_collect_orphans_(const std::vector<SegmentMeta>& 
         }
         if (live.count(g) != 0)
             continue;
-        fs::remove(it->path(), ec);
+        if (it->is_directory(ec))
+            fs::remove_all(it->path(), ec);
+        else
+            fs::remove(it->path(), ec);
         ++removed;
     }
     if (removed > 0)
-        log_event("[disk-cache] GC removed %d orphan segment packs", removed);
+        log_event("[disk-cache] GC removed %d orphan segment trees", removed);
 }
 
 uint64_t SegmentDiskCache::approx_disk_bytes_() const
@@ -450,12 +496,90 @@ void SegmentDiskCache::enforce_disk_budget_(std::vector<SegmentMeta>& segs,
                   [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg < b.g_seg; });
         const SegmentMeta drop = segs.front();
         segs.erase(segs.begin());
-        std::error_code ec;
-        fs::remove(segment_pack_path_(drop.g_seg), ec);
+        remove_segment_files_(drop.g_seg);
         garbage_collect_orphans_(segs);
         log_event("[disk-cache] disk budget dropped G=%d", drop.g_seg);
     }
     save_manifest_(segs, genesis_ms);
+}
+
+void SegmentDiskCache::migrate_v2_packs_if_needed_() const
+{
+    if (!enabled())
+        return;
+    const fs::path segs = root_dir_() + "\\segments";
+    std::error_code ec;
+    if (!fs::exists(segs, ec))
+        return;
+
+    int migrated = 0;
+    for (fs::directory_iterator it(segs, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+            continue;
+        const std::string name = it->path().filename().string();
+        // G_<id>.json.gz (v2 flat pack)
+        if (name.size() < 10 || name.rfind("G_", 0) != 0 ||
+            name.find(".json.gz") == std::string::npos)
+            continue;
+        if (name.find("\\") != std::string::npos)
+            continue;
+        int g = -1;
+        try
+        {
+            const auto dot = name.find('.');
+            g = std::stoi(name.substr(2, dot - 2));
+        }
+        catch (...)
+        {
+            continue;
+        }
+        // Skip if already v3 dir
+        if (fs::exists(segment_dir_(g), ec))
+        {
+            fs::remove(it->path(), ec);
+            continue;
+        }
+
+        std::string body;
+        if (!read_gzip_file_(it->path().string(), body))
+            continue;
+        cJSON* root = cJSON_Parse(body.c_str());
+        if (!root)
+            continue;
+        int64_t from_ms = 0, to_ms = 0;
+        if (cJSON* x = cJSON_GetObjectItem(root, "from_ms"))
+            from_ms = static_cast<int64_t>(x->valuedouble);
+        if (cJSON* x = cJSON_GetObjectItem(root, "to_ms"))
+            to_ms = static_cast<int64_t>(x->valuedouble);
+        bool complete = cJSON_IsTrue(cJSON_GetObjectItem(root, "complete"));
+        std::vector<CachedBlock> blocks;
+        cJSON* arr = cJSON_GetObjectItem(root, "blocks");
+        if (cJSON_IsArray(arr))
+        {
+            cJSON* bo = nullptr;
+            cJSON_ArrayForEach(bo, arr)
+            {
+                CachedBlock cb;
+                if (cjson_to_block_(bo, cb))
+                    blocks.push_back(std::move(cb));
+            }
+        }
+        cJSON_Delete(root);
+        if (blocks.empty() || to_ms <= from_ms)
+        {
+            fs::remove(it->path(), ec);
+            continue;
+        }
+        // Re-save via public path (v3 multi-chunk).
+        const_cast<SegmentDiskCache*>(this)->save_segment(g, from_ms, to_ms, cached_genesis_ms_,
+                                                          blocks, complete);
+        fs::remove(it->path(), ec);
+        ++migrated;
+    }
+    if (migrated > 0)
+        log_event("[disk-cache] migrated %d v2 packs to schema %d hierarchy", migrated,
+                  kSchemaVersion);
 }
 
 SegmentDiskCache::CacheStats SegmentDiskCache::stats() const
@@ -465,12 +589,10 @@ SegmentDiskCache::CacheStats SegmentDiskCache::stats() const
     s.root = root_dir_();
     if (!enabled())
         return s;
-    std::vector<SegmentMeta> segs;
-    int64_t gen = 0;
-    if (load_manifest_(segs, gen))
+    if (ensure_manifest_loaded_())
     {
-        s.segments = static_cast<int>(segs.size());
-        for (const auto& m : segs)
+        s.segments = static_cast<int>(cached_segs_.size());
+        for (const auto& m : cached_segs_)
             if (m.complete)
                 ++s.complete_segments;
     }
@@ -480,11 +602,9 @@ SegmentDiskCache::CacheStats SegmentDiskCache::stats() const
 
 bool SegmentDiskCache::find_meta_(int g_seg, SegmentMeta& out) const
 {
-    std::vector<SegmentMeta> segs;
-    int64_t gen = 0;
-    if (!load_manifest_(segs, gen))
+    if (!ensure_manifest_loaded_())
         return false;
-    for (const SegmentMeta& m : segs)
+    for (const SegmentMeta& m : cached_segs_)
     {
         if (m.g_seg == g_seg)
         {
@@ -508,12 +628,9 @@ bool SegmentDiskCache::has_segment(int g_seg) const
 std::vector<int> SegmentDiskCache::list_segment_ids(bool complete_only) const
 {
     std::vector<int> ids;
-    if (!enabled())
+    if (!enabled() || !ensure_manifest_loaded_())
         return ids;
-    std::vector<SegmentMeta> segs;
-    int64_t gen = 0;
-    if (!load_manifest_(segs, gen))
-        return ids;
+    std::vector<SegmentMeta> segs = cached_segs_;
     std::sort(segs.begin(), segs.end(),
               [](const SegmentMeta& a, const SegmentMeta& b) { return a.g_seg > b.g_seg; });
     for (const SegmentMeta& m : segs)
@@ -525,59 +642,113 @@ std::vector<int> SegmentDiskCache::list_segment_ids(bool complete_only) const
     return ids;
 }
 
-bool SegmentDiskCache::load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
-                                    int64_t& to_ms) const
+bool SegmentDiskCache::load_segment_visit(int g_seg, int64_t& from_ms, int64_t& to_ms,
+                                         const std::function<void(CachedBlock&&)>& on_block) const
 {
-    out.clear();
     from_ms = to_ms = 0;
-    if (!enabled() || g_seg < 0)
+    if (!enabled() || g_seg < 0 || !on_block)
         return false;
     SegmentMeta meta;
     if (!find_meta_(g_seg, meta) || !meta.complete)
         return false;
 
-    std::string body;
-    if (!read_gzip_file_(segment_pack_path_(g_seg), body))
-    {
-        log_event("[disk-cache] load_segment G=%d missing pack %s", g_seg,
-                  segment_pack_path_(g_seg).c_str());
-        return false;
-    }
-    cJSON* root = cJSON_Parse(body.c_str());
-    if (!root)
-        return false;
+    from_ms = meta.from_ms;
+    to_ms = meta.to_ms;
 
-    if (cJSON* x = cJSON_GetObjectItem(root, "from_ms"))
-        from_ms = static_cast<int64_t>(x->valuedouble);
-    else
-        from_ms = meta.from_ms;
-    if (cJSON* x = cJSON_GetObjectItem(root, "to_ms"))
-        to_ms = static_cast<int64_t>(x->valuedouble);
-    else
-        to_ms = meta.to_ms;
-
-    cJSON* blocks = cJSON_GetObjectItem(root, "blocks");
+    // Prefer v3 directory of chunk files.
+    const fs::path dir = segment_dir_(g_seg);
+    std::error_code ec;
     int got = 0;
-    if (cJSON_IsArray(blocks))
+    if (fs::exists(dir, ec) && fs::is_directory(dir, ec))
     {
-        cJSON* bo = nullptr;
-        cJSON_ArrayForEach(bo, blocks)
+        // Optional meta override
+        std::string meta_body;
+        if (read_text_file_(segment_meta_path_(g_seg), meta_body))
         {
-            CachedBlock cb;
-            if (!cjson_to_block_(bo, cb))
+            cJSON* mroot = cJSON_Parse(meta_body.c_str());
+            if (mroot)
+            {
+                if (cJSON* x = cJSON_GetObjectItem(mroot, "from_ms"))
+                    from_ms = static_cast<int64_t>(x->valuedouble);
+                if (cJSON* x = cJSON_GetObjectItem(mroot, "to_ms"))
+                    to_ms = static_cast<int64_t>(x->valuedouble);
+                cJSON_Delete(mroot);
+            }
+        }
+        for (fs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+        {
+            if (!it->is_regular_file(ec))
                 continue;
-            out.push_back(std::move(cb));
-            ++got;
+            const std::string name = it->path().filename().string();
+            if (name.rfind("c_", 0) != 0 || name.find(".json.gz") == std::string::npos)
+                continue;
+            std::string body;
+            if (!read_gzip_file_(it->path().string(), body))
+                continue;
+            cJSON* root = cJSON_Parse(body.c_str());
+            if (!root)
+                continue;
+            cJSON* blocks = cJSON_GetObjectItem(root, "blocks");
+            if (cJSON_IsArray(blocks))
+            {
+                cJSON* bo = nullptr;
+                cJSON_ArrayForEach(bo, blocks)
+                {
+                    CachedBlock cb;
+                    if (!cjson_to_block_(bo, cb))
+                        continue;
+                    on_block(std::move(cb));
+                    ++got;
+                }
+            }
+            cJSON_Delete(root);
         }
     }
-    cJSON_Delete(root);
+    else
+    {
+        // Fallback: legacy v2 single pack
+        std::string body;
+        if (!read_gzip_file_(legacy_v2_pack_path_(g_seg), body))
+            return false;
+        cJSON* root = cJSON_Parse(body.c_str());
+        if (!root)
+            return false;
+        if (cJSON* x = cJSON_GetObjectItem(root, "from_ms"))
+            from_ms = static_cast<int64_t>(x->valuedouble);
+        if (cJSON* x = cJSON_GetObjectItem(root, "to_ms"))
+            to_ms = static_cast<int64_t>(x->valuedouble);
+        cJSON* blocks = cJSON_GetObjectItem(root, "blocks");
+        if (cJSON_IsArray(blocks))
+        {
+            cJSON* bo = nullptr;
+            cJSON_ArrayForEach(bo, blocks)
+            {
+                CachedBlock cb;
+                if (!cjson_to_block_(bo, cb))
+                    continue;
+                on_block(std::move(cb));
+                ++got;
+            }
+        }
+        cJSON_Delete(root);
+    }
+
     if (got <= 0)
     {
-        log_event("[disk-cache] load_segment G=%d empty pack", g_seg);
+        log_event("[disk-cache] load_segment G=%d empty", g_seg);
         return false;
     }
-    log_event("[disk-cache] load_segment G=%d blocks=%d (1 pack)", g_seg, got);
+    log_event("[disk-cache] load_segment G=%d blocks=%d (multi-chunk)", g_seg, got);
     return true;
+}
+
+bool SegmentDiskCache::load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
+                                    int64_t& to_ms) const
+{
+    out.clear();
+    return load_segment_visit(g_seg, from_ms, to_ms, [&](CachedBlock&& cb) {
+        out.push_back(std::move(cb));
+    });
 }
 
 bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
@@ -592,62 +763,93 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         return false;
     }
 
-    cJSON* root = cJSON_CreateObject();
-    if (!root)
-        return false;
-    cJSON_AddNumberToObject(root, "g_seg", g_seg);
-    cJSON_AddNumberToObject(root, "from_ms", static_cast<double>(from_ms));
-    cJSON_AddNumberToObject(root, "to_ms", static_cast<double>(to_ms));
-    cJSON_AddBoolToObject(root, "complete", complete ? 1 : 0);
-    cJSON_AddNumberToObject(root, "verified_at",
-                            static_cast<double>(static_cast<int64_t>(std::time(nullptr))));
-    cJSON* arr = cJSON_AddArrayToObject(root, "blocks");
-
+    // Bucket blocks into 60s chunk files (multi-entry hierarchy under G_dir).
+    std::unordered_map<int64_t, std::vector<const CachedBlock*>> by_chunk;
     int written = 0;
-    int skipped_ts = 0;
     for (const CachedBlock& cb : blocks)
     {
         if (cb.block.hash.empty())
             continue;
         const int64_t ts = cb.block.timestamp;
         if (ts < from_ms || ts > to_ms)
-        {
-            ++skipped_ts;
             continue;
-        }
-        cJSON* bo = block_to_cjson_(cb);
-        if (!bo)
-            continue;
-        cJSON_AddItemToArray(arr, bo);
+        const int64_t key = chunk_floor_(ts, from_ms);
+        by_chunk[key].push_back(&cb);
         ++written;
     }
     if (written == 0)
     {
-        cJSON_Delete(root);
-        log_event("[disk-cache] save empty G=%d candidates=%zu skip_ts=%d window=[%lld,%lld]",
-                  g_seg, blocks.size(), skipped_ts, static_cast<long long>(from_ms),
+        log_event("[disk-cache] save empty G=%d candidates=%zu window=[%lld,%lld]",
+                  g_seg, blocks.size(), static_cast<long long>(from_ms),
                   static_cast<long long>(to_ms));
         return false;
     }
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed)
-        return false;
-    const std::string pack = printed;
-    cJSON_free(printed);
-
-    const std::string path = segment_pack_path_(g_seg);
-    if (!write_gzip_file_(path, pack))
+    std::error_code ec;
+    fs::create_directories(segment_dir_(g_seg), ec);
+    // Remove old chunk files for this G (rewrite set).
+    for (fs::directory_iterator it(segment_dir_(g_seg), ec), end; it != end && !ec;
+         it.increment(ec))
     {
-        log_event("[disk-cache] gzip write FAIL G=%d path=%s bytes=%zu", g_seg, path.c_str(),
-                  pack.size());
-        return false;
+        if (!it->is_regular_file(ec))
+            continue;
+        const std::string name = it->path().filename().string();
+        if (name.rfind("c_", 0) == 0)
+            fs::remove(it->path(), ec);
+    }
+    // Drop legacy v2 pack if present.
+    fs::remove(legacy_v2_pack_path_(g_seg), ec);
+
+    for (const auto& kv : by_chunk)
+    {
+        cJSON* root = cJSON_CreateObject();
+        if (!root)
+            continue;
+        cJSON_AddNumberToObject(root, "g_seg", g_seg);
+        cJSON_AddNumberToObject(root, "chunk_from", static_cast<double>(kv.first));
+        cJSON* arr = cJSON_AddArrayToObject(root, "blocks");
+        for (const CachedBlock* p : kv.second)
+        {
+            cJSON* bo = block_to_cjson_(*p);
+            if (bo)
+                cJSON_AddItemToArray(arr, bo);
+        }
+        char* printed = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        if (!printed)
+            continue;
+        write_gzip_file_(segment_chunk_path_(g_seg, kv.first), printed);
+        cJSON_free(printed);
+    }
+
+    // meta.json for the G directory
+    {
+        cJSON* meta = cJSON_CreateObject();
+        cJSON_AddNumberToObject(meta, "g_seg", g_seg);
+        cJSON_AddNumberToObject(meta, "from_ms", static_cast<double>(from_ms));
+        cJSON_AddNumberToObject(meta, "to_ms", static_cast<double>(to_ms));
+        cJSON_AddBoolToObject(meta, "complete", complete ? 1 : 0);
+        cJSON_AddNumberToObject(meta, "block_count", written);
+        cJSON_AddNumberToObject(meta, "chunk_count", static_cast<double>(by_chunk.size()));
+        cJSON_AddNumberToObject(meta, "verified_at",
+                                static_cast<double>(static_cast<int64_t>(std::time(nullptr))));
+        char* printed = cJSON_PrintUnformatted(meta);
+        cJSON_Delete(meta);
+        if (printed)
+        {
+            write_text_file_(segment_meta_path_(g_seg), printed);
+            cJSON_free(printed);
+        }
     }
 
     std::vector<SegmentMeta> segs;
     int64_t man_gen = genesis_ms;
-    load_manifest_(segs, man_gen);
+    if (ensure_manifest_loaded_())
+    {
+        segs = cached_segs_;
+        if (cached_genesis_ms_ > 0)
+            man_gen = cached_genesis_ms_;
+    }
     if (genesis_ms > 0)
         man_gen = genesis_ms;
 
@@ -677,8 +879,8 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         segs.push_back(m);
     }
     enforce_disk_budget_(segs, man_gen);
-    log_event("[disk-cache] saved G=%d blocks=%d complete=%d pack=%s (1 gzip)", g_seg, written,
-              complete ? 1 : 0, path.c_str());
+    log_event("[disk-cache] saved G=%d blocks=%d chunks=%zu complete=%d (schema %d)", g_seg,
+              written, by_chunk.size(), complete ? 1 : 0, kSchemaVersion);
     return true;
 }
 
@@ -695,27 +897,25 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
         return r;
     }
 
-    std::vector<SegmentMeta> segs;
-    int64_t genesis_ms = 0;
-    if (!load_manifest_(segs, genesis_ms))
+    if (!ensure_manifest_loaded_())
     {
-        log_event("[disk-cache] no v2 manifest at %s", manifest_path_().c_str());
+        log_event("[disk-cache] no manifest at %s", manifest_path_().c_str());
         return r;
     }
     r.manifest_ok = true;
-    r.genesis_ms = genesis_ms;
+    r.genesis_ms = cached_genesis_ms_;
 
     int effective_live = g_live;
-    if (genesis_ms > 0)
+    if (cached_genesis_ms_ > 0)
     {
         const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
         const int64_t w = static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
-        if (w > 0 && now_ms > genesis_ms)
-            effective_live = static_cast<int>((now_ms - genesis_ms) / w);
+        if (w > 0 && now_ms > cached_genesis_ms_)
+            effective_live = static_cast<int>((now_ms - cached_genesis_ms_) / w);
     }
 
     std::vector<int> ids;
-    for (const SegmentMeta& m : segs)
+    for (const SegmentMeta& m : cached_segs_)
     {
         if (!m.complete)
             continue;
@@ -731,24 +931,25 @@ SegmentDiskCache::LoadResult SegmentDiskCache::load_recent(
     std::unordered_set<std::string> seen;
     for (int G : ids)
     {
-        std::vector<CachedBlock> part;
         int64_t from_ms = 0, to_ms = 0;
-        if (!load_segment(G, part, from_ms, to_ms))
+        int part_n = 0;
+        if (!load_segment_visit(G, from_ms, to_ms, [&](CachedBlock&& cb) {
+                if (cb.block.hash.empty() || !seen.insert(cb.block.hash).second)
+                    return;
+                out_blocks.push_back(std::move(cb));
+                ++r.blocks_loaded;
+                ++part_n;
+            }))
             continue;
-        for (auto& cb : part)
-        {
-            if (cb.block.hash.empty() || !seen.insert(cb.block.hash).second)
-                continue;
-            out_blocks.push_back(std::move(cb));
-            ++r.blocks_loaded;
-        }
+        if (part_n <= 0)
+            continue;
         ++r.segments_loaded;
         r.segment_ids.push_back(G);
         auto keys = chunk_keys_for_window(from_ms, to_ms);
         r.chunk_keys.insert(r.chunk_keys.end(), keys.begin(), keys.end());
     }
-    log_event("[disk-cache] load_recent domain=%s loaded_seg=%d blocks=%d g_live=%d path=%s",
+    log_event("[disk-cache] load_recent domain=%s loaded_seg=%d blocks=%d g_live=%d schema=%d",
               domain_key_.c_str(), r.segments_loaded, r.blocks_loaded, effective_live,
-              r.root.c_str());
+              kSchemaVersion);
     return r;
 }
