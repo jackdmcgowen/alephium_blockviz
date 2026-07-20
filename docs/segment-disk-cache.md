@@ -8,7 +8,7 @@
 | Key | `G_seg` genesis index → 60s chunk files |
 |-----|----------------------------------------|
 | Save | Bucket blocks by 60s → `segments/G_<id>/c_<from>.json.gz` + `meta.json` |
-| Load | Stream chunk files under G dir; mark historical windows complete; live open edge network |
+| Load | Stream present `c_*` files (partial G OK); seed only those grid keys; live open tip never disk-complete |
 | Network | `try_fill_window_from_disk_(k)` before interval GET; live tip always `force_newest` |
 
 ### Debug checklist

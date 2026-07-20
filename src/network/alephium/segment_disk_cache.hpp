@@ -72,12 +72,24 @@ public:
 
     std::string root_dir() const { return root_dir_(); }
 
-    bool has_segment(int g_seg) const;
+    bool has_segment(int g_seg) const; // complete G only
+    // True if G has any on-disk data (meta and/or c_*.json.gz), complete or warm.
+    bool has_any_data(int g_seg) const;
+    bool has_chunk(int g_seg, int64_t chunk_from) const;
+    // Chunk from_ms keys present on disk (from c_*.json.gz filenames). Sorted ascending.
+    std::vector<int64_t> list_present_chunks(int g_seg) const;
+    // Meta bounds if known (manifest or meta.json); false if unknown.
+    bool segment_bounds(int g_seg, int64_t& from_ms, int64_t& to_ms) const;
+
     bool load_segment(int g_seg, std::vector<CachedBlock>& out, int64_t& from_ms,
                       int64_t& to_ms) const;
-    // Stream blocks without requiring a giant intermediate vector (caller may still collect).
+    // Stream blocks. require_complete=false allows partial/warm G (only present chunks).
     bool load_segment_visit(int g_seg, int64_t& from_ms, int64_t& to_ms,
-                            const std::function<void(CachedBlock&&)>& on_block) const;
+                            const std::function<void(CachedBlock&&)>& on_block,
+                            bool require_complete = true) const;
+    // Load only listed chunk keys (must exist). Returns blocks admitted count via visitor.
+    bool load_chunks_visit(int g_seg, const std::vector<int64_t>& chunk_from_keys,
+                           const std::function<void(CachedBlock&&)>& on_block) const;
     std::vector<int> list_segment_ids(bool complete_only = true) const;
 
     bool save_segment(int g_seg, int64_t from_ms, int64_t to_ms, int64_t genesis_ms,

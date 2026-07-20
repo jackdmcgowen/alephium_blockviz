@@ -127,7 +127,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 | **P1** | Config / URL resolution notes | `config.json` array + `network_domain_resolve_url` |
 | **P2** | Optional websocket tip stream | Focused feature, not a networking rewrite |
 | **P2** | Second real chain adapter | After FakeChain proves wiring |
-| **P2** | Eye-centered chunk priority / adaptive chunk size | Optional polish on top of newest-first |
+| **In progress** | Hole-priority subsegments + variable patches | Disk per-chunk presence; dep-critical hole queue before newest-first bulk; variable interval spans |
 
 ## Interfaces
 

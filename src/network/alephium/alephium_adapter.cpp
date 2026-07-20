@@ -109,6 +109,7 @@ void AlephiumAdapter::reset_stats()
     uncle_queued_.clear();
     pending_fill_parents_.clear();
     history_slots_fetched_.clear();
+    timeline_holes_.clear();
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
     live_edge_refreshed_ = false;
@@ -555,6 +556,16 @@ void AlephiumAdapter::mark_window_complete_from_cache_(int lookback_k, int g_seg
                                                       int64_t from_ms, int64_t to_ms,
                                                       bool open_live_edge)
 {
+    // Full-window seed (all grid keys). Prefer mark_window_present_chunks_from_cache_
+    // when only a subset of disk chunks exists.
+    mark_window_present_chunks_from_cache_(lookback_k, g_seg, from_ms, to_ms, open_live_edge,
+                                           /*present_keys=*/nullptr, /*all_keys=*/true);
+}
+
+void AlephiumAdapter::mark_window_present_chunks_from_cache_(
+    int lookback_k, int g_seg, int64_t from_ms, int64_t to_ms, bool open_live_edge,
+    const std::vector<int64_t>* present_keys, bool all_keys)
+{
     if (lookback_k < 0)
         return;
     while (static_cast<int>(lookback_windows_.size()) <= lookback_k)
@@ -573,34 +584,61 @@ void AlephiumAdapter::mark_window_complete_from_cache_(int lookback_k, int g_seg
         slot.epoch_to_ms = to_ms;
     }
 
-    // Open live segment: paint from disk, but never claim interval load-once for
-    // the open window — topmost 60s (and live fill) must come from network.
     const int G_live = live_global_segment_id_();
     const bool leave_live_edge =
         open_live_edge || lookback_k == 0 || (G_live >= 0 && g_seg == G_live);
 
-    auto keys = SegmentDiskCache::chunk_keys_for_window(slot.from_ms, slot.to_ms);
-    // keys are newest-first (first = topmost subsegment toward to_ms).
+    // grid keys newest-first.
+    auto grid = SegmentDiskCache::chunk_keys_for_window(slot.from_ms, slot.to_ms);
+
     if (leave_live_edge)
     {
-        // Drop any stale complete marks for this live window's chunks.
-        for (int64_t key : keys)
+        // Live: seed non-topmost present keys only; topmost always network.
+        for (int64_t key : grid)
             history_slots_fetched_.erase(key);
+        if (present_keys)
+        {
+            for (int64_t key : *present_keys)
+            {
+                if (!grid.empty() && key == grid[0])
+                    continue;
+                history_slots_fetched_.insert(key);
+            }
+        }
         slot.pending_from_ms = 0;
-        slot.next_fill_to_ms = slot.to_ms; // newest-first from tip
+        slot.next_fill_to_ms = slot.to_ms;
         slot.want_newest_refresh = true;
         slot.polled = false;
         recompute_window_chunk_stats_(lookback_k);
+        disk_segment_admitted_.insert(g_seg);
+        return;
     }
-    else
+
+    if (all_keys)
     {
-        for (int64_t key : keys)
+        for (int64_t key : grid)
             history_slots_fetched_.insert(key);
-        slot.pending_from_ms = 0;
-        slot.next_fill_to_ms = slot.from_ms;
-        recompute_window_chunk_stats_(lookback_k);
-        slot.polled = true;
     }
+    else if (present_keys)
+    {
+        for (int64_t key : *present_keys)
+            history_slots_fetched_.insert(key);
+    }
+
+    // Newest-first cursor: exclusive end of newest missing chunk.
+    int64_t next_to = slot.from_ms; // fully covered
+    for (size_t i = 0; i < grid.size(); ++i)
+    {
+        if (history_slots_fetched_.count(grid[i]) != 0)
+            continue;
+        next_to = (i == 0) ? slot.to_ms : grid[i - 1];
+        break;
+    }
+    slot.pending_from_ms = 0;
+    slot.next_fill_to_ms = next_to;
+    recompute_window_chunk_stats_(lookback_k);
+    slot.polled = (slot.chunks_total > 0 && slot.chunks_done >= slot.chunks_total &&
+                   slot.pending_from_ms == 0);
     disk_segment_admitted_.insert(g_seg);
 }
 
@@ -615,43 +653,86 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
     const int G_live = live_global_segment_id_();
     const bool is_open_live = (lookback_k == 0) || (G_live >= 0 && G == G_live);
 
+    int64_t from_ms = 0, to_ms = 0;
+    bounds_for_global_(G, from_ms, to_ms);
+
+    auto apply_presence = [&](const std::vector<int64_t>* present, bool all_keys) {
+        mark_window_present_chunks_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live,
+                                               present, all_keys);
+    };
+
+    // Already admitted this session — refresh presence from disk file list.
     if (disk_segment_admitted_.count(G) != 0)
     {
-        int64_t from_ms = 0, to_ms = 0;
-        bounds_for_global_(G, from_ms, to_ms);
-        // Historical: skip HTTP. Live open edge: re-apply open-edge marks and
-        // return false so force_newest / chunk pump can still hit the network.
-        mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live);
-        if (is_open_live)
-            return false;
-        return true;
+        const bool complete = disk_cache_.has_segment(G);
+        if (complete && !is_open_live)
+        {
+            apply_presence(nullptr, /*all_keys=*/true);
+            return true;
+        }
+        auto present = disk_cache_.list_present_chunks(G);
+        apply_presence(&present, /*all_keys=*/false);
+        if (!is_open_live && lookback_k < static_cast<int>(lookback_windows_.size()) &&
+            lookback_windows_[static_cast<size_t>(lookback_k)].polled)
+            return true;
+        return false;
     }
-    if (!disk_cache_.has_segment(G))
+
+    if (!disk_cache_.has_any_data(G))
         return false;
 
-    std::vector<SegmentDiskCache::CachedBlock> blocks;
-    int64_t from_ms = 0, to_ms = 0;
-    if (!disk_cache_.load_segment(G, blocks, from_ms, to_ms))
-        return false;
+    auto present = disk_cache_.list_present_chunks(G);
+    const bool complete = disk_cache_.has_segment(G);
+
+    int64_t pack_from = from_ms, pack_to = to_ms;
+    if (disk_cache_.segment_bounds(G, pack_from, pack_to) && pack_to > pack_from)
+    {
+        from_ms = pack_from;
+        to_ms = pack_to;
+    }
 
     int admitted = 0;
-    for (const auto& cb : blocks)
-    {
-        if (cb.block.hash.empty())
-            continue;
-        scene_.add_block(cb.block);
-        ++admitted;
-        // Bag only — sequential H_c must come from live tip pipeline, not lagging disk.
-        if (cb.confirmed)
-            scene_.mark_confirmed_bag_only(cb.block.hash);
-    }
-    mark_window_complete_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live);
-    set_disk_cache_event_("loaded G=%d from cache n=%d k=%d live_edge=%d", G, admitted,
-                          lookback_k, is_open_live ? 1 : 0);
-    // Open live: blocks painted, but do not claim "skip net" for the tip edge.
-    if (is_open_live)
+    const bool loaded = disk_cache_.load_segment_visit(
+        G, pack_from, pack_to,
+        [&](SegmentDiskCache::CachedBlock&& cb) {
+            if (cb.block.hash.empty())
+                return;
+            const bool conf = cb.confirmed;
+            const std::string h = cb.block.hash;
+            scene_.add_block(std::move(cb.block));
+            ++admitted;
+            if (conf)
+                scene_.mark_confirmed_bag_only(h);
+        },
+        /*require_complete=*/false);
+
+    if (!loaded && present.empty() && !complete)
         return false;
-    return admitted > 0 || !blocks.empty();
+
+    // Legacy v2 pack with no c_* files: treat complete as all-keys if marked complete.
+    if (present.empty() && complete && !is_open_live)
+    {
+        apply_presence(nullptr, /*all_keys=*/true);
+        set_disk_cache_event_("loaded G=%d complete(legacy) n=%d k=%d", G, admitted,
+                              lookback_k);
+        return true;
+    }
+
+    if (complete && !is_open_live && !present.empty())
+    {
+        // All chunk files present and meta complete.
+        apply_presence(nullptr, /*all_keys=*/true);
+        set_disk_cache_event_("loaded G=%d complete n=%d k=%d", G, admitted, lookback_k);
+        return true;
+    }
+
+    apply_presence(&present, /*all_keys=*/false);
+    set_disk_cache_event_("loaded G=%d partial chunks=%zu n=%d k=%d live_edge=%d", G,
+                          present.size(), admitted, lookback_k, is_open_live ? 1 : 0);
+    if (!is_open_live && lookback_k < static_cast<int>(lookback_windows_.size()) &&
+        lookback_windows_[static_cast<size_t>(lookback_k)].polled)
+        return true;
+    return false;
 }
 
 void AlephiumAdapter::bootstrap_disk_cache_()
@@ -1096,9 +1177,143 @@ int AlephiumAdapter::poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force)
     return added > 0 ? added : 1;
 }
 
+void AlephiumAdapter::register_dep_hole_(const std::string& parent_hash)
+{
+    if (parent_hash.empty())
+        return;
+    int64_t to_ts = block_timestamp_ms_(parent_hash);
+    if (to_ts <= 0)
+        return;
+
+    // First try: ~2–3 block periods of older time + small slack (variable patch).
+    const int64_t pad =
+        static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 * 3;
+    const int64_t slack =
+        static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
+    int64_t from_ts = std::max<int64_t>(0, to_ts - pad);
+    int64_t to_end = to_ts + slack;
+    if (to_end - from_ts < kMinPatchMs)
+        from_ts = std::max<int64_t>(0, to_end - kMinPatchMs);
+    if (to_end - from_ts > kMaxPatchMs)
+        from_ts = to_end - kMaxPatchMs;
+
+    // Dedup overlapping open holes for same parent.
+    for (const TimelineHole& h : timeline_holes_)
+    {
+        if (h.parent_hash == parent_hash && h.from_ms <= from_ts && h.to_ms >= to_end)
+            return;
+    }
+
+    TimelineHole hole;
+    hole.from_ms = from_ts;
+    hole.to_ms = to_end;
+    hole.priority = HolePriority::DepCritical;
+    hole.parent_hash = parent_hash;
+    if (genesis_resolved_ && genesis_ms_ > 0)
+        hole.g_seg = global_segment_id_(to_ts);
+    timeline_holes_.push_back(std::move(hole));
+    // Cap queue growth.
+    if (timeline_holes_.size() > 64)
+        timeline_holes_.erase(timeline_holes_.begin(),
+                              timeline_holes_.begin() +
+                                  static_cast<std::ptrdiff_t>(timeline_holes_.size() - 64));
+}
+
+void AlephiumAdapter::mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms)
+{
+    if (to_ms <= from_ms)
+        return;
+    // Project free-form admit onto every fully covered 60s grid key in lookback windows.
+    for (size_t wi = 0; wi < lookback_windows_.size(); ++wi)
+    {
+        const LookbackWindowSlot& s = lookback_windows_[wi];
+        if (s.to_ms <= s.from_ms)
+            continue;
+        for (int64_t key : SegmentDiskCache::chunk_keys_for_window(s.from_ms, s.to_ms))
+        {
+            const int64_t c = chunk_ms_();
+            const int64_t chunk_to = std::min(s.to_ms, key + c);
+            // Fully covered by [from_ms, to_ms).
+            if (key >= from_ms && chunk_to <= to_ms)
+                history_slots_fetched_.insert(key);
+        }
+        recompute_window_chunk_stats_(static_cast<int>(wi));
+    }
+    // Drop satisfied holes.
+    timeline_holes_.erase(
+        std::remove_if(timeline_holes_.begin(), timeline_holes_.end(),
+                       [&](const TimelineHole& h) {
+                           return h.from_ms >= from_ms && h.to_ms <= to_ms;
+                       }),
+        timeline_holes_.end());
+}
+
+bool AlephiumAdapter::pump_priority_holes_(int max_chunks)
+{
+    if (max_chunks <= 0 || timeline_holes_.empty())
+        return false;
+    // Highest priority first; then newer to_ms.
+    std::sort(timeline_holes_.begin(), timeline_holes_.end(),
+              [](const TimelineHole& a, const TimelineHole& b) {
+                  if (a.priority != b.priority)
+                      return static_cast<int>(a.priority) > static_cast<int>(b.priority);
+                  return a.to_ms > b.to_ms;
+              });
+
+    int fetched = 0;
+    std::vector<TimelineHole> remain;
+    remain.reserve(timeline_holes_.size());
+    for (TimelineHole& h : timeline_holes_)
+    {
+        if (fetched >= max_chunks)
+        {
+            remain.push_back(std::move(h));
+            continue;
+        }
+        if (h.to_ms <= h.from_ms)
+            continue;
+        // Skip if every overlapping grid key already present.
+        bool any_missing = false;
+        for (size_t wi = 0; wi < lookback_windows_.size() && !any_missing; ++wi)
+        {
+            const auto& s = lookback_windows_[wi];
+            if (s.to_ms <= h.from_ms || s.from_ms >= h.to_ms)
+                continue;
+            for (int64_t key : SegmentDiskCache::chunk_keys_for_window(s.from_ms, s.to_ms))
+            {
+                const int64_t c = chunk_ms_();
+                const int64_t chunk_to = std::min(s.to_ms, key + c);
+                if (chunk_to <= h.from_ms || key >= h.to_ms)
+                    continue;
+                if (history_slots_fetched_.count(key) == 0)
+                {
+                    any_missing = true;
+                    break;
+                }
+            }
+        }
+        if (!any_missing && !lookback_windows_.empty())
+            continue; // already covered
+
+        const int added = poll_time_slot_(h.from_ms, h.to_ms, /*force=*/false);
+        if (added > 0)
+        {
+            ++fetched;
+            // Keep hole until admit (mark_grid on admit clears); re-queue if not forced.
+            remain.push_back(std::move(h));
+        }
+        else
+            remain.push_back(std::move(h));
+    }
+    timeline_holes_ = std::move(remain);
+    return fetched > 0;
+}
+
 int AlephiumAdapter::request_history_slot_for_block_(const std::string& hash)
 {
-    // Historical completeness: cover the block and one lookback of older deps.
+    // Prefer priority hole queue (variable range); also enqueue classic slot as fallback.
+    register_dep_hole_(hash);
+
     int64_t to_ts = block_timestamp_ms_(hash);
     if (to_ts <= 0)
     {
@@ -1119,9 +1334,10 @@ int AlephiumAdapter::request_history_slot_for_block_(const std::string& hash)
             to_ts = 0;
     }
 
-    // One chunk around the block (not a full lookback window).
-    const int64_t c = chunk_ms_();
-    const int64_t from_ts = std::max<int64_t>(0, to_ts - c);
+    // Variable patch around parent (clamped), not fixed 60s only.
+    const int64_t pad =
+        static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 * 3;
+    const int64_t from_ts = std::max<int64_t>(0, to_ts - pad);
     const int64_t to_slack =
         to_ts + static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
     return poll_time_slot_(from_ts, to_slack);
@@ -2744,13 +2960,14 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     };
 
     // Tip-backward load only (lookback k from live tip — never genesis-forward).
-    // Live mode: k=0 first, then k=1, k=2.
-    // History mode: camera window first, then older pad.
-    // Force topmost live 60s even before Steady (disk bootstrap sets want_newest_refresh
-    // so tips resolve from network, not lagging cache). tip_ready is not required here.
+    // Force topmost live 60s even before Steady (disk bootstrap sets want_newest_refresh).
     (void)tip_ready;
     if (live_cam && !lookback_windows_.empty() && lookback_windows_[0].want_newest_refresh)
         try_win(0, /*force_newest=*/true);
+
+    // Dep-critical / priority holes before bulk newest-first grid fill.
+    while (fetched < max_chunks && pump_priority_holes_(1))
+        ++fetched;
 
     if (live_cam)
     {
@@ -3109,6 +3326,8 @@ void AlephiumAdapter::drain_fetch_results_(int interval_budget, int other_budget
         cJSON_Delete(obj);
         // Load-once: successful policy apply (including 0 blocks in span).
         history_slots_fetched_.insert(r.from_ms);
+        // Variable / overlapping patches: mark fully covered grid keys too.
+        mark_grid_keys_covered_(r.from_ms, r.to_ms > r.from_ms ? r.to_ms : (r.from_ms + chunk_ms_()));
         if (r.from_ms > 0 || r.to_ms > 0)
         {
             last_live_window_poll_ms_ =

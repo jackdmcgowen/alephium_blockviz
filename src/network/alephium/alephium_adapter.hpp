@@ -127,6 +127,24 @@ private:
     // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
                                           int64_t to_ms, bool open_live_edge = false);
+    // Seed history_slots_fetched_ from disk presence (subset or all grid keys).
+    void mark_window_present_chunks_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
+                                                int64_t to_ms, bool open_live_edge,
+                                                const std::vector<int64_t>* present_keys,
+                                                bool all_keys);
+    // Dep-critical / eye timeline hole for priority interval patches.
+    enum class HolePriority : uint8_t { Bulk = 0, Eye = 1, DepCritical = 2 };
+    struct TimelineHole
+    {
+        int64_t      from_ms = 0;
+        int64_t      to_ms = 0;
+        HolePriority priority = HolePriority::Bulk;
+        int          g_seg = -1;
+        std::string  parent_hash;
+    };
+    void register_dep_hole_(const std::string& parent_hash);
+    bool pump_priority_holes_(int max_chunks);
+    void mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms);
     void set_disk_cache_event_(const char* fmt, ...);
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
@@ -321,6 +339,10 @@ private:
     // Load-once: chunk from_ms successfully admitted (not mere HTTP attempt).
     // Re-GET only after fail/prune invalidation, or live tip force_newest.
     std::unordered_set<int64_t> history_slots_fetched_;
+    // Priority variable-range patches (missing deps / eye) before bulk newest-first.
+    std::vector<TimelineHole> timeline_holes_;
+    static constexpr int64_t kMinPatchMs = 8'000;
+    static constexpr int64_t kMaxPatchMs = 180'000;
     // Verified segment disk cache (per domain); bootstrap + persist closed windows.
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;

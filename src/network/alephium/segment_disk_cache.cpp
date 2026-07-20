@@ -625,6 +625,97 @@ bool SegmentDiskCache::has_segment(int g_seg) const
     return m.complete;
 }
 
+bool SegmentDiskCache::has_any_data(int g_seg) const
+{
+    if (!enabled() || g_seg < 0)
+        return false;
+    SegmentMeta m;
+    if (find_meta_(g_seg, m))
+        return true;
+    std::error_code ec;
+    if (fs::exists(segment_dir_(g_seg), ec))
+        return true;
+    if (fs::exists(legacy_v2_pack_path_(g_seg), ec))
+        return true;
+    return !list_present_chunks(g_seg).empty();
+}
+
+bool SegmentDiskCache::has_chunk(int g_seg, int64_t chunk_from) const
+{
+    if (!enabled() || g_seg < 0 || chunk_from < 0)
+        return false;
+    std::error_code ec;
+    if (fs::exists(segment_chunk_path_(g_seg, chunk_from), ec))
+        return true;
+    // Legacy v2 pack is treated as covering all keys only when complete meta says so.
+    return false;
+}
+
+std::vector<int64_t> SegmentDiskCache::list_present_chunks(int g_seg) const
+{
+    std::vector<int64_t> keys;
+    if (!enabled() || g_seg < 0)
+        return keys;
+    const fs::path dir = segment_dir_(g_seg);
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec))
+        return keys;
+    for (fs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+            continue;
+        const std::string name = it->path().filename().string();
+        // c_<from_ms>.json.gz
+        if (name.rfind("c_", 0) != 0 || name.find(".json.gz") == std::string::npos)
+            continue;
+        try
+        {
+            const auto und = name.find('_');
+            const auto dot = name.find('.');
+            if (und == std::string::npos || dot == std::string::npos || dot <= und + 1)
+                continue;
+            keys.push_back(std::stoll(name.substr(und + 1, dot - und - 1)));
+        }
+        catch (...)
+        {
+            continue;
+        }
+    }
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
+bool SegmentDiskCache::segment_bounds(int g_seg, int64_t& from_ms, int64_t& to_ms) const
+{
+    from_ms = to_ms = 0;
+    if (!enabled() || g_seg < 0)
+        return false;
+    SegmentMeta m;
+    if (find_meta_(g_seg, m) && m.to_ms > m.from_ms)
+    {
+        from_ms = m.from_ms;
+        to_ms = m.to_ms;
+        return true;
+    }
+    std::string meta_body;
+    if (read_text_file_(segment_meta_path_(g_seg), meta_body))
+    {
+        cJSON* mroot = cJSON_Parse(meta_body.c_str());
+        if (mroot)
+        {
+            if (cJSON* x = cJSON_GetObjectItem(mroot, "from_ms"))
+                from_ms = static_cast<int64_t>(x->valuedouble);
+            if (cJSON* x = cJSON_GetObjectItem(mroot, "to_ms"))
+                to_ms = static_cast<int64_t>(x->valuedouble);
+            cJSON_Delete(mroot);
+            if (to_ms > from_ms)
+                return true;
+        }
+    }
+    return false;
+}
+
 std::vector<int> SegmentDiskCache::list_segment_ids(bool complete_only) const
 {
     std::vector<int> ids;
@@ -642,18 +733,67 @@ std::vector<int> SegmentDiskCache::list_segment_ids(bool complete_only) const
     return ids;
 }
 
+bool SegmentDiskCache::load_chunks_visit(
+    int g_seg, const std::vector<int64_t>& chunk_from_keys,
+    const std::function<void(CachedBlock&&)>& on_block) const
+{
+    if (!enabled() || g_seg < 0 || !on_block || chunk_from_keys.empty())
+        return false;
+    int got = 0;
+    for (int64_t key : chunk_from_keys)
+    {
+        std::string body;
+        if (!read_gzip_file_(segment_chunk_path_(g_seg, key), body))
+            continue;
+        cJSON* root = cJSON_Parse(body.c_str());
+        if (!root)
+            continue;
+        cJSON* blocks = cJSON_GetObjectItem(root, "blocks");
+        if (cJSON_IsArray(blocks))
+        {
+            cJSON* bo = nullptr;
+            cJSON_ArrayForEach(bo, blocks)
+            {
+                CachedBlock cb;
+                if (!cjson_to_block_(bo, cb))
+                    continue;
+                on_block(std::move(cb));
+                ++got;
+            }
+        }
+        cJSON_Delete(root);
+    }
+    return got > 0;
+}
+
 bool SegmentDiskCache::load_segment_visit(int g_seg, int64_t& from_ms, int64_t& to_ms,
-                                         const std::function<void(CachedBlock&&)>& on_block) const
+                                         const std::function<void(CachedBlock&&)>& on_block,
+                                         bool require_complete) const
 {
     from_ms = to_ms = 0;
     if (!enabled() || g_seg < 0 || !on_block)
         return false;
     SegmentMeta meta;
-    if (!find_meta_(g_seg, meta) || !meta.complete)
+    const bool have_meta = find_meta_(g_seg, meta);
+    if (require_complete)
+    {
+        if (!have_meta || !meta.complete)
+            return false;
+    }
+    else if (!have_meta && !has_any_data(g_seg))
+    {
         return false;
+    }
 
-    from_ms = meta.from_ms;
-    to_ms = meta.to_ms;
+    if (have_meta)
+    {
+        from_ms = meta.from_ms;
+        to_ms = meta.to_ms;
+    }
+    else
+    {
+        segment_bounds(g_seg, from_ms, to_ms);
+    }
 
     // Prefer v3 directory of chunk files.
     const fs::path dir = segment_dir_(g_seg);
@@ -661,7 +801,6 @@ bool SegmentDiskCache::load_segment_visit(int g_seg, int64_t& from_ms, int64_t& 
     int got = 0;
     if (fs::exists(dir, ec) && fs::is_directory(dir, ec))
     {
-        // Optional meta override
         std::string meta_body;
         if (read_text_file_(segment_meta_path_(g_seg), meta_body))
         {
@@ -704,9 +843,9 @@ bool SegmentDiskCache::load_segment_visit(int g_seg, int64_t& from_ms, int64_t& 
             cJSON_Delete(root);
         }
     }
-    else
+    else if (require_complete || fs::exists(legacy_v2_pack_path_(g_seg), ec))
     {
-        // Fallback: legacy v2 single pack
+        // Fallback: legacy v2 single pack (treated as full segment content).
         std::string body;
         if (!read_gzip_file_(legacy_v2_pack_path_(g_seg), body))
             return false;
@@ -735,10 +874,12 @@ bool SegmentDiskCache::load_segment_visit(int g_seg, int64_t& from_ms, int64_t& 
 
     if (got <= 0)
     {
-        log_event("[disk-cache] load_segment G=%d empty", g_seg);
+        log_event("[disk-cache] load_segment G=%d empty complete_req=%d", g_seg,
+                  require_complete ? 1 : 0);
         return false;
     }
-    log_event("[disk-cache] load_segment G=%d blocks=%d (multi-chunk)", g_seg, got);
+    log_event("[disk-cache] load_segment G=%d blocks=%d multi-chunk complete_req=%d", g_seg, got,
+              require_complete ? 1 : 0);
     return true;
 }
 
@@ -746,9 +887,10 @@ bool SegmentDiskCache::load_segment(int g_seg, std::vector<CachedBlock>& out, in
                                     int64_t& to_ms) const
 {
     out.clear();
-    return load_segment_visit(g_seg, from_ms, to_ms, [&](CachedBlock&& cb) {
-        out.push_back(std::move(cb));
-    });
+    return load_segment_visit(
+        g_seg, from_ms, to_ms,
+        [&](CachedBlock&& cb) { out.push_back(std::move(cb)); },
+        /*require_complete=*/true);
 }
 
 bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
