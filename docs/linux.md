@@ -82,7 +82,14 @@ Same suites as Windows `.\scripts\run_vnv.ps1` where ported:
 
 Image compare (Linux): `vnv/int/tests/visual/compare_images.py` (needs Pillow).
 
-**CI:** `.github/workflows/linux-ci.yml` builds everything, runs **mod**, and optionally smokes **headless** `int_visual` (continue-on-error until goldens stabilize).
+**CI:** `.github/workflows/linux-ci.yml` — build, **mod**, **headless int hard gate** (lavapipe + `goldens/linux_headless/`).
+
+**Pre-merge smoke:**
+
+```bash
+./scripts/smoke_dual_track.sh           # PCH + mod + headless int
+./scripts/smoke_dual_track.sh --skip-build
+```
 
 ### Headless (no DISPLAY)
 
@@ -92,9 +99,10 @@ Uses **`VK_EXT_headless_surface`** + GPU swapchain readback for PNGs:
 ./build/bin/int_visual --headless --case fake_overview \
   --out vnv/int/tests/visual/out/fake_overview/actual.png
 ./scripts/run_vnv.sh --int --headless
+# compares against vnv/int/tests/visual/goldens/linux_headless/fake_overview.png
 ```
 
-Requires a Vulkan ICD (Mesa lavapipe is fine for smoke).
+Requires a Vulkan ICD (Mesa lavapipe is fine). Golden policy: [vnv/int/tests/visual/goldens/README.md](../vnv/int/tests/visual/goldens/README.md).
 
 ### GPU drivers (local)
 

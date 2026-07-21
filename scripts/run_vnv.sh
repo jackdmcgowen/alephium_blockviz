@@ -156,12 +156,19 @@ if [[ "$RUN_INT" -eq 1 ]]; then
   case="fake_overview"
   out_dir="vnv/int/tests/visual/out/${case}"
   actual="${out_dir}/actual.png"
-  golden="vnv/int/tests/visual/goldens/${case}.png"
+  # Multi-platform goldens: see vnv/int/tests/visual/goldens/README.md
+  if [[ "$HEADLESS" == "1" || "$HEADLESS" == "true" ]]; then
+    golden="vnv/int/tests/visual/goldens/linux_headless/${case}.png"
+    compare_profile="headless"
+  else
+    golden="vnv/int/tests/visual/goldens/${case}.png"
+    compare_profile="desktop"
+  fi
   diff="${out_dir}/diff.png"
   report="${out_dir}/report.txt"
   path="$(bin_path int_visual)"
   echo ""
-  echo "== VnV [int] int_visual (${case}) headless=${HEADLESS} =="
+  echo "== VnV [int] int_visual (${case}) headless=${HEADLESS} golden=${golden} =="
   if [[ -z "$path" ]]; then
     echo "FAIL: missing int_visual (build with -DBLOCKVIZ_BUILD_VNV_GPU=ON)"
     failures=$((failures + 1))
@@ -179,21 +186,24 @@ if [[ "$RUN_INT" -eq 1 ]]; then
       cp -f "$actual" "$golden"
       echo "PASS: updated golden $golden"
     else
-      # Smoke: require non-trivial PNG when headless (full golden optional)
-      if [[ ! -s "$actual" ]] || [[ "$(wc -c < "$actual")" -lt 256 ]]; then
-        echo "FAIL: actual PNG too small: $actual"
-        failures=$((failures + 1))
-      elif python3 vnv/int/tests/visual/compare_images.py \
-          --expected "$golden" --actual "$actual" \
-          --diff-out "$diff" --report-out "$report" 2>/dev/null; then
-        echo "PASS: int_visual ${case}"
-      else
-        if [[ "$HEADLESS" == "1" || "$HEADLESS" == "true" ]]; then
-          echo "PASS: int_visual capture ok (golden compare skipped/soft under headless)"
+      if [[ ! -f "$golden" ]]; then
+        # No golden yet: smoke gate (dims + min size)
+        if python3 vnv/int/tests/visual/compare_images.py \
+            --actual "$actual" --profile smoke \
+            --report-out "$report"; then
+          echo "PASS: int_visual smoke (no golden at $golden — commit with --update-goldens)"
         else
-          echo "FAIL: int_visual compare (see $report)"
+          echo "FAIL: int_visual smoke (see $report)"
           failures=$((failures + 1))
         fi
+      elif python3 vnv/int/tests/visual/compare_images.py \
+          --expected "$golden" --actual "$actual" \
+          --profile "$compare_profile" \
+          --diff-out "$diff" --report-out "$report"; then
+        echo "PASS: int_visual ${case} (${compare_profile})"
+      else
+        echo "FAIL: int_visual compare (see $report)"
+        failures=$((failures + 1))
       fi
     fi
   fi

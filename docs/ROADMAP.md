@@ -37,6 +37,11 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | **Linux VnV runner** + GitHub Actions mod CI | `scripts/run_vnv.sh` · `.github/workflows/linux-ci.yml` |
 | Graphics visual / bench harnesses (portable host) | `int_visual` · `bench_frame_profiler` |
 | **VnV framework** (mod/int/bench + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `run_vnv.ps1` |
+| **PCH include audit** (`scripts/check_pch.py`) | CI + AGENTS |
+| CRT helpers (`common/time_util.hpp`, `env_util.hpp`) | Portable local_time / env flags |
+| **GPU screenshot primary**; window blit opt-in | `BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1` |
+| **Multi-platform goldens** + headless CI hard gate | `goldens/linux_headless/` · `compare_images.py --profile` |
+| **Dual-track smoke** script | `scripts/smoke_dual_track.sh` |
 
 ---
 
@@ -44,9 +49,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Merge / dual-track smoke** (Windows sln + Linux mod + headless int PNG size) | build · docs | Branch `integration/platform/linux/01` before `main` |
-| 2 | **Golden policy** for multi-platform int (separate goldens or looser CI thresholds) | graphics · vnv | lavapipe ≠ desktop ≠ Windows blit |
-| 3 | **CI headless int hard gate** (drop `continue-on-error` once stable) | ci | Locks present/readback path |
+| 1 | **Merge `integration/platform/linux/01` → main** after Windows smoke checklist | build | Dual-track green |
 
 ---
 
@@ -54,12 +57,9 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 4 | **PCH include audit** in CI/pre-commit (`scripts/check_pch.py`) | build | Prevents MSVC rebuild miss on new platform TUs |
-| 5 | CRT helpers (`local_time`, etc.) under `src/common/` | shared | Kill remaining `localtime_s` / `_WIN32` in shared TUs |
-| 6 | Prefer **GPU screenshot always**; demote GDI+/window blit | graphics | One capture path |
-| 7 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
-| 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
-| 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
+| 2 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
+| 3 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
+| 4 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
 
 ---
 

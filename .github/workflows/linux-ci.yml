@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build-and-mod-vnv:
-    name: Ubuntu build + mod VnV
+    name: Ubuntu build + mod VnV + headless int
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build python3 pkg-config \
+            build-essential cmake ninja-build python3 python3-pil pkg-config \
             libvulkan-dev vulkan-tools glslang-tools glslc mesa-vulkan-drivers \
             libglfw3-dev libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
@@ -56,13 +56,14 @@ jobs:
           ./build/bin/int_visual --list
           ./build/bin/bench_frame_profiler --list
 
-      # Headless present + GPU PNG readback (VK_EXT_headless_surface). Soft until goldens stabilize.
-      - name: Headless int_visual smoke
-        continue-on-error: true
+      # Hard gate: headless present + GPU PNG readback vs linux_headless golden.
+      - name: Headless int_visual (hard gate)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
         run: |
-          mkdir -p vnv/int/tests/visual/out/fake_overview
-          ./build/bin/int_visual --headless --case fake_overview \
-            --out vnv/int/tests/visual/out/fake_overview/actual.png \
-            --warmup-ms 2500
-          test -s vnv/int/tests/visual/out/fake_overview/actual.png
-          test "$(wc -c < vnv/int/tests/visual/out/fake_overview/actual.png)" -gt 256
+          ./scripts/run_vnv.sh --skip-build --int --headless
+
+      - name: Dual-track smoke wrapper
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: ./scripts/smoke_dual_track.sh --skip-build

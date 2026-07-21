@@ -3,6 +3,7 @@
 #include "graphics/platform/gfx_platform.hpp"
 #include "graphics/gpu_prv_lib.h"
 #include "common/time_util.hpp"
+#include "common/env_util.hpp"
 
 #include <cstdio>
 #include <ctime>
@@ -173,19 +174,22 @@ bool GraphicsSystem::consume_and_save_screenshot_()
                         width, height);
             return true;
         }
-        std::printf("[gfx] screenshot: GPU readback failed, trying window blit\n");
+        std::printf("[gfx] screenshot: GPU readback failed\n");
     }
 
 fallback_window:
-    if (gfx_platform_is_headless() || !hwnd)
+    // Window blit is opt-in debug only (GDI+ / stub). Primary path is GPU readback.
+    const bool allow_blit = blockviz::env_flag("BLOCKVIZ_SCREENSHOT_WINDOW_BLIT", false);
+    if (!allow_blit || gfx_platform_is_headless() || !hwnd)
     {
-        std::printf("[gfx] screenshot failed (no GPU capture, headless or no window): %s\n",
+        std::printf("[gfx] screenshot failed: %s (set BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1 for "
+                    "legacy window blit)\n",
                     path.c_str());
         return false;
     }
     const bool ok = gfx_platform_save_window_png(hwnd, path.c_str());
     if (ok)
-        std::printf("[gfx] screenshot saved: %s\n", path.c_str());
+        std::printf("[gfx] screenshot (window blit) saved: %s\n", path.c_str());
     else
         std::printf("[gfx] screenshot failed: %s\n", path.c_str());
     return ok;
