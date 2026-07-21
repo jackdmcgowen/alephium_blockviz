@@ -28,15 +28,13 @@
 #include "imgui_impl_vulkan.h"
 #include "graphics/platform/gfx_platform.hpp"
 
-#include <vulkan/vk_enum_string_helper.h>
-
-
+// Avoid Vulkan SDK-only vk_enum_string_helper.h (not always in distro headers).
 static void check_vk_result(VkResult err)
 {
     if (err == VK_SUCCESS)
         return;
 
-    fprintf(stderr, "[vulkan] Error: VkResult = %s\n", string_VkResult(err) );
+    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", static_cast<int>(err));
     if (err < 0)
         abort();
 

@@ -6,6 +6,9 @@
     "curl",
     "cjson",
     "glm",
-    "zlib"
+    "zlib",
+    "glfw3",
+    "vulkan-headers",
+    "glslang"
   ]
 }

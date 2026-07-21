@@ -27,8 +27,8 @@ Historical design archives (not live backlogs): [modularization](docs/graphics-m
 
 ## Build & run
 
-**Windows (current):** MSVC / `sln/alephium_visualizer.sln`  
-**Linux:** in progress — OS code is isolated under `src/*/platform/` ([docs/platform.md](docs/platform.md)).
+**Windows:** MSVC / `sln/alephium_visualizer.sln`  
+**Linux:** CMake + GLFW — [docs/linux.md](docs/linux.md) · platform TUs: [docs/platform.md](docs/platform.md)
 
 1. Install [Vulkan SDK](https://vulkan.lunarg.com/) and MSVC (VS 2022+).
 2. `git submodule update --init --recursive` (Dear ImGui + vcpkg).

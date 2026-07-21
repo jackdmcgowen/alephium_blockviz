@@ -8,17 +8,17 @@ OS- and WSI-specific code lives in **dedicated translation units** selected at b
 src/app/platform/
   app_platform.hpp           # host window API
   app_platform_win32.cpp     # Win32 message loop, borderless fullscreen
-  app_platform_linux.cpp     # (planned) GLFW host
+  app_platform_linux.cpp     # GLFW host + F11/Esc
 
 src/graphics/platform/
   gfx_platform.hpp           # surface, client size, ImGui platform, screenshot, log
   gfx_platform_win32.cpp
-  gfx_platform_linux.cpp     # (planned)
+  gfx_platform_linux.cpp     # GLFW surface, ImGui_ImplGlfw, stderr log
 
 src/network/platform/
   net_platform.hpp           # cache root dir, process private bytes
   net_platform_win32.cpp
-  net_platform_linux.cpp     # (planned)
+  net_platform_linux.cpp     # XDG cache + /proc/self/status
 ```
 
 ## Build rules
@@ -26,7 +26,9 @@ src/network/platform/
 | System | Selection |
 |--------|-----------|
 | MSVC (`sln/*.vcxproj`) | Compile only `*_win32.cpp` |
-| CMake (planned) | `if(WIN32)` → win32 else → linux |
+| CMake (`CMakeLists.txt`) | `if(WIN32)` → win32 else → linux |
+
+Linux steps: [linux.md](linux.md).
 
 Never link both `*_win32` and `*_linux` into the same target.
 
