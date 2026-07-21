@@ -42,6 +42,8 @@ struct PickerRecordParams
     uint32_t instance_count = 0;
     uint32_t instance_offset = 0;
     uint32_t index_count = 36;
+
+    class FrameProfiler* profiler = nullptr;
 };
 
 class Picker

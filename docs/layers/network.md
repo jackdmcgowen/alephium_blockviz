@@ -47,11 +47,17 @@ BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady
 | **BfsTrace** | Parallel BFS confirm (`N=2G−1` workers): phase A seeds diagonal tips `[g→g]` only; phase B seeds remaining tips only if not already visited. Cross-shard deps. Pool-only expand; live holes hash-fill, history time-slots. Restart when segment fully loads. |
 | **Steady** | Interval polls; BFS maintenance + camera-unlock restart |
 
-Additional policy themes (see header comments on `AlephiumAdapter`): sequential frontier height `H_c`, free-main dep propagation, chain-walk multi-step confirm, live vs historical fetch rules (history may restrict hash fetches).
+Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + forward novelty** for live main, free-main dep fill, live vs historical fetch rules.
 
 **DAG missing fill:** budgeted walk from confirmed tips collects broken edges (parent in graph, dep missing). **≥2** unique missing → inclusive time range `[min_parent_ts, max_parent_ts]` (+ slack, split at max patch) on the priority hole queue. **Exactly 1** missing → sparse **single-hash queue**, drained only after DepCritical ranges are idle (so ranges can resolve clusters first). Exit path: host hides the window (`SW_HIDE`) before engine stop for responsive close.
 
-**Live sequential frontier (H_c):** established only from **network tip heights** (`MainChainCache` / `advance_sequential_tips_`). Disk cache and lagging graph max-height tips are **bag-only** — they must never set green H_c. When net tip is far ahead of a lagging bag, jump frontier to the network tip hash rather than crawling history gaps.
+**Live main-chain policy (simplified):**
+
+1. **Anchor:** refresh network tip heights → tip hash per lane → mark Main and set green `H_c` (`mark_scene_anchor_`). Tip proof: hashes-at-height singleton and/or one `is_main` for the tip only.
+2. **Forward novelty:** any admitted block whose **all known deps are already Main** is marked Main (`try_forward_promote_`) — **no** per-hop `is_main`.
+3. **Green tip steps:** sequential `H_c+1` when that hash is Main; jump only via **network tip** anchor (not lagging bag).
+4. **Spoof / conflict:** `is_main` / replace path only when tip is not main or duplicate competitor; not a safety-critical verifier (explorer remains deep truth).
+5. **Disk bootstrap:** bag-only + `clear_sequential_frontiers`; live anchors re-establish green tips.
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
@@ -61,7 +67,15 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **Terminology:** **G** = number of **groups** (`ALPH_NUM_GROUPS`, 4); shards = G×G lanes; each block has **2G−1** deps. Timeline **lookback k** is tip-relative (`k=0` live tip window, higher = older). Do not confuse k with groups. Window **ms bounds** are genesis-aligned (`G_live − k`); minimap Z uses those bounds so bars match cubes/planes.
 
-**Triple-buffer (sliding view/fetch):** always **`{cam_k, cam_k+1, cam_k+2}`** tip-relative, independent of tip-pipeline readiness. Load **live tip backward** only: Live mode fills k=0 then 1 then 2; History fills around camera. Never crawl from chain genesis as a fetch order. Minimap labels **genesis segment numbers** (`#G_seg`); Live prefix when tip segment is on-track.
+**Three-ring segment model:**
+
+| Ring | Size | Behavior |
+|------|------|----------|
+| **Load** | **15** G-windows, camera-centered | Disk-first (`try_fill` / bootstrap); network body only for holes. Chunked disk admit on boot (no bulk hitch). |
+| **Render** | **7** (app) | Draw corridor only; see app rule book |
+| **Live poll** | **~8s** tip edge | `force_newest` uses last block period when live G has body; full 60s chunks for cold fill |
+
+Fetch priority: live 8s edge → load-ring disk → load-ring network. History dep-hole ranges are **history-only** (not live tip path). Minimap labels genesis segment numbers (`#G_seg`).
 
 **History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
 

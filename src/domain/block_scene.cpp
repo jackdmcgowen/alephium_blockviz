@@ -393,6 +393,14 @@ bool BlockScene::frontier_valid(uint32_t lane) const
     return frontier_valid_[lane];
 }
 
+bool BlockScene::is_confirmed(const NodeId& hash) const
+{
+    if (hash.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    return is_confirmed_unlocked_(hash);
+}
+
 bool BlockScene::is_confirmed_locked(const NodeId& hash) const
 {
     return is_confirmed_unlocked_(hash);

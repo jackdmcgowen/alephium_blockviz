@@ -93,4 +93,43 @@ public:
     virtual void draw() = 0; // ImGui::* calls only; no Vulkan
 };
 
+// ---------------------------------------------------------------------------
+// Frame profiler snapshot (Vulkan-free). Filled when frame profiler is enabled.
+// Consumed by app HUD and vnv/bench — not graphics private headers.
+// ---------------------------------------------------------------------------
+
+enum class FrameBoundClass : uint8_t
+{
+    Unknown = 0,
+    Cpu,
+    Gpu,
+    PresentSync,
+};
+
+inline constexpr uint32_t kMaxFrameTimingScopes = 24;
+inline constexpr uint32_t kFrameTimingNameMax   = 32;
+
+struct FrameTimingScope
+{
+    char  name[kFrameTimingNameMax]{};
+    float cpu_ms = 0.f;         // last sample
+    float gpu_ms = 0.f;         // last sample
+    float cpu_median_ms = 0.f;  // rolling ring
+    float gpu_median_ms = 0.f;
+    float cpu_p95_ms = 0.f;
+    float gpu_p95_ms = 0.f;
+};
+
+struct FrameTimingSnapshot
+{
+    float          frame_ms = 0.f; // host wall for frame
+    float          cpu_ms   = 0.f; // sum of exclusive CPU scopes (last)
+    float          gpu_ms   = 0.f; // max GPU scope (last; multi-queue safe)
+    FrameBoundClass bound    = FrameBoundClass::Unknown;
+    uint32_t       scope_count = 0;
+    FrameTimingScope scopes[kMaxFrameTimingScopes]{};
+    uint64_t       sample_index = 0;
+    bool           valid = false;
+};
+
 // Render lifecycle types used by IGraphicsSystem / IEngine (see engine/engine.hpp).

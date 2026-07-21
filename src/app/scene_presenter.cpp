@@ -25,7 +25,7 @@ constexpr float kLayoutBaseRadius = 20.0f;
 
 // Colors from StyleBlockflow::global() (brand tokens / style_blockflow.json).
 inline const StyleBlockflow& sty() { return StyleBlockflow::global(); }
-inline glm::vec4 kCyanArrowColor() { return sty().frontier_cyan; }
+inline glm::vec4 kUnconfirmedArrowColor() { return sty().unconfirmed_red; }
 inline glm::vec4 kGreenArrowColor() { return sty().tip_green; }
 inline glm::vec4 kDeathArrowColor() { return sty().death_red; }
 inline glm::vec4 kSelectionArrowColor() { return sty().select_gold; }
@@ -42,8 +42,8 @@ glm::vec4 bfs_thread_color(int thread_id)
 {
     const StyleBlockflow& s = sty();
     const glm::vec4 palette[] = {
-        s.frontier_cyan, s.tip_green, s.incomplete_amber, s.select_gold,
-        s.frontier_cyan * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
+        s.unconfirmed_red, s.tip_green, s.incomplete_amber, s.select_gold,
+        s.unconfirmed_red * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
         s.tip_green * 0.7f + glm::vec4(0.15f, 0.12f, 0.1f, 0.f),
         s.incomplete_amber * 0.65f + glm::vec4(0.12f, 0.1f, 0.15f, 0.f),
     };
@@ -267,7 +267,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
     const float now = now_sec_();
     constexpr uint32_t kDepRadial = 8;
     const glm::vec4 kMissingWhite(1.f, 1.f, 1.f, kTipSolidAlpha);
-    const glm::vec4 kCyan = kCyanArrowColor();
+    const glm::vec4 kUnc = kUnconfirmedArrowColor();
 
     struct ActiveEdge
     {
@@ -429,8 +429,8 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             {
                 anim.cyan_to_main_u = 0.f;
                 anim.cyan_to_main_start = now;
-                anim.shaft_rgba = kCyan;
-                anim.tip_rgba = kCyan;
+                anim.shaft_rgba = kUnc;
+                anim.tip_rgba = kUnc;
             }
             else
             {
@@ -504,14 +504,14 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         glm::vec4 tipc;
         if (anim.tier == TipTier::Unconfirmed && e.dep_drawn && !dep_confirmed)
         {
-            shaft = kCyan;
-            tipc = kCyan;
+            shaft = kUnc;
+            tipc = kUnc;
         }
         else
         {
             const float u = anim.cyan_to_main_u;
-            shaft = glm::mix(kCyan, main_shaft, u);
-            tipc = glm::mix(kCyan, main_tip, u);
+            shaft = glm::mix(kUnc, main_shaft, u);
+            tipc = glm::mix(kUnc, main_tip, u);
         }
         float a_scale = 1.f;
         if (anim.tier == TipTier::Secondary)
@@ -907,10 +907,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const float scale = kDefaultBlockScale;
 
     // ------------------------------------------------------------------
-    // Client-side sliding triple-buffer (immediate on camera Z). Does not wait
-    // for network HUD poll cadence. Network still only *fetches* the ring.
+    // Client-side render ring: ALPH_RENDER_RING_SEGMENTS (7) windows centered
+    // on cam_k (±ALPH_RENDER_RING_HALF). At live tip (cam_k=0) clamps to 0..6.
+    // Does not wait for network HUD; fetch/load rings are adapter-owned.
     // ------------------------------------------------------------------
-    constexpr int kRingSize = 3;
+    constexpr int kRingSize = ALPH_RENDER_RING_SEGMENTS;
+    constexpr int kRingHalf = ALPH_RENDER_RING_HALF;
     const float eye_z = scene_.camera_scroll_z();
     const float R_cull = kLayoutBaseRadius * 1.35f;
     float seg_width_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * meters_per_second;
@@ -939,11 +941,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     };
     ClientSeg client_ring[kRingSize]{};
     int n_client = 0;
-    for (int d = 0; d < kRingSize; ++d)
+    // Centered corridor: cam_k - half … cam_k + half (clamp to [0, G_live]).
+    for (int d = -kRingHalf; d <= kRingHalf; ++d)
     {
         const int k = cam_k + d;
-        if (k > G_live)
-            break;
+        if (k < 0 || k > G_live)
+            continue;
         const int G = std::max(0, G_live - k);
         int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
         int64_t to_ms = from_ms + window_ms;
@@ -1005,14 +1008,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         int64_t to_ms = 0;
         int     k = -1;
     };
-    TimeWin merged[8]{};
+    TimeWin merged[16]{};
     int n_merged = 0;
     auto add_win = [&](int64_t from_ms, int64_t to_ms, int k) {
         if (from_ms <= 0 && to_ms <= 0)
             return;
         if (to_ms <= from_ms)
             return;
-        if (n_merged >= 8)
+        if (n_merged >= 16)
             return;
         merged[n_merged].from_ms = from_ms;
         merged[n_merged].to_ms = to_ms;
@@ -1722,14 +1725,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
         }
 
-        // Barrier planes from client ring (immediate on cam_k change) + fade alpha.
-        if (n_client > 0)
+        // Barrier planes on closed segment boundaries out to the LOAD ring (15),
+        // both directions. Cubes/arrows/Sobel stay on the RENDER ring (7) only.
+        // Never for open live interior (k=0 / G=G_live tip edge).
         {
+            constexpr int kPlaneHalf = ALPH_LOAD_RING_SEGMENTS / 2; // 7 → span 15
             const float plane_half = kLayoutBaseRadius * 8.f;
             const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
             float bold_z = 0.f;
             bool have_bold = false;
-            // Bold the completed-segment boundary under the eye (skip open live k=0).
+            // Bold the closed segment under the eye (render-ring membership).
             for (int i = 0; i < n_client; ++i)
             {
                 if (client_ring[i].k <= 0)
@@ -1742,29 +1747,25 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     break;
                 }
             }
-            // Barrier planes mark completed segment boundaries only.
-            // Never draw a plane for the open live segment (k=0 / G=G_live).
-            for (const auto& kv : seg_fade_alpha_)
+            for (int d = -kPlaneHalf; d <= kPlaneHalf; ++d)
             {
-                if (kv.second < 0.02f)
-                    continue;
-                const int k = kv.first;
+                const int k = cam_k + d;
                 if (k <= 0 || k > G_live)
-                    continue; // k==0 = open live — no plane until it rolls to history
+                    continue; // no open-live plane
                 const int G = std::max(0, G_live - k);
                 if (G >= G_live)
                     continue;
                 const int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
-                const float past_z =
+                const float z_edge =
                     ts_to_z(from_ms, timeline_origin_ms, meters_per_second);
-                // from is older edge for window (higher Z when genesis < now).
-                const float z_edge = past_z;
-                // Skip if plane sits on top of the eye (attached live tip).
                 if (std::abs(z_edge - eye_z) < std::max(2.f, seg_width_z * 0.05f))
                     continue;
                 const bool bold = have_bold && std::abs(z_edge - bold_z) < 0.25f;
+                // Steady α for load-only planes; render-ring planes can use cube fade.
+                const float in_render = fade_for_k(k);
+                const float fa = (in_render > 0.02f) ? in_render : 0.07f;
                 glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
-                col.a *= kv.second;
+                col.a *= fa;
                 debug->add_z_plane_quad(z_edge, plane_half, col);
             }
         }

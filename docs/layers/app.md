@@ -47,12 +47,12 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | **Solid α** | Confirmed bag with all deps live |
 | **Green Sobel** | Per-lane frontier tip `H_c` (or walk-anim display) |
 | **Tip dep arrows** | See **Rule book** below |
-| **Cyan Sobel** | Unconfirmed roles (outline) |
-| **Orange** | Missing-dep incompletes (not green/cyan) |
+| **Red Sobel** | Unconfirmed roles (outline) — high contrast vs green main |
+| **Orange** | Missing-dep incompletes (not green/unconfirmed red) |
 | **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
-| **Red** | Removal death fade |
+| **Red (fade)** | Removal death α → 0 (same family as unconfirmed) |
 
-Presentation only — confirmation marks come from **network** into `BlockScene`.
+Presentation only — confirmation marks come from **network** into `BlockScene` (anchor tips + forward novelty: all-deps-Main ⇒ Main).
 
 ### Rule book — tip arrows & live segment planes
 
@@ -69,17 +69,26 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 | State | Length | Color |
 |-------|--------|--------|
 | Primary | Full immediately (no grow) | Linear dual RGBA along axis: base=listing block, head=dep block (white if missing) |
-| Unconfirmed → unconfirmed | Full immediately | **Cyan both ends** |
-| Unconfirmed → confirmed | Full immediately | Cyan → main dual (color lerp) |
+| Unconfirmed → unconfirmed | Full immediately | **Red both ends** |
+| Unconfirmed → confirmed | Full immediately | Red → main dual (color lerp) |
 | Secondary | Full immediately | Main dual; α solid → translucent floor (&gt; 0) |
 | Replaced | Full | Fade α → 0 then erase |
 | Listing removed | Full | Red death α → 0 |
 | Selection / hover | May grow | Gold; **only** these re-grow on select/Replay/hover |
 
+**Segment rings (three-ring model)**
+
+| Ring | Size | Role |
+|------|------|------|
+| **Render** | **7** G-windows, camera-centered (`cam_k±3`, clamped) | Cubes, tip arrows, Sobel, selection — **all non-plane draw** |
+| **Load** | **15** G-windows, camera-centered (`cam_k±7`) | Disk-first body (adapter) + **barrier planes only** (presenter) |
+| **Live poll** | last **~8s** of open G | Tip growth (not a separate G length) |
+
 **Live segment barrier planes**
 
-- **Do not** draw a plane for the open live segment (`k=0` / `G=G_live`).
-- **Do** draw planes for completed historical segments in the ring (`k≥1`).
+- **Do not** draw a plane for the open live segment interior (`k=0` / `G=G_live`).
+- **Do** draw planes for completed boundaries (`k≥1`) **out to the load ring** (both directions).
+- **No** cubes / arrows / outlines outside the **render** ring.
 - When live G rolls, the previous live G becomes historical and then gets a plane.
 
 **Frustum**

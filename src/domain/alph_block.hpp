@@ -14,6 +14,15 @@
 // Initial poll / camera Z lookback (seconds).
 #define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * 60 )
 
+// Three-ring segment management (genesis-aligned G windows of LOOKBACK seconds):
+//   Load  : disk-first body around camera / live
+//   Live  : poll surface = last TARGET_BLOCK seconds (not a separate G length)
+//   Render: centered corridor for draw / planes
+#define ALPH_LOAD_RING_SEGMENTS   ( 15 )
+#define ALPH_RENDER_RING_HALF     ( 3 )
+#define ALPH_RENDER_RING_SEGMENTS ( (2 * ALPH_RENDER_RING_HALF) + 1 ) /* 7 */
+#define ALPH_LIVE_POLL_EDGE_MS    ( static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 )
+
 // Fallback genesis / chain-start if height-0 block fetch fails.
 // Docs: genesis block ts themed 2009-01-03; mainnet launch 2021-11-08.
 // Prefer API-resolved timestamp from height 0 when available.

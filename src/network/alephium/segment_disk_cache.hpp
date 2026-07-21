@@ -23,7 +23,7 @@ class SegmentDiskCache
 public:
     static constexpr int      kSchemaVersion  = 3; // G_dir + multi-chunk entries
     static constexpr int      kMaxSegments    = 48;
-    static constexpr int      kStartupLoadMax = 12;
+    static constexpr int      kStartupLoadMax = ALPH_LOAD_RING_SEGMENTS; // 15
     static constexpr int64_t  kChunkMs        = 60 * 1000;
     static constexpr uint64_t kMaxDiskBytes   = 512ull * 1024 * 1024;
 

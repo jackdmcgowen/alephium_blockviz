@@ -145,6 +145,8 @@ public:
         return timeline_origin_ms_.load(std::memory_order_relaxed);
     }
 
+    // Self-locking bag membership (Main / confirmed).
+    bool is_confirmed(const NodeId& hash) const;
     bool is_confirmed_locked(const NodeId& hash) const;
     std::vector<NodeId> confirmed_frontier_ids_locked() const;
     std::vector<NodeId> pending_tip_ids_locked() const;

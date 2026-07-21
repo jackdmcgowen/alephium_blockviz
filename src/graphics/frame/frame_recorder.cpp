@@ -2,6 +2,7 @@
 #include "graphics/frame/frame_recorder.hpp"
 
 #include "graphics/debug/debug_drawer.h"
+#include "graphics/frame/profiling/frame_profiler.hpp"
 #include "graphics/gpu_prv_lib.h"
 #include "graphics/mesh_arena.h"
 
@@ -19,6 +20,9 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vkBeginCommandBuffer(p.cmd, &beginInfo) != VK_SUCCESS)
         throw std::runtime_error("Failed to begin recording command buffer");
+
+    if (p.profiler)
+        p.profiler->ensure_pool_reset(p.cmd);
 
     const bool msaa = p.samples > VK_SAMPLE_COUNT_1_BIT && p.resolve_color_view != VK_NULL_HANDLE;
 
@@ -80,44 +84,88 @@ void FrameRecorder::record_main(const FrameRecordParams& p)
             { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 });
     }
 
-    // --- Pass A: scene (cubes + debug) into MSAA or 1Ã— color ---
-    vkCmdBeginRendering(p.cmd, &renderInfo);
-    vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_pipeline);
-    vkCmdSetPrimitiveTopology(p.cmd, p.topology);
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(p.width);
-    viewport.height = static_cast<float>(p.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(p.cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = p.scissor_extent;
-    vkCmdSetScissor(p.cmd, 0, 1, &scissor);
-
-    VkBuffer buffers[] = { p.vertex_buffer, p.instance_buffer };
-    VkDeviceSize offsets[] = { 0, 0 };
-    vkCmdBindVertexBuffers(p.cmd, 0, 2, buffers, offsets);
-    VkDescriptorSet set = p.descriptor_set;
-    vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_layout, 0, 1, &set, 0, nullptr);
-    vkCmdBindIndexBuffer(p.cmd, p.index_buffer, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(p.cmd, p.index_count, p.instance_count, 0, 0, 0);
-
-    if (p.mesh_arena && p.debug_drawer && p.view_proj)
+    // --- Pass A: scene (cubes + debug) into MSAA or 1× color ---
     {
-        p.mesh_arena->upload(*p.debug_drawer);
-        p.mesh_arena->draw(p.cmd, *p.view_proj);
+        FrameProfiler::GpuScope main_gpu(
+            p.profiler, p.cmd, "MainColorDepth",
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
+
+        vkCmdBeginRendering(p.cmd, &renderInfo);
+        vkCmdBindPipeline(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_pipeline);
+        vkCmdSetPrimitiveTopology(p.cmd, p.topology);
+
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(p.width);
+        viewport.height = static_cast<float>(p.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(p.cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = { 0, 0 };
+        scissor.extent = p.scissor_extent;
+        vkCmdSetScissor(p.cmd, 0, 1, &scissor);
+
+        {
+            FrameProfiler::GpuScope cubes_gpu(
+                p.profiler, p.cmd, "Cubes",
+                VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+            VkBuffer buffers[] = { p.vertex_buffer, p.instance_buffer };
+            VkDeviceSize offsets[] = { 0, 0 };
+            vkCmdBindVertexBuffers(p.cmd, 0, 2, buffers, offsets);
+            VkDescriptorSet set = p.descriptor_set;
+            vkCmdBindDescriptorSets(p.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.cube_layout, 0, 1, &set, 0, nullptr);
+            vkCmdBindIndexBuffer(p.cmd, p.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdDrawIndexed(p.cmd, p.index_count, p.instance_count, 0, 0, 0);
+        }
+
+        if (p.mesh_arena && p.debug_drawer && p.view_proj)
+        {
+            if (p.profiler)
+            {
+                auto cpu = p.profiler->cpu_scope("MeshArenaUpload");
+                p.mesh_arena->upload(*p.debug_drawer);
+            }
+            else
+            {
+                p.mesh_arena->upload(*p.debug_drawer);
+            }
+            FrameProfiler::GpuScope dbg_gpu(
+                p.profiler, p.cmd, "DebugMesh",
+                VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            p.mesh_arena->draw(p.cmd, *p.view_proj);
+        }
+
+        vkCmdEndRendering(p.cmd);
     }
 
-    vkCmdEndRendering(p.cmd);
-
-    // --- Pass B: ImGui on resolved 1Ã— swapchain color (after MSAA resolve) ---
+    // --- Pass B: ImGui on resolved 1× swapchain color (after MSAA resolve) ---
     if (p.imgui_draw_data)
     {
+        FrameProfiler::GpuScope imgui_gpu(
+            p.profiler, p.cmd, "ImGui",
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(p.width);
+        viewport.height = static_cast<float>(p.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+
+        VkRect2D scissor{};
+        scissor.offset = { 0, 0 };
+        scissor.extent = p.scissor_extent;
+
         VkImageView ui_view = msaa ? p.resolve_color_view : p.color_view;
         VkRenderingAttachmentInfo uiColor{};
         uiColor.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

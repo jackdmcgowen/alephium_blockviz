@@ -70,7 +70,7 @@ This is a **bootstrap** layer, not a full archive and not a substitute for main-
 |-----|----------------|
 | Max verified segments | 32–64 (LRU by recency toward live) |
 | Max disk | e.g. 512 MB–1 GB hard stop |
-| Startup load | Most recent N verified segments only (e.g. 8–16) for fast paint |
+| Startup load | Most recent **15** verified segments (`ALPH_LOAD_RING_SEGMENTS`); **chunked admit** to avoid frame hitch |
 | Write | Async I/O on network/poll side — **never** render thread |
 
 ## Write path (when to cache)

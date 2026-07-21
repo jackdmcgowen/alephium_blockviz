@@ -6,7 +6,7 @@ Automated checks for **alephium_blockviz**, separate from the product app soluti
 |----------|------|------|---------|
 | **mod** | `vnv/mod/tests/<area>/<test_id>/` | No | Module logic (one subfolder per test; optional `expected/`) |
 | **int** | `vnv/int/tests/` | Yes | Integration (engine + systems, visual goldens) |
-| **bench** | `vnv/bench/tests/` | Later | Performance baselines (not implemented yet) |
+| **bench** | `vnv/bench/tests/` | Yes | Performance baselines via frame profiler (`-Bench`, opt-in) |
 
 ## Solutions
 
@@ -54,6 +54,11 @@ Manifests under `vnv/manifest/` are the source of truth:
 
 .\scripts\run_vnv.ps1 -Int
 .\scripts\run_vnv.ps1 -Int -UpdateGoldens
+
+# Performance (opt-in; not in -All)
+.\scripts\run_vnv.ps1 -Bench
+.\scripts\run_vnv.ps1 -Bench -UpdateBaselines
+.\scripts\run_vnv.ps1 -Bench -Configuration Release
 ```
 
 Working directory must be **repo root**.
@@ -62,6 +67,6 @@ Working directory must be **repo root**.
 
 See `vnv/int/tests/visual/README.md`.
 
-## Bench (later)
+## Bench (frame profiler)
 
-See `vnv/bench/README.md` — standards only; no harness in V0.
+See `vnv/bench/README.md` — FakeChain + `FrameTimingSnapshot` median/p95 baselines.

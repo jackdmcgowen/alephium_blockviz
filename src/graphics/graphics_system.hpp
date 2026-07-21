@@ -41,6 +41,7 @@
 #include "graphics/frame/sobel_types.hpp"
 #include "graphics/frame/swapchain_targets.hpp"
 #include "graphics/frame/vertex_types.hpp"
+#include "graphics/frame/profiling/frame_profiler.hpp"
 #include "graphics/buffer_manager.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
@@ -95,9 +96,16 @@ public:
     void init_platform(void* hInstance, void* hwnd) override;
     void on_resize() override;
 
+    void enable_frame_profiler(bool enabled) override;
+    bool frame_profiler_enabled() const override;
+    void copy_frame_timing_snapshot(FrameTimingSnapshot& out) const override;
+
     // Kill-switch for role outlines (tips/cyan/orange). Selection gold still emitted by app.
     void set_visualize_confirmed_tips(bool enabled) { visualize_confirmed_tips_ = enabled; }
     bool visualize_confirmed_tips() const { return visualize_confirmed_tips_; }
+
+    // Render-thread access for record/Sobel instrumentation.
+    FrameProfiler* frame_profiler() { return &frame_profiler_; }
 
 private:
     void resize_internal();
@@ -217,6 +225,9 @@ private:
 
     // Kill-switch: gates role outlines via FrameSourceInput; selection gold always works.
     bool visualize_confirmed_tips_ = true;
+
+    FrameProfiler frame_profiler_;
+    bool          profiler_hud_ = false; // F3 toggles HUD; enabling profiler shows data
 
     mutable std::mutex ui_snap_mutex_;
     UiSnapshot ui_snap_;

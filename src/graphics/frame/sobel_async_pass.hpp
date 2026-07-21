@@ -13,6 +13,7 @@
 class FramePresenter;
 class FrameRecorder;
 class FrameSync;
+class FrameProfiler;
 
 struct SobelAsyncSubmitContext
 {
@@ -43,6 +44,7 @@ struct SobelAsyncSubmitContext
     FrameRecorder*  recorder  = nullptr;
     FrameSync*      frame_sync = nullptr;
     FramePresenter* presenter = nullptr;
+    FrameProfiler*  profiler  = nullptr;
 };
 
 class SobelAsyncPass

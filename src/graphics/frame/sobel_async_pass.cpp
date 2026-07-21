@@ -3,6 +3,7 @@
 #include "graphics/frame/frame_presenter.hpp"
 #include "graphics/frame/frame_recorder.hpp"
 #include "graphics/frame/frame_sync.hpp"
+#include "graphics/frame/profiling/frame_profiler.hpp"
 
 #include <stdexcept>
 
@@ -66,19 +67,27 @@ void SobelAsyncPass::submit(SobelPipeline& pipe,
     const VkSemaphore cfin = pipe.compute_finished(frame_index);
 
     // Single outline pass: all cubes, one clear, colors from compact instance buffer.
-    OutlinePassDrawParams sp{};
-    sp.cmd = graphics_cb;
-    sp.ubo_set = ctx.frame_ubo_set;
-    sp.vertex_buffer = ctx.vertex_buffer;
-    sp.outline_instance_buffer = ctx.outline_instance_buffer;
-    sp.index_buffer = ctx.index_buffer;
-    sp.outline_count = ctx.outline_count;
-    sp.index_count = ctx.index_count;
-    sp.width = ctx.width;
-    sp.height = ctx.height;
-    pipe.record_outline_pass(sp);
-    pipe.record_sel_depth_release_for_compute(graphics_cb);
-    pipe.record_outline_color_to_shader_read(graphics_cb);
+    {
+        FrameProfiler::GpuScope sel_gpu(
+            ctx.profiler, graphics_cb, "SelectionDepth",
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
+
+        OutlinePassDrawParams sp{};
+        sp.cmd = graphics_cb;
+        sp.ubo_set = ctx.frame_ubo_set;
+        sp.vertex_buffer = ctx.vertex_buffer;
+        sp.outline_instance_buffer = ctx.outline_instance_buffer;
+        sp.index_buffer = ctx.index_buffer;
+        sp.outline_count = ctx.outline_count;
+        sp.index_count = ctx.index_count;
+        sp.width = ctx.width;
+        sp.height = ctx.height;
+        pipe.record_outline_pass(sp);
+        pipe.record_sel_depth_release_for_compute(graphics_cb);
+        pipe.record_outline_color_to_shader_read(graphics_cb);
+    }
     ctx.recorder->end(graphics_cb);
 
     // Submit graphics (scene + pick + outline) → signal g2c.
@@ -108,7 +117,13 @@ void SobelAsyncPass::submit(SobelPipeline& pipe,
         VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(compute_cb, &bi);
-        pipe.record_dispatch(compute_cb, /*strength=*/14.0f, /*threshold=*/0.001f);
+        {
+            FrameProfiler::GpuScope cmp_gpu(
+                ctx.profiler, compute_cb, "SobelAsyncCMP",
+                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            pipe.record_dispatch(compute_cb, /*strength=*/14.0f, /*threshold=*/0.001f);
+        }
         vkEndCommandBuffer(compute_cb);
 
         VkCommandBufferSubmitInfo cb{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
@@ -136,25 +151,32 @@ void SobelAsyncPass::submit(SobelPipeline& pipe,
         VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(overlay_cb, &bi);
-        pipe.record_edge_acquire_for_graphics(overlay_cb);
+        {
+            FrameProfiler::GpuScope ovl_gpu(
+                ctx.profiler, overlay_cb, "EdgeOverlay",
+                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 
-        VkRenderingAttachmentInfo color{};
-        color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        color.imageView = ctx.swapchain_color_view;
-        color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            pipe.record_edge_acquire_for_graphics(overlay_cb);
 
-        VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea = { { 0, 0 }, { ctx.width, ctx.height } };
-        ri.layerCount = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments = &color;
-        vkCmdBeginRendering(overlay_cb, &ri);
-        pipe.record_overlay(overlay_cb, ctx.width, ctx.height, /*intensity=*/1.0f);
-        vkCmdEndRendering(overlay_cb);
+            VkRenderingAttachmentInfo color{};
+            color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            color.imageView = ctx.swapchain_color_view;
+            color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-        ctx.recorder->transition_color_to_present(overlay_cb, ctx.swapchain_image);
+            VkRenderingInfo ri{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea = { { 0, 0 }, { ctx.width, ctx.height } };
+            ri.layerCount = 1;
+            ri.colorAttachmentCount = 1;
+            ri.pColorAttachments = &color;
+            vkCmdBeginRendering(overlay_cb, &ri);
+            pipe.record_overlay(overlay_cb, ctx.width, ctx.height, /*intensity=*/1.0f);
+            vkCmdEndRendering(overlay_cb);
+
+            ctx.recorder->transition_color_to_present(overlay_cb, ctx.swapchain_image);
+        }
         vkEndCommandBuffer(overlay_cb);
 
         const uint64_t signal_value = ctx.presenter->frame_counter() + 1;

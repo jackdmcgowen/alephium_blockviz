@@ -94,6 +94,12 @@ public:
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;
+
+    // Frame pass profiler (CPU scopes + GPU timestamps). Default off.
+    virtual void enable_frame_profiler(bool enabled) = 0;
+    virtual bool frame_profiler_enabled() const = 0;
+    // Copy latest rolling snapshot (valid=false until first profiled frame).
+    virtual void copy_frame_timing_snapshot(FrameTimingSnapshot& out) const = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -145,6 +151,11 @@ public:
 
     virtual void init_platform(void* hInstance, void* hwnd) = 0;
     virtual void on_resize() = 0;
+
+    // Frame pass profiler (CPU scopes + GPU timestamps). Default off.
+    virtual void enable_frame_profiler(bool enabled) = 0;
+    virtual bool frame_profiler_enabled() const = 0;
+    virtual void copy_frame_timing_snapshot(FrameTimingSnapshot& out) const = 0;
 
     // Convenience: find NetworkSystem and switch domain (no-op if missing).
     virtual bool switch_network_domain(int domain, const std::string& base_url) = 0;

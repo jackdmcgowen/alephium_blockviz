@@ -1,16 +1,42 @@
-# VnV · bench (deferred)
+# VnV · bench
 
-Performance regression category — **not implemented in V0**.
+Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timestamps).
 
-## Future standards
+## Commands
+
+```powershell
+# Opt-in (not part of -All / free CI by default)
+.\scripts\run_vnv.ps1 -Bench
+.\scripts\run_vnv.ps1 -Bench -Configuration Release
+.\scripts\run_vnv.ps1 -Bench -UpdateBaselines
+```
+
+## Standards
 
 | Topic | Standard |
 |-------|----------|
-| Metrics | Median + p95 frame time (ms); optional FakeChain CPU step; build times via `scripts/bench_build.ps1` |
-| Config | Release\|x64 preferred; validation **off** for render benches |
+| Metrics | Median + p95 of `frame_ms`, `cpu_ms`, `gpu_ms`, and named scopes |
+| Source | `IEngine::copy_frame_timing_snapshot` after `enable_frame_profiler(true)` |
+| Config | Release\|x64 preferred for baselines; validation **off** in harness |
 | Baseline | `vnv/bench/baselines/<id>.json` |
-| Pass rule | `median <= baseline * (1 + tol)` with tol **10–15%** |
-| Update | `run_vnv.ps1 -Bench -UpdateBaselines` on golden machine |
-| Non-goals | Cross-machine absolute ms; free CI GPU |
+| Pass rule | `median <= baseline * (1 + tol)` with tol **15%** (tracked metrics) |
+| Update | `run_vnv.ps1 -Bench -UpdateBaselines` on a golden machine |
+| Non-goals | Cross-machine absolute ms in free CI; replace `scripts/bench_build.ps1` |
 
-When implemented, place harness sources under `vnv/bench/tests/` and register in `vnv/manifest/vnv_projects.json` with `"category": "bench"`.
+## Layout
+
+| Path | Role |
+|------|------|
+| `baselines/<case>.json` | Committed median/p95 budget |
+| `tests/graphics_bench_tests.cpp` | Harness → `bench_frame_profiler.exe` |
+| `tests/out/<case>/actual.json` | Last run (gitignored) |
+
+## Case: `fake_steady_frame`
+
+- 1280×720 FakeChain, fixed camera, profiler on  
+- Warmup ~2s, then ~120 distinct snapshot samples  
+- Tracks frame/cpu/gpu + pass scopes (`Prepare`, `MainColorDepth`, …)
+
+## Compare
+
+`run_vnv.ps1 -Bench` compares actual JSON to baseline. Missing baseline → fail with hint to `-UpdateBaselines`.

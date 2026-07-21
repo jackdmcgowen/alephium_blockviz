@@ -122,6 +122,9 @@ private:
     void refresh_lookback_floors_();
     // Disk cache: whole G_seg units replace network interval fills.
     void bootstrap_disk_cache_();
+    // Admit pending disk bootstrap blocks (budgeted) — avoids startup hitch.
+    int  pump_bootstrap_admit_(int max_blocks);
+    bool bootstrap_admit_pending_() const;
     void maybe_persist_verified_segments_(bool force = false);
     bool try_fill_window_from_disk_(int lookback_k);
     // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
@@ -256,6 +259,13 @@ private:
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
+    // Anchor green H_c to network tip (chain_walk jump allowed).
+    void mark_scene_anchor_(const std::string& hash, int from, int to, int height);
+    // Forward novelty: if ALL known deps are Main, mark B Main (no is_main).
+    // Returns true if hash is Main after call (already was, or newly promoted).
+    bool try_forward_promote_(const std::string& hash);
+    // After promote/admit: re-try pending tips + confirm-fill parents.
+    void after_main_or_admit_(const std::string& hash);
     // Mark in-pool deps of a confirmed block as main (no is_main API).
     void propagate_main_from_confirmed_deps_(const std::string& confirmed_hash);
     // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
@@ -336,8 +346,8 @@ private:
         bool    want_newest_refresh = false;
     };
     std::vector<LookbackWindowSlot> lookback_windows_;
-    // Active fetch ring (absolute indices); size ≤ kSegmentRingSize.
-    int active_ring_[3]{};
+    // Active load/fetch ring (lookback k); size ≤ kSegmentRingSize (load ring).
+    int active_ring_[ALPH_LOAD_RING_SEGMENTS]{};
     int active_ring_n_ = 0;
     int64_t genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     bool    genesis_resolved_ = false;
@@ -366,6 +376,12 @@ private:
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;
     int  disk_cache_bootstrap_blocks_ = 0;
+    // Chunked admit after load_recent (avoids multi-second hitch).
+    std::vector<SegmentDiskCache::CachedBlock> bootstrap_pending_;
+    size_t bootstrap_admit_i_ = 0;
+    std::vector<int> bootstrap_segment_ids_;
+    int bootstrap_g_live_ = -1;
+    bool bootstrap_windows_marked_ = false;
     std::unordered_set<int> disk_segment_admitted_; // G complete on disk / admitted
     std::unordered_map<int, int> disk_cache_saved_count_; // G → last saved block count
     int64_t disk_cache_last_live_save_ms_ = 0;
@@ -407,8 +423,8 @@ private:
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     static constexpr int kMaxChunksPerPoll = 4;
     static constexpr int kMaxChunksPerDrain = 2;
-    // Triple-buffer ring: at most 3 active lookback windows for fetch/HUD/draw.
-    static constexpr int kSegmentRingSize = 3;
+    // Load ring: disk-first body (15 G). Render ring is app-side (7 centered).
+    static constexpr int kSegmentRingSize = ALPH_LOAD_RING_SEGMENTS;
     static constexpr int kInitialSegmentCount = 2; // bootstrap windows 0 and 1
     static constexpr int kBootstrapChunksPerPoll = 16;
     static constexpr int kBootstrapChunksPerDrain = 4;
@@ -416,5 +432,7 @@ private:
     static constexpr int kChunkMaxRetries = 3;
     // Past this fraction of current segment toward older → bump effective k.
     static constexpr float kPrefetchHysteresis = 0.40f;
-    static constexpr int kAheadChunksPerDrain = 4; // prioritize filling k+1,k+2
+    static constexpr int kAheadChunksPerDrain = 4;
+    // Disk bootstrap admit budget per drain_verify tick.
+    static constexpr int kBootstrapAdmitPerDrain = 2500;
 };

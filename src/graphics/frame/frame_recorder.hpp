@@ -9,6 +9,7 @@
 
 class DebugDrawer;
 class MeshArena;
+class FrameProfiler;
 struct ImDrawData;
 
 struct FrameRecordParams
@@ -52,6 +53,9 @@ struct FrameRecordParams
 
     // When false, color stays COLOR_ATTACHMENT_OPTIMAL for post (async Sobel overlay).
     bool transition_color_to_present = true;
+
+    // Optional frame profiler (GPU timestamps + MeshArenaUpload CPU).
+    FrameProfiler* profiler = nullptr;
 };
 
 class FrameRecorder

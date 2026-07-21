@@ -6,8 +6,8 @@
 // Production BlockFlow visual model (spacing/layout unchanged — keep):
 //   solid α  — confirmed bag with all deps live
 //   green    — per-lane frontier tip H_c (or walk-anim display) + full blockDeps arrows
-//   cyan     — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip
-//   orange   — missing-dep incompletes (not green/cyan)
+//   red      — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip
+//   orange   — missing-dep incompletes (not green/red unconfirmed)
 //   gold     — selection + full BFS block-dep fan from selected root
 //   red      — removal death fade
 //   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
@@ -40,7 +40,7 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
-    static constexpr float  kCyanToMainSec  = 0.40f;
+    static constexpr float  kCyanToMainSec  = 0.40f; // unconfirmed red → main dual lerp
     static constexpr float  kSecondaryAlphaSec = 0.50f;
     static constexpr float  kTipReplaceFadeSec = 0.32f;
     static constexpr float  kTipSolidAlpha = 0.90f;

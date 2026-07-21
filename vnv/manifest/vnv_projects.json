@@ -34,6 +34,19 @@
       "run_by_default": true,
       "kind": "visual_golden",
       "case": "fake_overview"
+    },
+    {
+      "id": "bench_frame_profiler",
+      "category": "bench",
+      "vcxproj": "sln/bench_frame_profiler.vcxproj",
+      "guid": "{E7F8A9B0-C1D2-4E3F-A4B5-C6D7E8F90123}",
+      "exe_name": "bench_frame_profiler.exe",
+      "out_dir_key": "bench_frame_profiler",
+      "depends_on_libraries": ["blockviz_engine", "graphics", "network"],
+      "sources_under": "vnv/bench/tests/",
+      "run_by_default": false,
+      "kind": "perf_baseline",
+      "case": "fake_steady_frame"
     }
   ]
 }

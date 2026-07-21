@@ -1,5 +1,6 @@
 ﻿#include "graphics/pch.h"
 #include "graphics/frame/picker.hpp"
+#include "graphics/frame/profiling/frame_profiler.hpp"
 
 #include "graphics/gpu_prv_lib.h"
 
@@ -104,6 +105,12 @@ void Picker::record_pass(const PickerRecordParams& p)
 {
     if (!p.cmd || image_ == VK_NULL_HANDLE || image_view_ == VK_NULL_HANDLE)
         throw std::runtime_error("Picker::record_pass: not ready");
+
+    FrameProfiler::GpuScope picker_gpu(
+        p.profiler, p.cmd, "Picker",
+        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
     if (p.image_layout_undefined)
     {

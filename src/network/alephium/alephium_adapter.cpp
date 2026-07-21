@@ -309,9 +309,28 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash)
     }
     scene_.mark_confirmed(hash);
     ++stats_confirmed_marks_;
+    main_chain_cache_.mark_main(hash);
     const int nfill = enqueue_confirm_deps_(hash);
     if (nfill == 0)
         propagate_main_from_confirmed_deps_(hash);
+    after_main_or_admit_(hash);
+}
+
+void AlephiumAdapter::mark_scene_anchor_(const std::string& hash, int from, int to, int height)
+{
+    // Network tip anchor: always allowed to set/jump green H_c.
+    if (hash.empty())
+        return;
+    const uint32_t lane = lane_of(from, to);
+    main_chain_cache_.mark_main(hash);
+    scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/true);
+    ++stats_confirmed_marks_;
+    scene_.set_pending_tip(lane, hash);
+    const int n = enqueue_confirm_deps_(hash);
+    if (n == 0)
+        propagate_main_from_confirmed_deps_(hash);
+    after_main_or_admit_(hash);
+    adapter_vlog("[adapter] anchor tip lane=%u h=%d %s\n", lane, height, hash.c_str());
 }
 
 void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, int to, int height)
@@ -322,67 +341,129 @@ void AlephiumAdapter::mark_scene_confirmed_(const std::string& hash, int from, i
     const int hc = scene_.confirmed_height(lane);
     const int net = main_chain_cache_.tip(from, to);
 
-    // Live frontier H_c is established only from network tip heights (or H_c+1 walk
-    // once already at/near net). Lagging graph/DB tips must not set green H_c.
-    if (net >= 0 && height < net)
+    // Policy (simplified):
+    // - Network tip (height >= net) → anchor / jump frontier
+    // - height == H_c+1 → sequential step
+    // - height <= H_c with frontier → bag only (or same-height tip update)
+    // - height > H_c+1 not at tip → bag only (forward novelty fills gaps; no green leap)
+    // - First frontier only from tip anchor or when net unknown
+
+    main_chain_cache_.mark_main(hash);
+
+    if (net >= 0 && height >= net)
     {
-        const bool can_step =
-            scene_.frontier_valid(lane) && height == hc + 1 && hc >= 0;
-        if (!can_step)
+        mark_scene_anchor_(hash, from, to, height);
+        return;
+    }
+
+    if (!scene_.frontier_valid(lane))
+    {
+        // No green tip yet: bag only unless net tip height unknown (allow set).
+        if (net >= 0)
         {
             scene_.mark_confirmed_bag_only(hash);
             ++stats_confirmed_marks_;
-            const int n = enqueue_confirm_deps_(hash);
-            if (n == 0)
-                propagate_main_from_confirmed_deps_(hash);
-            return;
         }
-        // height == H_c+1 with frontier already set: allow sequential step (may still
-        // lag net until jump).
-    }
-
-    if (scene_.frontier_valid(lane) && height > hc + 1)
-    {
-        if (try_chain_walk_confirm_(hash, lane, height))
-            return;
-        // Prefer jumping sequential frontier to network tip when far ahead of H_c.
-        const bool at_live_tip = (net >= 0 && height >= net);
-        if (at_live_tip)
+        else
         {
-            scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/true);
+            scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/false);
             ++stats_confirmed_marks_;
-            const int n = enqueue_confirm_deps_(hash);
-            if (n == 0)
-                propagate_main_from_confirmed_deps_(hash);
-            adapter_vlog("[adapter] frontier jump to live tip lane=%u h=%d (was H_c=%d)\n",
-                         lane, height, hc);
-            return;
         }
-        // No clean path and not network tip: bag-only confirm (no frontier jump).
-        scene_.mark_confirmed_bag_only(hash);
-        ++stats_confirmed_marks_;
         const int n = enqueue_confirm_deps_(hash);
         if (n == 0)
             propagate_main_from_confirmed_deps_(hash);
+        after_main_or_admit_(hash);
         return;
     }
 
-    // First frontier set: only allow if at/near network tip (never from lagging DB tips).
-    if (!scene_.frontier_valid(lane) && net >= 0 && height < net)
+    if (height == hc + 1)
     {
-        scene_.mark_confirmed_bag_only(hash);
+        scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/false);
         ++stats_confirmed_marks_;
         const int n = enqueue_confirm_deps_(hash);
         if (n == 0)
             propagate_main_from_confirmed_deps_(hash);
+        after_main_or_admit_(hash);
         return;
     }
 
-    scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/false);
+    if (height == hc)
+    {
+        scene_.mark_confirmed(hash, lane, height, /*chain_walk=*/false);
+        ++stats_confirmed_marks_;
+        const int n = enqueue_confirm_deps_(hash);
+        if (n == 0)
+            propagate_main_from_confirmed_deps_(hash);
+        after_main_or_admit_(hash);
+        return;
+    }
+
+    // Lagging or gap: solid bag, do not move green H_c.
+    scene_.mark_confirmed_bag_only(hash);
     ++stats_confirmed_marks_;
     const int n = enqueue_confirm_deps_(hash);
     if (n == 0)
         propagate_main_from_confirmed_deps_(hash);
+    after_main_or_admit_(hash);
+}
+
+bool AlephiumAdapter::try_forward_promote_(const std::string& hash)
+{
+    // Forward novelty: all known deps Main ⇒ B is Main (no is_main API).
+    if (hash.empty())
+        return false;
+    if (scene_.is_confirmed(hash))
+        return true;
+    if (proven_not_main_.count(hash))
+        return false;
+
+    auto node = scene_.graph().get(hash);
+    if (!node)
+        return false;
+
+    // Need detail for deps; missing detail ⇒ cannot promote yet.
+    auto detail = scene_.detail_store().get(hash);
+    if (!detail)
+        return false;
+
+    // Empty deps (genesis-like): treat as promotable if present.
+    for (const std::string& dep : detail->deps)
+    {
+        if (dep.empty())
+            continue;
+        if (!scene_.graph().contains(dep))
+            return false; // incomplete — orange path in presenter
+        if (!scene_.is_confirmed(dep))
+            return false; // wait for deps to become Main
+    }
+
+    // All deps Main (or no deps) → promote.
+    const int from = static_cast<int>(node->group_from);
+    const int to = static_cast<int>(node->group_to);
+    const int height = static_cast<int>(node->height);
+    mark_scene_confirmed_(hash, from, to, height);
+    adapter_vlog("[adapter] forward-promote %s h=%d\n", hash.c_str(), height);
+    return scene_.is_confirmed(hash);
+}
+
+void AlephiumAdapter::after_main_or_admit_(const std::string& hash)
+{
+    if (hash.empty())
+        return;
+    // Re-try self (if admit path) and parents waiting on deps.
+    try_forward_promote_(hash);
+
+    // Pending per-lane tips often become promotable once deps fill.
+    for (int i = 0; i < BlockScene::kLaneCount; ++i)
+    {
+        const NodeId pend = scene_.pending_tip_hash(static_cast<uint32_t>(i));
+        if (!pend.empty() && pend != hash)
+            try_forward_promote_(pend);
+        const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(i));
+        // No-op if already main; cheap.
+        (void)tip;
+    }
+    recheck_confirm_fill_parents_();
 }
 
 bool AlephiumAdapter::try_chain_walk_confirm_(const std::string& tip_hash, uint32_t lane,
@@ -772,6 +853,11 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         return;
     disk_cache_bootstrapped_ = true;
     disk_cache_bootstrap_blocks_ = 0;
+    bootstrap_pending_.clear();
+    bootstrap_admit_i_ = 0;
+    bootstrap_segment_ids_.clear();
+    bootstrap_windows_marked_ = false;
+    bootstrap_g_live_ = -1;
 
     if (!disk_cache_.enabled())
     {
@@ -795,10 +881,10 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         genesis_ms_ = lr.genesis_ms;
         genesis_resolved_ = true;
         scene_.set_genesis_ms(genesis_ms_);
-        // Recompute g_live with resolved genesis if needed.
         if (w > 0 && now_ms > genesis_ms_)
             g_live = static_cast<int>((now_ms - genesis_ms_) / w);
     }
+    bootstrap_g_live_ = g_live;
     if (lr.blocks_loaded <= 0)
     {
         std::printf("[adapter] disk-cache bootstrap empty domain=%s path=%s\n",
@@ -806,37 +892,75 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         return;
     }
 
-    for (const auto& cb : all)
-    {
-        if (cb.block.hash.empty())
-            continue;
-        scene_.add_block(cb.block);
-        // Bag-only: do not lock sequential frontiers to lagging disk heights.
-        if (cb.confirmed)
-            scene_.mark_confirmed_bag_only(cb.block.hash);
-    }
-    // Live tip pipeline owns H_c from network tip heights only — never from DB.
+    // Defer admit to pump_bootstrap_admit_ (chunked) to avoid startup frame hitch.
+    bootstrap_pending_ = std::move(all);
+    bootstrap_segment_ids_ = lr.segment_ids;
+    bootstrap_admit_i_ = 0;
+    disk_cache_bootstrap_blocks_ = lr.blocks_loaded;
+
+    // Live tip pipeline owns H_c from network tips only — never from DB.
     scene_.clear_sequential_frontiers();
-    // Refresh API tip heights ASAP so IdentifyTips does not seed lagging graph tips.
     main_chain_cache_.refresh_tips();
     refresh_lookback_floors_();
 
-    for (int G : lr.segment_ids)
+    // First budget immediately so first paint is not empty.
+    pump_bootstrap_admit_(kBootstrapAdmitPerDrain);
+
+    set_disk_cache_event_("boot streaming %d G-seg · %d blocks (chunked admit)",
+                          lr.segments_loaded, lr.blocks_loaded);
+    std::printf("[adapter] disk-cache bootstrap queued: %d segs %d blocks (chunked); "
+                "live G=%d\n",
+                lr.segments_loaded, lr.blocks_loaded, g_live);
+}
+
+bool AlephiumAdapter::bootstrap_admit_pending_() const
+{
+    return bootstrap_admit_i_ < bootstrap_pending_.size();
+}
+
+int AlephiumAdapter::pump_bootstrap_admit_(int max_blocks)
+{
+    if (max_blocks <= 0 || !bootstrap_admit_pending_())
+        return 0;
+
+    int admitted = 0;
+    while (admitted < max_blocks && bootstrap_admit_i_ < bootstrap_pending_.size())
     {
-        disk_segment_admitted_.insert(G);
-        const int k = global_to_lookback_(G);
-        int64_t from_ms = 0, to_ms = 0;
-        bounds_for_global_(G, from_ms, to_ms);
-        const bool open_live = (g_live >= 0 && G == g_live) || k == 0;
-        mark_window_complete_from_cache_(k, G, from_ms, to_ms, open_live);
+        const auto& cb = bootstrap_pending_[bootstrap_admit_i_++];
+        if (cb.block.hash.empty())
+            continue;
+        scene_.add_block(cb.block);
+        if (cb.confirmed)
+            scene_.mark_confirmed_bag_only(cb.block.hash);
+        ++admitted;
     }
 
-    disk_cache_bootstrap_blocks_ = lr.blocks_loaded;
-    set_disk_cache_event_("boot loaded %d G-seg · %d blocks (live edge open)",
-                          lr.segments_loaded, lr.blocks_loaded);
-    std::printf("[adapter] disk-cache bootstrap: %d segs %d blocks; frontiers cleared; "
-                "live G=%d H_c from network tips only\n",
-                lr.segments_loaded, lr.blocks_loaded, g_live);
+    if (!bootstrap_admit_pending_() && !bootstrap_windows_marked_)
+    {
+        bootstrap_windows_marked_ = true;
+        for (int G : bootstrap_segment_ids_)
+        {
+            disk_segment_admitted_.insert(G);
+            const int k = global_to_lookback_(G);
+            int64_t from_ms = 0, to_ms = 0;
+            bounds_for_global_(G, from_ms, to_ms);
+            const bool open_live =
+                (bootstrap_g_live_ >= 0 && G == bootstrap_g_live_) || k == 0;
+            mark_window_complete_from_cache_(k, G, from_ms, to_ms, open_live);
+        }
+        scene_.clear_sequential_frontiers();
+        bootstrap_pending_.clear();
+        bootstrap_pending_.shrink_to_fit();
+        set_disk_cache_event_("boot admit complete · %d blocks", disk_cache_bootstrap_blocks_);
+        std::printf("[adapter] disk-cache bootstrap admit complete: %d blocks\n",
+                    disk_cache_bootstrap_blocks_);
+    }
+    else if (bootstrap_admit_pending_())
+    {
+        set_disk_cache_event_("boot admit %zu / %zu blocks", bootstrap_admit_i_,
+                              bootstrap_pending_.size() + 0);
+    }
+    return admitted;
 }
 
 void AlephiumAdapter::set_disk_cache_event_(const char* fmt, ...)
@@ -1392,6 +1516,9 @@ void AlephiumAdapter::register_dep_hole_(const std::string& parent_hash)
 {
     if (parent_hash.empty())
         return;
+    // History-only segment-edge dep resolve — live tip uses novelty / tip path.
+    if (is_live_block_(parent_hash))
+        return;
 
     // Count missing deps on this parent; singles go to hash queue, not a micro-range.
     int missing = 0;
@@ -1667,7 +1794,12 @@ bool AlephiumAdapter::fetch_and_admit_(const std::string& hash)
 
     scene_.add_block(block);
     cJSON_Delete(block_obj);
-    return scene_.graph().contains(hash);
+    if (scene_.graph().contains(hash))
+    {
+        after_main_or_admit_(hash);
+        return true;
+    }
+    return false;
 }
 
 int AlephiumAdapter::flood_confirm_deps_offline_(const std::string& main_hash, int budget)
@@ -1995,7 +2127,9 @@ void AlephiumAdapter::recheck_confirm_fill_parents_()
         if (!still)
         {
             done.push_back(parent);
-            propagate_main_from_confirmed_deps_(parent);
+            try_forward_promote_(parent);
+            if (scene_.is_confirmed(parent))
+                propagate_main_from_confirmed_deps_(parent);
             adapter_vlog("[adapter] live confirm fill complete parent=%s\n", parent.c_str());
         }
     }
@@ -2542,6 +2676,8 @@ int AlephiumAdapter::admit_blocks_with_events_(cJSON* obj, int* seen_out, int* a
 
                 if (main_chain_cache_.is_cached_main(block_hash))
                     mark_scene_confirmed_(block_hash, cf, ct, h);
+                else
+                    after_main_or_admit_(block_hash); // forward novelty if deps already Main
             }
         }
     }
@@ -2931,8 +3067,12 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
 
     if (force_newest)
     {
+        // Live poll surface: last ~8s when the live G already has body; else 60s.
         chunk_to = slot.to_ms;
-        chunk_from = std::max(slot.from_ms, chunk_to - c);
+        int64_t edge = c;
+        if (window_index == 0 && slot.chunks_done > 0)
+            edge = std::min(c, static_cast<int64_t>(ALPH_LIVE_POLL_EDGE_MS));
+        chunk_from = std::max(slot.from_ms, chunk_to - edge);
     }
     else
     {
@@ -3012,6 +3152,9 @@ bool AlephiumAdapter::dual_initial_complete_() const
     // force refresh so IdentifyTips is not built solely on lagging cache.
     if (disk_cache_bootstrap_blocks_ > 0 && !live_edge_refreshed_)
         return false;
+    // Wait for chunked disk admit to finish before dual-initial is "complete".
+    if (bootstrap_admit_pending_())
+        return false;
     return true;
 }
 
@@ -3052,28 +3195,25 @@ int AlephiumAdapter::effective_lookback_index_() const
 
 void AlephiumAdapter::update_segment_ring_()
 {
-    // View/fetch ring always follows camera: {cam_k, cam_k+1, cam_k+2}.
-    // Do NOT freeze to {0,1,2} until Steady/tip-ready — that blocked history
-    // past k2 during IdentifyTips/BfsTrace and left paging at k3+ empty.
-    // live_tip_pipeline_ready_ still gates tip seeds / live poll / BFS only.
-    // Do NOT base the ring on hysteresis-bumped k_eff — that drops live (k=0)
-    // while the eye is still in N. Prefetch uses effective_lookback_index_ in pump.
-    // Sorted older → newer for HUD/minimap (descending k).
+    // Load/fetch ring: up to ALPH_LOAD_RING_SEGMENTS windows centered on cam_k
+    // (± half). Prefer disk-first fills for these; network only for holes.
+    // Render ring (7) is a subset used by the presenter for draw.
     const int max_k = max_lookback_index_();
     int cam_k = camera_lookback_index_();
     cam_k = std::clamp(cam_k, 0, max_k);
     active_ring_n_ = 0;
 
-    int tmp[3]{};
+    constexpr int kHalf = ALPH_LOAD_RING_SEGMENTS / 2; // 7 → span 15
+    int tmp[ALPH_LOAD_RING_SEGMENTS]{};
     int n = 0;
-    for (int d = 0; d < kSegmentRingSize; ++d)
+    for (int d = -kHalf; d <= kHalf && n < kSegmentRingSize; ++d)
     {
         const int idx = cam_k + d;
-        if (idx > max_k)
-            break;
+        if (idx < 0 || idx > max_k)
+            continue;
         tmp[n++] = idx;
     }
-    // Sort descending k (older first).
+    // Sort descending k (older first) for HUD/minimap.
     for (int i = 0; i < n; ++i)
         for (int j = i + 1; j < n; ++j)
             if (tmp[j] > tmp[i])
@@ -3417,7 +3557,9 @@ void AlephiumAdapter::resync_live_chain_()
 
 void AlephiumAdapter::advance_sequential_tips_()
 {
-    // Request / mark next height H_c+1 only (one step per lane).
+    // Anchor-first: resolve network tip height → tip hash → Main green H_c.
+    // Intermediate H_c+1 uses forward novelty (try_forward_promote_) once admitted,
+    // not bulk is_main. is_main only when tip not yet proven / spoof path.
     if (!main_chain_cache_.tips_valid())
         main_chain_cache_.refresh_tips();
 
@@ -3435,19 +3577,15 @@ void AlephiumAdapter::advance_sequential_tips_()
             if (have_frontier && net_tip <= hc)
             {
                 scene_.clear_pending_tip(lane);
+                // Still try to promote any pending novelty on this lane.
                 continue;
             }
 
-            // Prefer H_c+1; also try network tip for chain-walk when much ahead.
+            // Primary target: network tip (anchor). Secondary: H_c+1 to crawl gaps.
             std::vector<int> targets;
-            if (!have_frontier)
-                targets.push_back(net_tip);
-            else
-            {
+            targets.push_back(net_tip);
+            if (have_frontier && hc + 1 < net_tip)
                 targets.push_back(hc + 1);
-                if (net_tip > hc + 1)
-                    targets.push_back(net_tip);
-            }
 
             for (int target_h : targets)
             {
@@ -3470,27 +3608,41 @@ void AlephiumAdapter::advance_sequential_tips_()
                 if (!scene_.graph().contains(cand))
                 {
                     if (fetch_and_admit_(cand))
+                    {
                         ++stats_fetch_admitted_;
+                        after_main_or_admit_(cand);
+                    }
                 }
                 if (!scene_.graph().contains(cand))
                     continue;
 
                 scene_.set_pending_tip(lane, cand);
 
-                if (main_chain_cache_.is_cached_main(cand) ||
-                    main_chain_cache_.try_hashes_singleton(cand, f, t, target_h))
+                // Tip height: treat hashes-at-height singleton as anchor proof (cheap).
+                if (target_h == net_tip)
                 {
-                    mark_scene_confirmed_(cand, f, t, target_h);
+                    if (main_chain_cache_.is_cached_main(cand) ||
+                        main_chain_cache_.try_hashes_singleton(cand, f, t, target_h))
+                    {
+                        mark_scene_anchor_(cand, f, t, target_h);
+                        break;
+                    }
+                    // One is_main for new tip only.
+                    SeedJob job;
+                    job.hash = cand;
+                    job.from = f;
+                    job.to = t;
+                    job.height = target_h;
+                    enqueue_seed_(std::move(job));
                     break;
                 }
 
-                SeedJob job;
-                job.hash = cand;
-                job.from = f;
-                job.to = t;
-                job.height = target_h;
-                enqueue_seed_(std::move(job));
-                break; // one pending seed per lane per tick
+                // H_c+1 intermediate: forward novelty only (no is_main).
+                if (try_forward_promote_(cand))
+                    break;
+                // Deps not all Main yet — hash-fill deps; re-try later.
+                enqueue_confirm_deps_(cand);
+                break;
             }
         }
     }
@@ -3832,37 +3984,47 @@ void AlephiumAdapter::replace_non_main_(const SeedJob& job)
 
 void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
 {
-    // Tip-only verification â€” never walk the ancestor chain with is_main.
+    // Tip-anchor verification only — intermediates use forward novelty, not is_main.
     const uint32_t lane = lane_of(seed.from, seed.to);
+    const int net = main_chain_cache_.tip(seed.from, seed.to);
 
     if (main_chain_cache_.is_cached_main(seed.hash))
     {
-        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
-        // Already known main: only re-flood if lane incomplete / camera unlocked.
-        // Completeness via parallel BFS during BfsTrace / Steady.
+        if (net >= 0 && seed.height >= net)
+            mark_scene_anchor_(seed.hash, seed.from, seed.to, seed.height);
+        else
+            mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
         maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/false);
         ++stats_verified_ok_;
         return;
     }
 
     if (!scene_.graph().contains(seed.hash))
-        return; // nothing to do without a live tip in the pool
+        return;
 
     if (!height_in_lookback_(lane, seed.height))
         return;
 
+    // Non-tip seeds: try novelty first (no is_main).
+    if (net >= 0 && seed.height < net)
+    {
+        if (try_forward_promote_(seed.hash))
+        {
+            ++stats_verified_ok_;
+            return;
+        }
+        enqueue_confirm_deps_(seed.hash);
+        return;
+    }
+
     if (seed.height >= 0 &&
         main_chain_cache_.try_hashes_singleton(seed.hash, seed.from, seed.to, seed.height))
     {
-        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
+        mark_scene_anchor_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
-        if (m > 0)
-            adapter_vlog("[adapter] tip main (singleton) %s [%d->%d] h=%d â€” offline flood marked=%d\n",
-                        seed.hash.c_str(), seed.from, seed.to, seed.height, m);
-        else
-            adapter_vlog("[adapter] tip main (singleton) %s [%d->%d] h=%d\n",
-                        seed.hash.c_str(), seed.from, seed.to, seed.height);
+        adapter_vlog("[adapter] tip anchor (singleton) %s [%d->%d] h=%d flood=%d\n",
+                    seed.hash.c_str(), seed.from, seed.to, seed.height, m);
         return;
     }
 
@@ -3870,25 +4032,21 @@ void AlephiumAdapter::confirm_seed_(const SeedJob& seed)
     ++stats_api_is_main_;
     if (main_chain_cache_.query_is_main(seed.hash, &transport_ok))
     {
-        mark_scene_confirmed_(seed.hash, seed.from, seed.to, seed.height);
+        mark_scene_anchor_(seed.hash, seed.from, seed.to, seed.height);
         const int m = maybe_flood_offline_(seed.hash, lane, seed.height, /*force=*/true);
         ++stats_verified_ok_;
-        if (m > 0)
-            adapter_vlog("[adapter] tip main %s [%d->%d] h=%d â€” offline flood marked=%d\n",
-                        seed.hash.c_str(), seed.from, seed.to, seed.height, m);
-        else
-            adapter_vlog("[adapter] tip main %s [%d->%d] h=%d\n",
-                        seed.hash.c_str(), seed.from, seed.to, seed.height);
+        adapter_vlog("[adapter] tip anchor (is_main) %s [%d->%d] h=%d flood=%d\n",
+                    seed.hash.c_str(), seed.from, seed.to, seed.height, m);
         return;
     }
 
     if (!transport_ok)
     {
-        // Retry later (same tip only â€” do not expand to ancestors).
         enqueue_seed_(seed);
         return;
     }
 
+    // Tip hash not main — competitor / spoof path.
     replace_non_main_(seed);
 }
 
@@ -3909,7 +4067,7 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
     static constexpr size_t kSoftMaxNodes = 80000;  // earlier soft eviction with disk
     static constexpr size_t kHardMaxNodes = 250000;
     // Keep live + ring + 1 hysteresis lookback in RAM (k = 0..cam+3).
-    static constexpr int kRamKeepLookbacks = 4;
+    static constexpr int kRamKeepLookbacks = ALPH_LOAD_RING_SEGMENTS;
 
     size_t private_bytes = 0;
 #if defined(_WIN32)
@@ -4050,6 +4208,10 @@ void AlephiumAdapter::maybe_refill_selection_detail()
 void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& running)
 {
     maybe_refill_selection_detail();
+    // Stream disk bootstrap admits before heavy network work (hitch fix).
+    if (bootstrap_admit_pending_())
+        pump_bootstrap_admit_(kBootstrapAdmitPerDrain);
+
     // Separate interval vs hash budgets (History / catch-up prioritize intervals).
     const int cam_k_early = camera_lookback_index_();
     const int ib =

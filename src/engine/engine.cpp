@@ -224,6 +224,25 @@ public:
             graphics_->on_resize();
     }
 
+    void enable_frame_profiler(bool enabled) override
+    {
+        if (graphics_)
+            graphics_->enable_frame_profiler(enabled);
+    }
+
+    bool frame_profiler_enabled() const override
+    {
+        return graphics_ ? graphics_->frame_profiler_enabled() : false;
+    }
+
+    void copy_frame_timing_snapshot(FrameTimingSnapshot& out) const override
+    {
+        if (graphics_)
+            graphics_->copy_frame_timing_snapshot(out);
+        else
+            out = {};
+    }
+
     bool switch_network_domain(int domain, const std::string& base_url) override
     {
         return network_ ? network_->switch_domain(domain, base_url) : false;
