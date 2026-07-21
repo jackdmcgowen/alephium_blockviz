@@ -60,6 +60,20 @@ Tips:
 - Validation layers: install `vulkan-validationlayers`; Debug builds write `build/debug.log`.
 - Segment disk cache: `~/.cache/AlephiumBlockViz/cache/<domain>/`.
 
+## VnV (mod, CPU-only)
+
+Same suites as Windows `.\scripts\run_vnv.ps1` (default mod):
+
+```bash
+./scripts/run_vnv.sh                 # build mod_domain + mod_network, run both
+./scripts/run_vnv.sh --skip-build    # run existing binaries only
+./scripts/run_vnv.sh --ctest         # optional ctest driver
+```
+
+Binaries: `build/bin/mod_domain`, `build/bin/mod_network`.
+
+`int_visual` / `bench_*` are **not** on Linux yet (use Windows `run_vnv.ps1 -Int` / `-Bench`).
+
 ## Platform sources linked on Linux
 
 | Target | TU |

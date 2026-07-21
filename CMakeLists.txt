@@ -12,6 +12,7 @@ set(SRC_ROOT "${REPO_ROOT}/src")
 set(IMGUI_ROOT "${REPO_ROOT}/imgui")
 
 option(BLOCKVIZ_BUILD_APP "Build product executable" ON)
+option(BLOCKVIZ_BUILD_VNV "Build mod_* VnV executables (CPU-only)" ON)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -247,8 +248,57 @@ if(BLOCKVIZ_BUILD_APP)
   )
 endif()
 
+# ---------------------------------------------------------------------------
+# VnV mod (CPU-only — mirrors sln/mod_domain + sln/mod_network)
+# ---------------------------------------------------------------------------
+if(BLOCKVIZ_BUILD_VNV)
+  enable_testing()
+
+  add_executable(mod_domain
+    vnv/mod/tests/domain/main.cpp
+    vnv/mod/tests/domain/add_idempotent_and_confirm/test.cpp
+    vnv/mod/tests/domain/remove_erases_confirmed/test.cpp
+    vnv/mod/tests/domain/confirm_readmit_after_remove/test.cpp
+    vnv/mod/tests/domain/detail_slim_pin/test.cpp
+    vnv/mod/tests/domain/detail_via_scene/test.cpp
+    vnv/mod/tests/domain/graph_lane/test.cpp
+    vnv/mod/tests/domain/prune_protects_frontier/test.cpp
+    vnv/mod/tests/domain/alph_out_sum_slim/test.cpp
+    src/domain/block_graph.cpp
+    src/domain/block_scene.cpp
+    src/network/alephium/alph_detail_store.cpp
+  )
+  target_include_directories(mod_domain PRIVATE ${REPO_ROOT}/vnv ${SRC_ROOT} ${CJSON_INCLUDE_DIR} ${GLM_INCLUDE_DIR})
+  target_compile_definitions(mod_domain PRIVATE GLM_FORCE_LEFT_HANDED GLM_FORCE_DEPTH_ZERO_TO_ONE)
+  if(NOT MSVC)
+    target_compile_options(mod_domain PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-class-memaccess)
+  endif()
+  target_link_libraries(mod_domain PRIVATE ${CJSON_LIBRARY})
+  set_target_properties(mod_domain PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  add_test(NAME mod_domain COMMAND mod_domain WORKING_DIRECTORY ${REPO_ROOT})
+
+  add_executable(mod_network
+    vnv/mod/tests/network/main.cpp
+    vnv/mod/tests/network/enqueue_block_and_drain/test.cpp
+    vnv/mod/tests/network/parallel_intervals/test.cpp
+    vnv/mod/tests/network/interval_dedupe/test.cpp
+    vnv/mod/tests/network/stop_clean/test.cpp
+    vnv/mod/tests/network/inflight_interval_cap/test.cpp
+    src/network/alephium/http_transport.cpp
+    src/network/alephium/http_io_pool.cpp
+  )
+  target_include_directories(mod_network PRIVATE ${REPO_ROOT}/vnv ${SRC_ROOT})
+  if(NOT MSVC)
+    target_compile_options(mod_network PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+  endif()
+  target_link_libraries(mod_network PRIVATE CURL::libcurl Threads::Threads)
+  set_target_properties(mod_network PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  add_test(NAME mod_network COMMAND mod_network WORKING_DIRECTORY ${REPO_ROOT})
+endif()
+
 message(STATUS "alephium_blockviz platform=${CMAKE_SYSTEM_NAME}")
 message(STATUS "  Vulkan=${Vulkan_LIBRARIES}")
 message(STATUS "  cJSON=${CJSON_LIBRARY}")
 message(STATUS "  glm=${GLM_INCLUDE_DIR}")
 message(STATUS "  glslc=${GLSLC_EXECUTABLE}")
+message(STATUS "  VnV mod=${BLOCKVIZ_BUILD_VNV}")

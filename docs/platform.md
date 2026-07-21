@@ -28,7 +28,8 @@ src/network/platform/
 | MSVC (`sln/*.vcxproj`) | Compile only `*_win32.cpp` |
 | CMake (`CMakeLists.txt`) | `if(WIN32)` → win32 else → linux |
 
-Linux steps: [linux.md](linux.md).
+Linux steps: [linux.md](linux.md).  
+VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.sh`.
 
 Never link both `*_win32` and `*_linux` into the same target.
 

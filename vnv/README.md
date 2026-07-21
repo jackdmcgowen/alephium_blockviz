@@ -45,6 +45,8 @@ Manifests under `vnv/manifest/` are the source of truth:
 
 ## Run VnV
 
+### Windows (MSVC)
+
 ```powershell
 # Fast (mod only) — default
 .\scripts\run_vnv.ps1
@@ -60,6 +62,18 @@ Manifests under `vnv/manifest/` are the source of truth:
 .\scripts\run_vnv.ps1 -Bench -UpdateBaselines
 .\scripts\run_vnv.ps1 -Bench -Configuration Release
 ```
+
+### Linux (CMake)
+
+```bash
+# Fast (mod only) — default; builds mod_domain + mod_network
+./scripts/run_vnv.sh
+
+./scripts/run_vnv.sh --skip-build
+./scripts/run_vnv.sh --ctest
+```
+
+`int` / `bench` are still Windows-only (`run_vnv.ps1 -Int` / `-Bench`). See [docs/linux.md](../docs/linux.md).
 
 Working directory must be **repo root**.
 
