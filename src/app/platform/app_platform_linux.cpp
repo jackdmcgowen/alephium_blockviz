@@ -106,6 +106,8 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    // Harnesses show after engine start; product calls app_platform_show_window.
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 
     const int w = width ? static_cast<int>(width) : WDW_WIDTH;
     const int h = height ? static_cast<int>(height) : WDW_HEIGHT;
@@ -160,9 +162,14 @@ void app_platform_destroy_window(void* window)
     }
 }
 
-int app_platform_run_loop(AppPlatformCallbacks cb)
+void app_platform_set_callbacks(AppPlatformCallbacks cb)
 {
     g_cb = cb;
+}
+
+int app_platform_run_loop(AppPlatformCallbacks cb)
+{
+    app_platform_set_callbacks(cb);
     while (g_running && g_window)
     {
         glfwPollEvents();
@@ -189,4 +196,37 @@ bool app_platform_is_running()
 void app_platform_request_quit()
 {
     g_running = false;
+}
+
+void app_platform_poll_events()
+{
+    if (!g_window)
+        return;
+    glfwPollEvents();
+    if (glfwWindowShouldClose(g_window))
+        begin_app_exit(g_window);
+}
+
+void app_platform_sleep_ms(int ms)
+{
+    if (ms <= 0)
+        return;
+    // Sub-sleeps so harnesses remain responsive to close events.
+    const int slice = 10;
+    int left = ms;
+    while (left > 0 && g_running)
+    {
+        const int step = left < slice ? left : slice;
+        glfwWaitEventsTimeout(static_cast<double>(step) / 1000.0);
+        left -= step;
+        if (g_window && glfwWindowShouldClose(g_window))
+            begin_app_exit(g_window);
+    }
+}
+
+void app_platform_raise_window(void* window)
+{
+    GLFWwindow* w = static_cast<GLFWwindow*>(window ? window : g_window);
+    if (w)
+        glfwFocusWindow(w);
 }

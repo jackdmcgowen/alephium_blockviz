@@ -2,13 +2,14 @@
 // Working directory must be the repo root.
 //
 // Usage:
-//   bench_frame_profiler.exe --case fake_steady_frame --out vnv/bench/tests/out/fake_steady_frame/actual.json
-//   bench_frame_profiler.exe --list
+//   bench_frame_profiler --case fake_steady_frame --out vnv/bench/tests/out/fake_steady_frame/actual.json
+//   bench_frame_profiler --list
 
 #include "app/pch.h"
 
 #include "app/app_identity.hpp"
 #include "app/camera_controller.hpp"
+#include "app/platform/app_platform.hpp"
 #include "app/scene_presenter.hpp"
 #include "domain/alph_block.hpp"
 #include "domain/block_scene.hpp"
@@ -18,12 +19,10 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
-#include <thread>
 #include <vector>
 
 #ifndef BENCH_WDW_W
@@ -35,45 +34,21 @@
 
 namespace fs = std::filesystem;
 
-static volatile bool g_running = true;
 static IEngine* g_engine = nullptr;
 
-static LRESULT CALLBACK BenchWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static void on_resize(void* /*user*/)
 {
-    switch (msg)
-    {
-    case WM_SIZE:
-        if (g_engine)
-            g_engine->on_resize();
-        return 0;
-    case WM_CLOSE:
-        g_running = false;
-        DestroyWindow(hwnd);
-        return 0;
-    case WM_DESTROY:
-        g_running = false;
-        PostQuitMessage(0);
-        return 0;
-    default:
-        break;
-    }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    if (g_engine)
+        g_engine->on_resize();
 }
 
 static void pump_for_ms(int ms)
 {
     const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-    MSG msg{};
-    while (g_running && std::chrono::steady_clock::now() < end)
+    while (app_platform_is_running() && std::chrono::steady_clock::now() < end)
     {
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT)
-                g_running = false;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        app_platform_poll_events();
+        app_platform_sleep_ms(5);
     }
 }
 
@@ -169,29 +144,22 @@ int main(int argc, char** argv)
         fs::remove(p, ec);
     }
 
-    SetProcessDPIAware();
-
-    HINSTANCE hInstance = GetModuleHandle(nullptr);
-    WNDCLASSW wc{};
-    wc.lpfnWndProc = BenchWndProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = L"BlockvizBenchTests";
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
-
-    RECT wr{ 0, 0, width, height };
-    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowW(
-        wc.lpszClassName, L"Blockviz Bench Tests",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        wr.right - wr.left, wr.bottom - wr.top,
-        nullptr, nullptr, hInstance, nullptr);
-    if (!hwnd)
+    EngineCreateInfo create_info{};
+    create_info.application = app_identity::make();
+    create_info.enable_validation = false;
+    if (!app_platform_create_window(&create_info, "Blockviz Bench Tests",
+                                    static_cast<uint32_t>(width),
+                                    static_cast<uint32_t>(height)))
     {
-        std::printf("[bench] CreateWindow failed\n");
+        std::printf("[bench] create window failed\n");
         return 1;
     }
+    create_info.width = static_cast<uint32_t>(width);
+    create_info.height = static_cast<uint32_t>(height);
+
+    AppPlatformCallbacks cb{};
+    cb.on_resize = &on_resize;
+    app_platform_set_callbacks(cb);
 
     BlockScene scene;
     CameraController camera;
@@ -203,14 +171,6 @@ int main(int argc, char** argv)
 
     IEngine* engine = create_engine();
     g_engine = engine;
-
-    EngineCreateInfo create_info{};
-    create_info.platform_instance = hInstance;
-    create_info.window = hwnd;
-    create_info.width = static_cast<uint32_t>(width);
-    create_info.height = static_cast<uint32_t>(height);
-    create_info.enable_validation = false; // bench: validation off
-    create_info.application = app_identity::make();
 
     IGraphicsSystem* graphics = create_graphics_system();
     graphics->configure(create_info);
@@ -237,8 +197,7 @@ int main(int argc, char** argv)
 
     engine->start();
 
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
+    app_platform_show_window(create_info.window);
 
     std::printf("[bench] case=%s warmup_ms=%d samples=%d out=%s\n",
                 case_id.c_str(), warmup_ms, samples, out_path.c_str());
@@ -256,7 +215,6 @@ int main(int argc, char** argv)
     cpu_ms.reserve(static_cast<size_t>(samples));
     gpu_ms.reserve(static_cast<size_t>(samples));
 
-    // Per-scope last samples collected into vectors keyed by name (fixed set).
     struct ScopeSeries
     {
         std::string name;
@@ -269,7 +227,7 @@ int main(int argc, char** argv)
     int got = 0;
     int spins = 0;
     const int max_spins = samples * 8 + 200;
-    while (got < samples && spins < max_spins && g_running)
+    while (got < samples && spins < max_spins && app_platform_is_running())
     {
         pump_for_ms(sample_ms);
         ++spins;
@@ -314,7 +272,7 @@ int main(int argc, char** argv)
     destroy_engine(engine);
     g_engine = nullptr;
     delete presenter;
-    DestroyWindow(hwnd);
+    app_platform_destroy_window(create_info.window);
 
     if (got < 8)
     {
@@ -329,8 +287,8 @@ int main(int argc, char** argv)
     const float gpu_med = percentile(gpu_ms, 0.50f);
     const float gpu_p95 = percentile(gpu_ms, 0.95f);
 
-    FILE* f = nullptr;
-    if (fopen_s(&f, out_path.c_str(), "wb") != 0 || !f)
+    FILE* f = std::fopen(out_path.c_str(), "wb");
+    if (!f)
     {
         std::printf("[bench] failed to open %s\n", out_path.c_str());
         return 1;
@@ -357,7 +315,7 @@ int main(int argc, char** argv)
     }
     std::fprintf(f, "  }\n");
     std::fprintf(f, "}\n");
-    fclose(f);
+    std::fclose(f);
 
     std::printf("[bench] wrote %s (samples=%d frame_med=%.3f cpu_med=%.3f gpu_med=%.3f)\n",
                 out_path.c_str(), got, frame_med, cpu_med, gpu_med);

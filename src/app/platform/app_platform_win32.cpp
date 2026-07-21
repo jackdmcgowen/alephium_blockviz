@@ -222,9 +222,14 @@ void app_platform_destroy_window(void* window)
         g_hwnd = nullptr;
 }
 
-int app_platform_run_loop(AppPlatformCallbacks cb)
+void app_platform_set_callbacks(AppPlatformCallbacks cb)
 {
     g_cb = cb;
+}
+
+int app_platform_run_loop(AppPlatformCallbacks cb)
+{
+    app_platform_set_callbacks(cb);
     MSG msg = {};
     while (g_running)
     {
@@ -248,4 +253,32 @@ bool app_platform_is_running()
 void app_platform_request_quit()
 {
     g_running = false;
+}
+
+void app_platform_poll_events()
+{
+    MSG msg = {};
+    while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+    {
+        if (msg.message == WM_QUIT)
+            g_running = false;
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
+void app_platform_sleep_ms(int ms)
+{
+    if (ms > 0)
+        Sleep(static_cast<DWORD>(ms));
+}
+
+void app_platform_raise_window(void* window)
+{
+    HWND hwnd = static_cast<HWND>(window ? window : g_hwnd);
+    if (!hwnd)
+        return;
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetForegroundWindow(hwnd);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 }

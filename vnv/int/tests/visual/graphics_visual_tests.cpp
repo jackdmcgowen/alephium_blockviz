@@ -1,15 +1,16 @@
 // Graphics visual regression harness (V1).
-// Fixed-size window + Debug FakeChain + fixed camera + BitBlt screenshot.
+// Fixed-size window + Debug FakeChain + fixed camera + screenshot.
 // Working directory must be the repo root.
 //
 // Usage:
-//   int_visual.exe --case fake_overview --out vnv/int/tests/visual/out/fake_overview/actual.png
-//   int_visual.exe --list
+//   int_visual --case fake_overview --out vnv/int/tests/visual/out/fake_overview/actual.png
+//   int_visual --list
 
 #include "app/pch.h"
 
 #include "app/app_identity.hpp"
 #include "app/camera_controller.hpp"
+#include "app/platform/app_platform.hpp"
 #include "app/scene_presenter.hpp"
 #include "domain/alph_block.hpp"
 #include "domain/block_scene.hpp"
@@ -22,8 +23,6 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
-#include <thread>
-#include <vector>
 
 #ifndef VIS_WDW_W
 #define VIS_WDW_W 1280
@@ -34,45 +33,21 @@
 
 namespace fs = std::filesystem;
 
-static volatile bool g_running = true;
 static IEngine* g_engine = nullptr;
 
-static LRESULT CALLBACK VisWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static void on_resize(void* /*user*/)
 {
-    switch (msg)
-    {
-    case WM_SIZE:
-        if (g_engine)
-            g_engine->on_resize();
-        return 0;
-    case WM_CLOSE:
-        g_running = false;
-        DestroyWindow(hwnd);
-        return 0;
-    case WM_DESTROY:
-        g_running = false;
-        PostQuitMessage(0);
-        return 0;
-    default:
-        break;
-    }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    if (g_engine)
+        g_engine->on_resize();
 }
 
 static void pump_for_ms(int ms)
 {
     const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-    MSG msg{};
-    while (g_running && std::chrono::steady_clock::now() < end)
+    while (app_platform_is_running() && std::chrono::steady_clock::now() < end)
     {
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT)
-                g_running = false;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        app_platform_poll_events();
+        app_platform_sleep_ms(10);
     }
 }
 
@@ -152,7 +127,6 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    // Ensure output directory exists.
     {
         fs::path p(out_path);
         if (p.has_parent_path())
@@ -161,52 +135,33 @@ int main(int argc, char** argv)
         fs::remove(p, ec);
     }
 
-    // Prefer fixed client size; DPI may still affect BitBlt — document in README.
-    SetProcessDPIAware();
-
-    HINSTANCE hInstance = GetModuleHandle(nullptr);
-    WNDCLASSW wc{};
-    wc.lpfnWndProc = VisWndProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = L"BlockvizVisualTests";
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
-
-    RECT wr{ 0, 0, width, height };
-    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowW(
-        wc.lpszClassName, L"Blockviz Visual Tests",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        wr.right - wr.left, wr.bottom - wr.top,
-        nullptr, nullptr, hInstance, nullptr);
-    if (!hwnd)
+    EngineCreateInfo create_info{};
+    create_info.application = app_identity::make();
+    create_info.enable_validation = false;
+    if (!app_platform_create_window(&create_info, "Blockviz Visual Tests",
+                                    static_cast<uint32_t>(width),
+                                    static_cast<uint32_t>(height)))
     {
-        std::printf("[vis] CreateWindow failed\n");
+        std::printf("[vis] create window failed\n");
         return 1;
     }
+    create_info.width = static_cast<uint32_t>(width);
+    create_info.height = static_cast<uint32_t>(height);
+
+    AppPlatformCallbacks cb{};
+    cb.on_resize = &on_resize;
+    app_platform_set_callbacks(cb);
 
     BlockScene scene;
     CameraController camera;
     camera.set_aspect(static_cast<float>(width) / static_cast<float>(height > 0 ? height : 1));
-    // Detach timeline and fix a stable overview pose.
     camera.set_scroll_z(-48.f);
-    camera.add_look_delta(0.f, 180.f); // slight pitch up from default
-    // Snap targets: tick a few large dt steps offline (render thread also ticks).
+    camera.add_look_delta(0.f, 180.f);
     for (int i = 0; i < 30; ++i)
         camera.tick(1.f / 30.f);
 
     IEngine* engine = create_engine();
     g_engine = engine;
-
-    EngineCreateInfo create_info{};
-    create_info.platform_instance = hInstance;
-    create_info.window = hwnd;
-    create_info.width = static_cast<uint32_t>(width);
-    create_info.height = static_cast<uint32_t>(height);
-    // Visual goldens: prefer no validation noise (still Debug build OK).
-    create_info.enable_validation = false;
-    create_info.application = app_identity::make();
 
     IGraphicsSystem* graphics = create_graphics_system();
     graphics->configure(create_info);
@@ -228,20 +183,16 @@ int main(int argc, char** argv)
     engine->set_scene(&scene);
     engine->set_camera(&camera);
     engine->set_frame_source(presenter);
-    engine->set_ui_overlay(nullptr); // scene-only capture intent (host still inits ImGui)
+    engine->set_ui_overlay(nullptr);
 
     engine->start();
 
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
-    // Keep on top briefly so BitBlt is not occluded during capture.
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-    SetForegroundWindow(hwnd);
+    app_platform_show_window(create_info.window);
+    app_platform_raise_window(create_info.window);
 
     std::printf("[vis] case=%s warmup_ms=%d out=%s\n", case_id.c_str(), warmup_ms, out_path.c_str());
     pump_for_ms(warmup_ms);
 
-    // Re-assert fixed camera after network/timeline publishes.
     camera.set_scroll_z(-48.f);
     for (int i = 0; i < 10; ++i)
         camera.tick(1.f / 30.f);
@@ -249,7 +200,6 @@ int main(int argc, char** argv)
 
     engine->request_screenshot(out_path.c_str());
     const bool got = wait_for_file(out_path, 8000);
-    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
     engine->stop();
     engine->free_systems();
@@ -257,7 +207,7 @@ int main(int argc, char** argv)
     g_engine = nullptr;
     delete presenter;
 
-    DestroyWindow(hwnd);
+    app_platform_destroy_window(create_info.window);
 
     if (!got)
     {

@@ -66,14 +66,17 @@ Manifests under `vnv/manifest/` are the source of truth:
 ### Linux (CMake)
 
 ```bash
-# Fast (mod only) — default; builds mod_domain + mod_network
+# Fast (mod only) — default
 ./scripts/run_vnv.sh
 
 ./scripts/run_vnv.sh --skip-build
 ./scripts/run_vnv.sh --ctest
+./scripts/run_vnv.sh --int            # DISPLAY + GPU
+./scripts/run_vnv.sh --bench          # opt-in
+./scripts/run_vnv.sh --all            # mod + int
 ```
 
-`int` / `bench` are still Windows-only (`run_vnv.ps1 -Int` / `-Bench`). See [docs/linux.md](../docs/linux.md).
+CI: `.github/workflows/linux-ci.yml` (mod + full compile). See [docs/linux.md](../docs/linux.md).
 
 Working directory must be **repo root**.
 

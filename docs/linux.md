@@ -60,19 +60,35 @@ Tips:
 - Validation layers: install `vulkan-validationlayers`; Debug builds write `build/debug.log`.
 - Segment disk cache: `~/.cache/AlephiumBlockViz/cache/<domain>/`.
 
-## VnV (mod, CPU-only)
+## VnV
 
-Same suites as Windows `.\scripts\run_vnv.ps1` (default mod):
+Same suites as Windows `.\scripts\run_vnv.ps1` where ported:
 
 ```bash
-./scripts/run_vnv.sh                 # build mod_domain + mod_network, run both
-./scripts/run_vnv.sh --skip-build    # run existing binaries only
-./scripts/run_vnv.sh --ctest         # optional ctest driver
+./scripts/run_vnv.sh                 # mod (default)
+./scripts/run_vnv.sh --skip-build
+./scripts/run_vnv.sh --ctest
+./scripts/run_vnv.sh --int           # needs DISPLAY + GPU; golden compare
+./scripts/run_vnv.sh --bench         # opt-in perf; needs DISPLAY + GPU
+./scripts/run_vnv.sh --all           # mod + int
 ```
 
-Binaries: `build/bin/mod_domain`, `build/bin/mod_network`.
+| Binary | Role |
+|--------|------|
+| `build/bin/mod_domain` | Domain / detail store |
+| `build/bin/mod_network` | HttpIoPool |
+| `build/bin/int_visual` | FakeChain PNG capture |
+| `build/bin/bench_frame_profiler` | Frame timing JSON |
 
-`int_visual` / `bench_*` are **not** on Linux yet (use Windows `run_vnv.ps1 -Int` / `-Bench`).
+Image compare (Linux): `vnv/int/tests/visual/compare_images.py` (needs Pillow).
+
+**CI:** `.github/workflows/linux-ci.yml` builds everything and runs **mod only** (GPU goldens are machine-sensitive; Linux window capture may still be stub-quality until swapchain readback).
+
+### GPU drivers (local)
+
+- Mesa: `vulkan-tools` → `vulkaninfo` should list a device (RADV/ANV/lavapipe)
+- NVIDIA: proprietary driver + Vulkan ICD
+- Validation: `vulkan-validationlayers` for Debug logs in `build/debug.log`
 
 ## Platform sources linked on Linux
 

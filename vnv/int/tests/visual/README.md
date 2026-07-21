@@ -12,6 +12,15 @@ Prefer the VnV runner:
 .\scripts\run_vnv.ps1 -All
 ```
 
+```bash
+./scripts/run_vnv.sh --int
+./scripts/run_vnv.sh --int --update-goldens
+./scripts/run_vnv.sh --all
+# compare only:
+python3 vnv/int/tests/visual/compare_images.py --expected vnv/int/tests/visual/goldens/fake_overview.png \
+  --actual vnv/int/tests/visual/out/fake_overview/actual.png
+```
+
 Legacy wrapper: `.\scripts\run_visual_tests.ps1`
 
 ## Layout

@@ -13,6 +13,7 @@ set(IMGUI_ROOT "${REPO_ROOT}/imgui")
 
 option(BLOCKVIZ_BUILD_APP "Build product executable" ON)
 option(BLOCKVIZ_BUILD_VNV "Build mod_* VnV executables (CPU-only)" ON)
+option(BLOCKVIZ_BUILD_VNV_GPU "Build int_visual + bench_frame_profiler (needs window/GPU)" ON)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -296,9 +297,51 @@ if(BLOCKVIZ_BUILD_VNV)
   add_test(NAME mod_network COMMAND mod_network WORKING_DIRECTORY ${REPO_ROOT})
 endif()
 
+# ---------------------------------------------------------------------------
+# VnV GPU harnesses (window + FakeChain; goldens/baselines machine-sensitive)
+# ---------------------------------------------------------------------------
+if(BLOCKVIZ_BUILD_VNV_GPU)
+  set(VNV_GPU_COMMON_SOURCES
+    src/app/scene_presenter.cpp
+    src/domain/block_graph.cpp
+    src/domain/block_scene.cpp
+    src/domain/layout.cpp
+    ${APP_PLATFORM_SRC}
+    ${IMGUI_ROOT}/imgui.cpp
+    ${IMGUI_ROOT}/imgui_draw.cpp
+    ${IMGUI_ROOT}/imgui_tables.cpp
+    ${IMGUI_ROOT}/imgui_widgets.cpp
+    ${IMGUI_PLATFORM_SRC}
+  )
+
+  add_executable(int_visual
+    vnv/int/tests/visual/graphics_visual_tests.cpp
+    ${VNV_GPU_COMMON_SOURCES}
+  )
+  blockviz_target_common(int_visual)
+  target_include_directories(int_visual PRIVATE
+    ${IMGUI_ROOT} ${IMGUI_ROOT}/backends ${Vulkan_INCLUDE_DIRS})
+  target_link_libraries(int_visual PRIVATE blockviz_engine ${CJSON_LIBRARY})
+  blockviz_link_glfw(int_visual)
+  set_target_properties(int_visual PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+  add_executable(bench_frame_profiler
+    vnv/bench/tests/graphics_bench_tests.cpp
+    ${VNV_GPU_COMMON_SOURCES}
+  )
+  blockviz_target_common(bench_frame_profiler)
+  target_include_directories(bench_frame_profiler PRIVATE
+    ${IMGUI_ROOT} ${IMGUI_ROOT}/backends ${Vulkan_INCLUDE_DIRS})
+  target_link_libraries(bench_frame_profiler PRIVATE blockviz_engine ${CJSON_LIBRARY})
+  blockviz_link_glfw(bench_frame_profiler)
+  set_target_properties(bench_frame_profiler PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 message(STATUS "alephium_blockviz platform=${CMAKE_SYSTEM_NAME}")
 message(STATUS "  Vulkan=${Vulkan_LIBRARIES}")
 message(STATUS "  cJSON=${CJSON_LIBRARY}")
 message(STATUS "  glm=${GLM_INCLUDE_DIR}")
 message(STATUS "  glslc=${GLSLC_EXECUTABLE}")
 message(STATUS "  VnV mod=${BLOCKVIZ_BUILD_VNV}")
+message(STATUS "  VnV GPU=${BLOCKVIZ_BUILD_VNV_GPU}")
