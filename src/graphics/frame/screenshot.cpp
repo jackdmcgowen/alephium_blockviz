@@ -1,68 +1,42 @@
 #include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
-
-#include <windows.h>
-#include <gdiplus.h>
+#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/gpu_prv_lib.h"
+#include "common/time_util.hpp"
+#include "common/env_util.hpp"
 
 #include <cstdio>
-#include <cstring>
 #include <ctime>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
-#pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "user32.lib")
-
 namespace
 {
-int get_encoder_clsid(const WCHAR* format, CLSID* pClsid)
-{
-    UINT num = 0, size = 0;
-    Gdiplus::GetImageEncodersSize(&num, &size);
-    if (size == 0)
-        return -1;
-    std::vector<BYTE> buf(size);
-    auto* info = reinterpret_cast<Gdiplus::ImageCodecInfo*>(buf.data());
-    Gdiplus::GetImageEncoders(num, size, info);
-    for (UINT i = 0; i < num; ++i)
-    {
-        if (wcscmp(info[i].MimeType, format) == 0)
-        {
-            *pClsid = info[i].Clsid;
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
-}
-
-std::wstring utf8_to_wide(const char* utf8)
-{
-    if (!utf8 || !utf8[0])
-        return L"";
-    const int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
-    if (n <= 0)
-        return L"";
-    std::wstring out(static_cast<size_t>(n - 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, out.data(), n);
-    return out;
-}
-
 std::string make_default_path()
 {
-    char path[MAX_PATH]{};
-    // Prefer docs/images under cwd (repo root when launched correctly).
-    std::snprintf(path, sizeof(path), "docs\\images");
-    CreateDirectoryA(path, nullptr);
+    gfx_platform_ensure_directory("docs");
+    gfx_platform_ensure_directory("docs/images");
 
     const std::time_t t = std::time(nullptr);
     std::tm tm_local{};
-    localtime_s(&tm_local, &t);
-    char name[MAX_PATH]{};
-    std::snprintf(name, sizeof(name), "docs\\images\\capture_%04d%02d%02d_%02d%02d%02d.png",
+    if (!blockviz::local_time(tm_local, t))
+        tm_local = {};
+    char name[256]{};
+    std::snprintf(name, sizeof(name), "docs/images/capture_%04d%02d%02d_%02d%02d%02d.png",
                   tm_local.tm_year + 1900, tm_local.tm_mon + 1, tm_local.tm_mday,
                   tm_local.tm_hour, tm_local.tm_min, tm_local.tm_sec);
     return name;
+}
+
+void ensure_parent_dirs(const std::string& path)
+{
+    const auto slash = path.find_last_of("/\\");
+    if (slash != std::string::npos)
+    {
+        const std::string dir = path.substr(0, slash);
+        if (!dir.empty())
+            gfx_platform_ensure_directory(dir.c_str());
+    }
 }
 } // namespace
 
@@ -86,61 +60,136 @@ bool GraphicsSystem::consume_and_save_screenshot_()
         screenshot_pending_path_.clear();
     }
 
-    if (!hwnd)
+    ensure_parent_dirs(path);
+
+    // --- Preferred: GPU readback of last presented swapchain image ---
+    if (device != VK_NULL_HANDLE && last_swapchain_image_valid_ &&
+        last_swapchain_image_index_ < swapchainImages.size() && width > 0 && height > 0)
     {
-        std::printf("[gfx] screenshot: no hwnd\n");
-        return false;
-    }
+        const VkImage src = swapchainImages[last_swapchain_image_index_];
+        const VkDeviceSize row_pitch = static_cast<VkDeviceSize>(width) * 4u;
+        const VkDeviceSize buf_size = row_pitch * height;
 
-    HWND h = static_cast<HWND>(hwnd);
-    RECT rc{};
-    if (!GetClientRect(h, &rc))
-        return false;
-    POINT tl{ rc.left, rc.top };
-    POINT br{ rc.right, rc.bottom };
-    ClientToScreen(h, &tl);
-    ClientToScreen(h, &br);
-    const int w = br.x - tl.x;
-    const int ht = br.y - tl.y;
-    if (w < 2 || ht < 2)
-        return false;
-
-    HDC screen = GetDC(nullptr);
-    HDC mem = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, w, ht);
-    HGDIOBJ old = SelectObject(mem, bmp);
-    BitBlt(mem, 0, 0, w, ht, screen, tl.x, tl.y, SRCCOPY);
-    SelectObject(mem, old);
-
-    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-    ULONG_PTR gdiplusToken = 0;
-    if (Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr) != Gdiplus::Ok)
-    {
-        DeleteObject(bmp);
-        DeleteDC(mem);
-        ReleaseDC(nullptr, screen);
-        std::printf("[gfx] screenshot: GDI+ startup failed\n");
-        return false;
-    }
-
-    bool ok = false;
-    {
-        Gdiplus::Bitmap bitmap(bmp, nullptr);
-        CLSID clsid{};
-        if (get_encoder_clsid(L"image/png", &clsid) >= 0)
+        VkBuffer staging = VK_NULL_HANDLE;
+        VkDeviceMemory staging_mem = VK_NULL_HANDLE;
+        try
         {
-            const std::wstring wpath = utf8_to_wide(path.c_str());
-            ok = (bitmap.Save(wpath.c_str(), &clsid, nullptr) == Gdiplus::Ok);
+            create_buffer(device, &deviceMemProps, buf_size,
+                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          staging, staging_mem);
         }
+        catch (...)
+        {
+            std::printf("[gfx] screenshot: staging buffer alloc failed\n");
+            goto fallback_window;
+        }
+
+        // One-shot CB on graphics pool.
+        VkCommandBufferAllocateInfo ai{};
+        ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        ai.commandPool = commandPool;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        VkCommandBuffer cb = VK_NULL_HANDLE;
+        if (vkAllocateCommandBuffers(device, &ai, &cb) != VK_SUCCESS)
+        {
+            destroy_buffer(device, staging, staging_mem);
+            goto fallback_window;
+        }
+
+        VkCommandBufferBeginInfo bi{};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cb, &bi);
+
+        // PRESENT_SRC → TRANSFER_SRC
+        VkImageMemoryBarrier2 barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.image = src;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        VkDependencyInfo dep{};
+        dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cb, &dep);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { width, height, 1 };
+        vkCmdCopyImageToBuffer(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, 1, &region);
+
+        // TRANSFER_SRC → PRESENT_SRC
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        barrier.dstAccessMask = 0;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier2(cb, &dep);
+
+        vkEndCommandBuffer(cb);
+
+        VkCommandBufferSubmitInfo cbs{};
+        cbs.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        cbs.commandBuffer = cb;
+        VkSubmitInfo2 submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos = &cbs;
+
+        const bool ok_submit =
+            vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS;
+        if (ok_submit)
+            vkQueueWaitIdle(queues_.get(QueueType::_3D));
+        vkFreeCommandBuffers(device, commandPool, 1, &cb);
+
+        bool ok = false;
+        if (ok_submit)
+        {
+            void* mapped = nullptr;
+            if (vkMapMemory(device, staging_mem, 0, buf_size, 0, &mapped) == VK_SUCCESS && mapped)
+            {
+                ok = gfx_platform_write_png_rgba(
+                    path.c_str(), static_cast<int>(width), static_cast<int>(height),
+                    static_cast<const unsigned char*>(mapped));
+                vkUnmapMemory(device, staging_mem);
+            }
+        }
+        destroy_buffer(device, staging, staging_mem);
+
+        if (ok)
+        {
+            std::printf("[gfx] screenshot (GPU readback) saved: %s (%ux%u)\n", path.c_str(),
+                        width, height);
+            return true;
+        }
+        std::printf("[gfx] screenshot: GPU readback failed\n");
     }
 
-    Gdiplus::GdiplusShutdown(gdiplusToken);
-    DeleteObject(bmp);
-    DeleteDC(mem);
-    ReleaseDC(nullptr, screen);
-
+fallback_window:
+    // Window blit is opt-in debug only (GDI+ / stub). Primary path is GPU readback.
+    const bool allow_blit = blockviz::env_flag("BLOCKVIZ_SCREENSHOT_WINDOW_BLIT", false);
+    if (!allow_blit || gfx_platform_is_headless() || !hwnd)
+    {
+        std::printf("[gfx] screenshot failed: %s (set BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1 for "
+                    "legacy window blit)\n",
+                    path.c_str());
+        return false;
+    }
+    const bool ok = gfx_platform_save_window_png(hwnd, path.c_str());
     if (ok)
-        std::printf("[gfx] screenshot saved: %s\n", path.c_str());
+        std::printf("[gfx] screenshot (window blit) saved: %s\n", path.c_str());
     else
         std::printf("[gfx] screenshot failed: %s\n", path.c_str());
     return ok;

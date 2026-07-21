@@ -5,6 +5,10 @@
   "dependencies": [
     "curl",
     "cjson",
-    "glm"
+    "glm",
+    "zlib",
+    "glfw3",
+    "vulkan-headers",
+    "glslang"
   ]
 }

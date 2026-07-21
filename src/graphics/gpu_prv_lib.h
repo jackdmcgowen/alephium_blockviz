@@ -13,15 +13,16 @@
 
   //instance.cpp — app identity from host; engine identity from engine layer
 VkInstance create_instance(const SoftwareIdentity& application,
-                           const SoftwareIdentity& engine);
+                           const SoftwareIdentity& engine,
+                           bool enable_validation = true);
 void destroy_instance(VkInstance instance);
 
   //validation.cpp
 void create_debug_messenger(VkInstance instance);
 void destroy_debug_messenger(VkInstance instance);
 
-  //surface.cpp
-VkSurfaceKHR create_win32_surface(VkInstance instance, void* hwnd, void* hinstance);
+  //surface.cpp — delegates to graphics/platform/gfx_platform_*.cpp
+VkSurfaceKHR create_platform_surface(VkInstance instance, void* window, void* platform_instance);
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface);
 
   //device.cpp

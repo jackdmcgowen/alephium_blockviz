@@ -1,18 +1,20 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
+#include "graphics/platform/gfx_platform.hpp"
 
-#include <windows.h> //OutputDebugString
+#include <cstdio>
 
 #ifndef NDEBUG
-static const bool enableValidationLayers = TRUE;
-static const bool enableValidationLogging = TRUE;
+static const bool kCompileTimeValidation = true;
+static const bool kCompileTimeValidationLogging = true;
 #else
-static const bool enableValidationLayers = FALSE;
-static const bool enableValidationLogging = FALSE;
+static const bool kCompileTimeValidation = false;
+static const bool kCompileTimeValidationLogging = false;
 #endif
 
-FILE* validationFile;
-VkDebugUtilsMessengerEXT debugMessenger;
+static FILE* validationFile = nullptr;
+static VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+static bool messenger_created = false;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
 (
@@ -22,11 +24,11 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
     void* pUserData
 )
 {
-    if (enableValidationLogging && validationFile) {
+    if (kCompileTimeValidationLogging && validationFile) {
         fprintf(validationFile, "%s\n", pCallbackData->pMessage);
         fflush(validationFile); // survive hard kill during /vulkan-validator re-verify
     }
-    OutputDebugStringA(pCallbackData->pMessage);
+    gfx_platform_debug_log(pCallbackData->pMessage);
 
     return VK_FALSE; // Return VK_FALSE to not abort the call
 
@@ -35,11 +37,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
 
 void create_debug_messenger(VkInstance instance)
 {
-    if (!enableValidationLayers) return;
+    if (!kCompileTimeValidation)
+        return;
 
-    if (enableValidationLogging) {
+    if (kCompileTimeValidationLogging) {
         // CWD is repo root (LocalDebuggerWorkingDirectory); keep logs out of source tree.
-        CreateDirectoryA("build", nullptr);
+        gfx_platform_ensure_directory("build");
         validationFile = fopen("build/debug.log", "a+");
 
         if (!validationFile)
@@ -61,22 +64,26 @@ void create_debug_messenger(VkInstance instance)
     if (func == nullptr || func(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
         throw std::runtime_error("Failed to set up debug messenger!");
     }
+    messenger_created = true;
 
 }   /* create_debug_messenger() */
 
 
 void destroy_debug_messenger(VkInstance instance)
 {
-    if (enableValidationLayers)
+    if (validationFile)
     {
-        if (enableValidationLogging)
-        {
-            fclose(validationFile);
-            validationFile = NULL;
-
-            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+        fclose(validationFile);
+        validationFile = nullptr;
+    }
+    if (messenger_created && debugMessenger != VK_NULL_HANDLE)
+    {
+        auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+            instance, "vkDestroyDebugUtilsMessengerEXT");
+        if (func)
             func(instance, debugMessenger, nullptr);
-        }
+        debugMessenger = VK_NULL_HANDLE;
+        messenger_created = false;
     }
 
 }   /* destroy_debug_messenger() */

@@ -15,10 +15,8 @@
 #include <stdexcept>
 
 #include "imgui.h"
-#include "imgui_impl_win32.h"
-#define VK_USE_PLATFORM_WIN32_KHR
 #include "imgui_impl_vulkan.h"
-#include <windows.h>
+#include "graphics/platform/gfx_platform.hpp"
 
 namespace
 {
@@ -83,19 +81,16 @@ void draw_profiler_hud(const FrameTimingSnapshot& snap)
 void GraphicsSystem::render_loop()
 {
     const double frameTimeMin = 1000.0 / 60; // ~16.67ms for 60Hz
-    LARGE_INTEGER freq, t1, t2;
-    double t, dt;
-
-    t = dt = 0.0;
-    QueryPerformanceFrequency(&freq);
+    double t = 0.0;
+    double dt = 0.0;
 
     while (running)
     {
         ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplWin32_NewFrame();
+        gfx_platform_imgui_new_frame();
         ImGui::NewFrame();
 
-        QueryPerformanceCounter(&t1);
+        const auto t1 = std::chrono::steady_clock::now();
 
         // Host-frame wall for profiler starts here (paired with end_host_frame).
         g_debugDrawer.clear();
@@ -352,16 +347,14 @@ void GraphicsSystem::render_loop()
         consume_and_save_screenshot_();
 
         // Work wall (before 60 Hz pad) — used for profiler frame_ms / bound class.
-        LARGE_INTEGER t_work{};
-        QueryPerformanceCounter(&t_work);
-        const float work_ms = static_cast<float>(
-            (t_work.QuadPart - t1.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart));
+        const auto t_work = std::chrono::steady_clock::now();
+        const float work_ms = std::chrono::duration<float, std::milli>(t_work - t1).count();
         frame_profiler_.end_host_frame(work_ms);
 
         do
         {
-            QueryPerformanceCounter(&t2);
-            dt = static_cast<double>((t2.QuadPart - t1.QuadPart) * 1000LL / freq.QuadPart);
+            const auto t2 = std::chrono::steady_clock::now();
+            dt = std::chrono::duration<double, std::milli>(t2 - t1).count();
             t += dt;
         } while (dt <= frameTimeMin);
 
@@ -423,7 +416,12 @@ void GraphicsSystem::render()
     const FramePresenter::AcquireResult acq =
         frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
     if (!acq.ok)
+    {
+        last_swapchain_image_valid_ = false;
         return; // OUT_OF_DATE: resize next begin; do not submit/present
+    }
+    last_swapchain_image_index_ = acq.image_index;
+    last_swapchain_image_valid_ = true;
 
     // App builds colored outline list; graphics draws all in one pass (no role names).
     const bool want_sobel =

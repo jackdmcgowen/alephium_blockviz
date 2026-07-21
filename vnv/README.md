@@ -45,6 +45,8 @@ Manifests under `vnv/manifest/` are the source of truth:
 
 ## Run VnV
 
+### Windows (MSVC)
+
 ```powershell
 # Fast (mod only) — default
 .\scripts\run_vnv.ps1
@@ -60,6 +62,21 @@ Manifests under `vnv/manifest/` are the source of truth:
 .\scripts\run_vnv.ps1 -Bench -UpdateBaselines
 .\scripts\run_vnv.ps1 -Bench -Configuration Release
 ```
+
+### Linux (CMake)
+
+```bash
+# Fast (mod only) — default
+./scripts/run_vnv.sh
+
+./scripts/run_vnv.sh --skip-build
+./scripts/run_vnv.sh --ctest
+./scripts/run_vnv.sh --int            # DISPLAY + GPU
+./scripts/run_vnv.sh --bench          # opt-in
+./scripts/run_vnv.sh --all            # mod + int
+```
+
+CI: `.github/workflows/linux-ci.yml` (mod + full compile). See [docs/linux.md](../docs/linux.md).
 
 Working directory must be **repo root**.
 

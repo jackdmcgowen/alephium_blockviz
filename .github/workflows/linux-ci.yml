@@ -1,0 +1,69 @@
+name: Linux CI
+
+on:
+  push:
+    branches: [main, "integration/**", "feature/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: linux-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-mod-vnv:
+    name: Ubuntu build + mod VnV + headless int
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 python3-pil pkg-config \
+            libvulkan-dev vulkan-tools glslang-tools glslc mesa-vulkan-drivers \
+            libglfw3-dev libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: PCH include audit
+        run: python3 scripts/check_pch.py
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBLOCKVIZ_BUILD_APP=ON \
+            -DBLOCKVIZ_BUILD_VNV=ON \
+            -DBLOCKVIZ_BUILD_VNV_GPU=ON
+
+      - name: Build all
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Run mod VnV
+        run: ./scripts/run_vnv.sh --skip-build
+
+      - name: ctest mod
+        run: ctest --test-dir build --output-on-failure -R 'mod_'
+
+      - name: Confirm GPU harness binaries exist
+        run: |
+          test -x build/bin/int_visual
+          test -x build/bin/bench_frame_profiler
+          ./build/bin/int_visual --list
+          ./build/bin/bench_frame_profiler --list
+
+      # Hard gate: headless present + GPU PNG readback vs linux_headless golden.
+      - name: Headless int_visual (hard gate)
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: |
+          ./scripts/run_vnv.sh --skip-build --int --headless
+
+      - name: Dual-track smoke wrapper
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: ./scripts/smoke_dual_track.sh --skip-build

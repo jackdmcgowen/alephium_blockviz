@@ -95,6 +95,7 @@
       <PrecompiledHeaderFile>app/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="..\vnv\bench\tests\graphics_bench_tests.cpp" />
+    <ClCompile Include="..\src\app\platform\app_platform_win32.cpp" />
     <ClCompile Include="..\src\app\scene_presenter.cpp" />
     <ClCompile Include="..\src\domain\block_graph.cpp" />
     <ClCompile Include="..\src\domain\block_scene.cpp" />

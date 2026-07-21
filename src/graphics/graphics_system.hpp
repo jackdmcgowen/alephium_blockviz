@@ -116,6 +116,9 @@ private:
 
     void *hInstance;
     void *hwnd;
+    bool headless_ = false;
+    uint32_t last_swapchain_image_index_ = 0;
+    bool last_swapchain_image_valid_ = false;
 
     VkInstance instance;
     VkPhysicalDevice physicalDevice;

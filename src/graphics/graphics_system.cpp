@@ -25,21 +25,18 @@
 
 
 #include "imgui.h"
-#include "imgui_impl_win32.h"
-#define VK_USE_PLATFORM_WIN32_KHR
 #include "imgui_impl_vulkan.h"
-#include <windows.h>
+#include "graphics/platform/gfx_platform.hpp"
 
-#include <vulkan/vulkan_win32.h>
-#include <vulkan/vk_enum_string_helper.h>
+// ensure configure can call headless setup
 
-
+// Avoid Vulkan SDK-only vk_enum_string_helper.h (not always in distro headers).
 static void check_vk_result(VkResult err)
 {
     if (err == VK_SUCCESS)
         return;
 
-    fprintf(stderr, "[vulkan] Error: VkResult = %s\n", string_VkResult(err) );
+    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", static_cast<int>(err));
     if (err < 0)
         abort();
 
@@ -167,6 +164,7 @@ void GraphicsSystem::configure(const EngineCreateInfo& info)
 {
     create_info_ = info;
     configured_ = true;
+    gfx_platform_configure_headless(info.headless, info.width, info.height);
 }
 
 void GraphicsSystem::init()
@@ -182,19 +180,26 @@ void GraphicsSystem::init()
     const EngineCreateInfo& info = create_info_;
     void* hInst = info.platform_instance;
     void* hwnd_ = info.window;
+    headless_ = info.headless || gfx_platform_is_headless();
+    gfx_platform_configure_headless(headless_, info.width, info.height);
 
-    RECT rect;
-    GetClientRect((HWND)hwnd_, &rect);
-    width = info.width ? info.width : static_cast<uint32_t>(rect.right - rect.left);
-    height = info.height ? info.height : static_cast<uint32_t>(rect.bottom - rect.top);
+    uint32_t client_w = 0, client_h = 0;
+    gfx_platform_get_window_size(hwnd_, &client_w, &client_h);
+    width = info.width ? info.width : client_w;
+    height = info.height ? info.height : client_h;
+    if (width == 0)
+        width = headless_ ? 1280u : WDW_WIDTH;
+    if (height == 0)
+        height = headless_ ? 720u : WDW_HEIGHT;
 
     this->hInstance = hInst;
     this->hwnd = hwnd_;
 
     const SoftwareIdentity engine_id = blockviz_engine::identity();
-    instance = create_instance(info.application, engine_id);
-    create_debug_messenger(instance);
-    surface = create_win32_surface(instance, hwnd_, hInst);
+    instance = create_instance(info.application, engine_id, info.enable_validation);
+    if (info.enable_validation)
+        create_debug_messenger(instance);
+    surface = create_platform_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     log_engine_startup(deviceProps, engine_id);
     create_device(instance, physicalDevice, surface, &device, &queues_);
@@ -282,7 +287,7 @@ void GraphicsSystem::init()
     style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.28f, 0.30f, 1.f);
     style.Colors[ImGuiCol_PlotHistogram] = ImVec4(1.f, 0.36f, 0.0f, 0.85f);
 
-    ImGui_ImplWin32_Init(hwnd);
+    gfx_platform_imgui_init(hwnd);
     ImGui_ImplVulkan_InitInfo imgui_vk = {};
 
     imgui_vk.ApiVersion = VK_API_VERSION_1_3;
@@ -395,14 +400,8 @@ void GraphicsSystem::stop()
 
 void GraphicsSystem::Resize()
 {
-    RECT rect;
-    int new_width;
-    int new_height;
-
-    GetClientRect((HWND)hwnd, &rect);
-
-    new_width = rect.right - rect.left;
-    new_height = rect.bottom - rect.top;
+    uint32_t new_width = 0, new_height = 0;
+    gfx_platform_get_window_size(hwnd, &new_width, &new_height);
 
     if (0 == new_width && 0 == new_height)
         return;
@@ -711,7 +710,7 @@ void GraphicsSystem::cleanup()
     vkDeviceWaitIdle(device);
 
     ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplWin32_Shutdown();
+    gfx_platform_imgui_shutdown();
     ImGui::DestroyContext();
 
     frame_profiler_.destroy(device);

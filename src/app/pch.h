@@ -15,6 +15,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <windows.h>
+// OS headers live in app/platform/*_platform_<os>.cpp — not in product PCH.
 
 #include <glm/glm.hpp>

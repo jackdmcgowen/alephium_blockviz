@@ -118,9 +118,11 @@
     <ClCompile Include="..\src\network\alephium\main_chain_cache.cpp" />
     <ClCompile Include="..\src\network\alephium\alph_detail_store.cpp" />
     <ClCompile Include="..\src\network\alephium\segment_disk_cache.cpp" />
+    <ClCompile Include="..\src\network\platform\net_platform_win32.cpp" />
     <ClCompile Include="..\src\network\fake\fake_chain_simulator.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\network\platform\net_platform.hpp" />
     <ClInclude Include="..\src\network\commands.h" />
     <ClInclude Include="..\src\network\network_system.hpp" />
     <ClInclude Include="..\src\network\alephium\network_poller.hpp" />

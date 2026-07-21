@@ -12,6 +12,19 @@ Prefer the VnV runner:
 .\scripts\run_vnv.ps1 -All
 ```
 
+```bash
+./scripts/run_vnv.sh --int
+./scripts/run_vnv.sh --int --headless
+./scripts/run_vnv.sh --int --headless --update-goldens   # → goldens/linux_headless/
+./scripts/run_vnv.sh --all
+# compare only:
+python3 vnv/int/tests/visual/compare_images.py --profile headless \
+  --expected vnv/int/tests/visual/goldens/linux_headless/fake_overview.png \
+  --actual vnv/int/tests/visual/out/fake_overview/actual.png
+```
+
+Goldens policy: [goldens/README.md](goldens/README.md).
+
 Legacy wrapper: `.\scripts\run_visual_tests.ps1`
 
 ## Layout
