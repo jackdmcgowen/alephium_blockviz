@@ -158,12 +158,16 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
 
     const float shaft_len = std::max(0.0f, drawn_len - tip_len);
 
-    // Fade in with grow (keeps early frames soft). Dual RGBA: shaft vs tip cone.
+    // Fade in with grow. Linear color along axis: t=0 at base (listing), t=1 at head (dep).
     const float a_mul = (0.2f + 0.8f * u);
-    glm::vec4 col_shaft = shaft_rgba;
-    glm::vec4 col_tip = tip_rgba;
-    col_shaft.a *= a_mul;
-    col_tip.a *= a_mul;
+    glm::vec4 base_c = shaft_rgba; // start / listing
+    glm::vec4 head_c = tip_rgba;   // apex / dep
+    base_c.a *= a_mul;
+    head_c.a *= a_mul;
+    auto color_at = [&](float t) -> glm::vec4 {
+        t = std::clamp(t, 0.f, 1.f);
+        return glm::mix(base_c, head_c, t);
+    };
 
     glm::vec3 right, up;
     build_basis(forward, right, up);
@@ -173,6 +177,7 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
     const uint32_t base = vertex_count();
 
     const glm::vec3 shaft_top_center = start + forward * shaft_len;
+    const float t_shaft_end = (drawn_len > 1e-6f) ? (shaft_len / drawn_len) : 0.f;
 
     auto ring_point = [&](const glm::vec3& center, float radius, uint32_t i) -> glm::vec3
     {
@@ -180,23 +185,23 @@ void DebugDrawer::add_arrow(const glm::vec3& start,
         return center + (std::cos(theta) * right + std::sin(theta) * up) * radius;
     };
 
-    // 0 .. N-1: shaft base
+    // 0 .. N-1: shaft base (t=0)
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(start, shaft_radius, i), col_shaft });
+        verts_.push_back({ ring_point(start, shaft_radius, i), color_at(0.f) });
 
-    // N .. 2N-1: shaft top
+    // N .. 2N-1: shaft top (t = shaft_len/L)
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(shaft_top_center, shaft_radius, i), col_shaft });
+        verts_.push_back({ ring_point(shaft_top_center, shaft_radius, i), color_at(t_shaft_end) });
 
-    // 2N .. 3N-1: tip base (same plane as shaft top, wider radius)
+    // 2N .. 3N-1: tip base (same plane as shaft top)
     for (uint32_t i = 0; i < N; ++i)
-        verts_.push_back({ ring_point(shaft_top_center, tip_radius, i), col_tip });
+        verts_.push_back({ ring_point(shaft_top_center, tip_radius, i), color_at(t_shaft_end) });
 
     const uint32_t i_apex = base + 3 * N;
-    verts_.push_back({ tip_pos, col_tip });
+    verts_.push_back({ tip_pos, color_at(1.f) });
 
     const uint32_t i_butt = base + 3 * N + 1;
-    verts_.push_back({ start, col_shaft });
+    verts_.push_back({ start, color_at(0.f) });
 
     auto idx = [base](uint32_t local) -> uint32_t
     {

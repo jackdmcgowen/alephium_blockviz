@@ -46,13 +46,44 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 |-----|---------|
 | **Solid α** | Confirmed bag with all deps live |
 | **Green Sobel** | Per-lane frontier tip `H_c` (or walk-anim display) |
-| **Tip dep arrows** | Dual RGBA: shaft = listing block color, tip = dep color (white if missing). Primary confirmed = solid main dual; unconfirmed tips cyan→main; secondary (prior tip) solid→translucent main (α floor &gt; 0). Grow once, freeze; fade when replaced; red death if listing removed. Only selection/hover replay grows again. |
-| **Cyan Sobel** | Unconfirmed roles (outline); arrow shafts no longer stay solid cyan |
+| **Tip dep arrows** | See **Rule book** below |
+| **Cyan Sobel** | Unconfirmed roles (outline) |
 | **Orange** | Missing-dep incompletes (not green/cyan) |
 | **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
 | **Red** | Removal death fade |
 
 Presentation only — confirmation marks come from **network** into `BlockScene`.
+
+### Rule book — tip arrows & live segment planes
+
+**Tip roles**
+
+| Role | Who | Deps |
+|------|-----|------|
+| Primary confirmed | Domain `H_c` / walk hop | All live deps |
+| Unconfirmed tip | Per-lane max-height unconfirmed in ring | All live deps |
+| Secondary | Prior primary after tip advance | Full fan while retained |
+
+**Tip arrow appearance (not selection gold)**
+
+| State | Length | Color |
+|-------|--------|--------|
+| Primary | Full immediately (no grow) | Linear dual RGBA along axis: base=listing block, head=dep block (white if missing) |
+| Unconfirmed | Full immediately | Cyan → main dual (color lerp only) |
+| Secondary | Full immediately | Main dual; α solid → translucent floor (&gt; 0) |
+| Replaced | Full | Fade α → 0 then erase |
+| Listing removed | Full | Red death α → 0 |
+| Selection / hover | May grow | Gold; **only** these re-grow on select/Replay/hover |
+
+**Live segment barrier planes**
+
+- **Do not** draw a plane for the open live segment (`k=0` / `G=G_live`).
+- **Do** draw planes for completed historical segments in the ring (`k≥1`).
+- When live G rolls, the previous live G becomes historical and then gets a plane.
+
+**Frustum**
+
+- Cull frustum near/far must match this frame’s camera UBO (clip set before prepare cull).
 
 ### Sobel colors (app → graphics)
 

@@ -125,6 +125,72 @@ void GraphicsSystem::render_loop()
                 camera_->set_live_scroll_z(live_z);
 
                 camera_->tick(last_frame_dt_sec_);
+
+                // Same-frame cull: set near/far from eye + ring span BEFORE frustum
+                // so prepare() culls with the same clip this frame's UBO will use.
+                {
+                    const float eye_z = camera_->scroll_z();
+                    const int64_t window_ms =
+                        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+                    const int G_live =
+                        window_ms > 0 && now_ms > genesis_ms
+                            ? static_cast<int>((now_ms - genesis_ms) / window_ms)
+                            : 0;
+                    const float older_sec = eye_z - live_z;
+                    int cam_k = 0;
+                    if (older_sec >= 1.f && window_ms > 0)
+                        cam_k = static_cast<int>(
+                            older_sec / (static_cast<float>(window_ms) * 0.001f));
+                    cam_k = std::clamp(cam_k, 0, std::max(0, G_live));
+                    float vis_lo = 0.f, vis_hi = 0.f;
+                    bool have = false;
+                    float seg_w = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
+                    for (int d = 0; d < 3; ++d)
+                    {
+                        const int k = cam_k + d;
+                        if (k > G_live)
+                            break;
+                        const int G = std::max(0, G_live - k);
+                        int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
+                        int64_t to_ms = from_ms + window_ms;
+                        if (k == 0 && now_ms < to_ms)
+                            to_ms = std::max(from_ms + 1, now_ms);
+                        const float z0 =
+                            -static_cast<float>(from_ms - origin_ms) * 0.001f * mps;
+                        const float z1 =
+                            -static_cast<float>(to_ms - origin_ms) * 0.001f * mps;
+                        const float zn = std::min(z0, z1);
+                        const float zo = std::max(z0, z1);
+                        if (!have)
+                        {
+                            vis_lo = zn;
+                            vis_hi = zo;
+                            have = true;
+                            seg_w = std::max(1.f, zo - zn);
+                        }
+                        else
+                        {
+                            vis_lo = std::min(vis_lo, zn);
+                            vis_hi = std::max(vis_hi, zo);
+                        }
+                    }
+                    constexpr float kHardFarCap = 20000.f;
+                    constexpr float kMinNear = 0.5f;
+                    constexpr float kLayoutR = 20.f * 1.35f;
+                    float near_z = kMinNear;
+                    float far_z = Camera::kDefaultFarZ;
+                    if (have)
+                    {
+                        const float z_dist = std::max(std::abs(vis_hi - eye_z),
+                                                      std::abs(vis_lo - eye_z));
+                        const float pad = std::max(seg_w * 0.35f, 40.f);
+                        far_z = std::min(
+                            kHardFarCap,
+                            std::max(near_z + 50.f, z_dist + kLayoutR + 40.f + pad));
+                    }
+                    camera_->set_clip(near_z, far_z);
+                }
+
                 frame_frustum = camera_->frustum();
                 fin.frustum = &frame_frustum;
                 fin.camera_eye = camera_->camera().eye;
@@ -137,9 +203,7 @@ void GraphicsSystem::render_loop()
 
             if (camera_)
             {
-                // Dynamic near/far from visible segment span (presenter suggestion).
-                // Applied after prepare so this frame's UBO matches draw-set depth;
-                // next frame's cull frustum picks up the tighter clip.
+                // Refine clip from presenter if present (matches prepass in common cases).
                 if (fout.has_clip_suggestion)
                 {
                     const float n = std::max(0.5f, fout.suggested_near_z);

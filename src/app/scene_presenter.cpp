@@ -246,6 +246,12 @@ std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_ha
     return out;
 }
 
+// RULEBOOK (tip_dep only — selection/hover are separate and may re-grow):
+// - Primary confirmed: solid dual-RGBA gradient listing→dep (white head if missing).
+// - Unconfirmed tip: full length immediately; color cyan→main dual over cyan_to_main_sec.
+// - Secondary (prior tip): solid→translucent main (alpha floor > 0).
+// - No length grow/restart for tip keys; leave-active → Fading; listing dead → Dying.
+// - Barrier planes: never for open live k=0.
 void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
@@ -413,11 +419,11 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         const glm::vec4 main_tip = e.dep_drawn ? glm::vec4(dep_rgb, kTipSolidAlpha)
                                                : kMissingWhite;
 
-        // First birth: grow once only — never restart.
+        // Tip deps: full length immediately (no grow animation / never restart).
         if (anim.birth_sec < 0.f)
         {
-            anim.birth_sec = now + kArrowStagger * static_cast<float>(e.stagger_i);
-            anim.phase = ArrowPhase::Growing;
+            anim.birth_sec = now;
+            anim.phase = ArrowPhase::Held;
             anim.tier = e.tier;
             if (e.tier == TipTier::Unconfirmed)
             {
@@ -433,23 +439,21 @@ void ScenePresenter::tip_dep_tick_and_draw_(
                 anim.shaft_rgba = main_shaft;
                 anim.tip_rgba = main_tip;
             }
-            anim.secondary_alpha_u = (e.tier == TipTier::Secondary) ? 0.f : 0.f;
+            anim.secondary_alpha_u = 0.f;
             if (e.tier == TipTier::Secondary)
                 anim.secondary_fade_start = now;
         }
         else
         {
-            // Never re-enter Growing.
-            if (anim.phase == ArrowPhase::Growing && (now - anim.birth_sec) >= kArrowGrowSec)
+            // Never re-enter Growing for tip keys.
+            if (anim.phase == ArrowPhase::Growing)
                 anim.phase = ArrowPhase::Held;
             if (anim.phase == ArrowPhase::Dying || anim.phase == ArrowPhase::Fading)
             {
-                // Revive to Held full length (no re-grow).
                 anim.phase = ArrowPhase::Held;
                 anim.fade_start_sec = 0.f;
             }
 
-            // Tier transitions without re-grow.
             if (anim.tier != e.tier)
             {
                 if (e.tier == TipTier::Secondary && anim.tier == TipTier::Primary)
@@ -590,36 +594,23 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         if (!inset_segment(anim.from_pos, anim.to_pos, clearance, from_inset, to_inset))
             continue;
 
-        float grow_u = 1.f;
+        // Tip deps: always full length (grow_u=1); only selection/hover re-grow.
+        constexpr float grow_u = 1.f;
         glm::vec4 shaft = anim.shaft_rgba;
         glm::vec4 tipc = anim.tip_rgba;
 
         if (anim.phase == ArrowPhase::Growing)
+            anim.phase = ArrowPhase::Held;
+
+        if (anim.phase == ArrowPhase::Fading)
         {
-            const float age = now - anim.birth_sec;
-            if (age <= 0.f)
-                continue;
-            grow_u = std::clamp(age / kArrowGrowSec, 0.f, 1.f);
-            if (grow_u >= 1.f)
-                anim.phase = ArrowPhase::Held;
-        }
-        else if (anim.phase == ArrowPhase::Fading)
-        {
-            grow_u = 1.f; // frozen full length
             const float t =
                 std::clamp((now - anim.fade_start_sec) / kTipReplaceFadeSec, 0.f, 1.f);
             shaft.a *= (1.f - t);
             tipc.a *= (1.f - t);
-            if (t >= 1.f)
-            {
-                // erase later
-                anim.phase = ArrowPhase::Fading;
-                anim.fade_start_sec = now - kTipReplaceFadeSec; // mark done
-            }
         }
         else if (anim.phase == ArrowPhase::Dying)
         {
-            grow_u = 1.f;
             const float t = std::clamp((now - anim.fade_start_sec) / kDeathSec, 0.f, 1.f);
             const glm::vec4 death = kDeathArrowColor();
             shaft = death;
@@ -632,6 +623,7 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             (anim.phase == ArrowPhase::Fading || anim.phase == ArrowPhase::Dying))
             continue;
 
+        // Linear gradient base→head along arrow (listing color → dep color).
         debug.add_arrow(from_inset, to_inset, shaft, tipc, tip_len * anim.tip_scale,
                         tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, kDepRadial, grow_u);
         ++drawn;
@@ -1724,8 +1716,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
             float bold_z = 0.f;
             bool have_bold = false;
+            // Bold the completed-segment boundary under the eye (skip open live k=0).
             for (int i = 0; i < n_client; ++i)
             {
+                if (client_ring[i].k <= 0)
+                    continue;
                 if (eye_z >= client_ring[i].z_new - cross_eps &&
                     eye_z <= client_ring[i].z_old + cross_eps)
                 {
@@ -1734,20 +1729,26 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     break;
                 }
             }
-            // Fading-out segments still draw planes until alpha ~0.
+            // Barrier planes mark completed segment boundaries only.
+            // Never draw a plane for the open live segment (k=0 / G=G_live).
             for (const auto& kv : seg_fade_alpha_)
             {
                 if (kv.second < 0.02f)
                     continue;
                 const int k = kv.first;
-                if (k > G_live)
-                    continue;
+                if (k <= 0 || k > G_live)
+                    continue; // k==0 = open live — no plane until it rolls to history
                 const int G = std::max(0, G_live - k);
+                if (G >= G_live)
+                    continue;
                 const int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
                 const float past_z =
                     ts_to_z(from_ms, timeline_origin_ms, meters_per_second);
                 // from is older edge for window (higher Z when genesis < now).
-                const float z_edge = past_z; // past edge of segment k
+                const float z_edge = past_z;
+                // Skip if plane sits on top of the eye (attached live tip).
+                if (std::abs(z_edge - eye_z) < std::max(2.f, seg_width_z * 0.05f))
+                    continue;
                 const bool bold = have_bold && std::abs(z_edge - bold_z) < 0.25f;
                 glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
                 col.a *= kv.second;
