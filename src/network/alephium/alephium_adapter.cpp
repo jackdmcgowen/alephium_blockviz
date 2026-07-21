@@ -15,14 +15,7 @@
 
 #include "domain/alph_block.hpp"
 #include "network/commands.h"
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <psapi.h>
-#endif
+#include "network/platform/net_platform.hpp"
 
 namespace
 {
@@ -4070,13 +4063,7 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
     static constexpr int kRamKeepLookbacks = ALPH_LOAD_RING_SEGMENTS;
 
     size_t private_bytes = 0;
-#if defined(_WIN32)
-    PROCESS_MEMORY_COUNTERS_EX pmc{};
-    if (GetProcessMemoryInfo(GetCurrentProcess(),
-                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc),
-                             sizeof(pmc)))
-        private_bytes = static_cast<size_t>(pmc.PrivateUsage);
-#endif
+    (void)net_platform_process_private_bytes(&private_bytes);
     const size_t nodes = scene_.graph().node_count();
     const bool soft =
         (private_bytes > 0 && private_bytes >= kSoftMemBytes) || nodes >= kSoftMaxNodes;

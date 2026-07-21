@@ -20,8 +20,8 @@ struct SoftwareIdentity
 
 struct EngineCreateInfo
 {
-    void*    platform_instance = nullptr; // HINSTANCE
-    void*    window            = nullptr; // HWND
+    void*    platform_instance = nullptr; // HINSTANCE | display / unused on GLFW
+    void*    window            = nullptr; // HWND | GLFWwindow*
     uint32_t width             = 0;
     uint32_t height            = 0;
     bool     enable_validation = true;    // Debug default true

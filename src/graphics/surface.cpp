@@ -1,29 +1,15 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
+#include "graphics/platform/gfx_platform.hpp"
 
-#include <windows.h>
-#include <vulkan/vulkan_win32.h>
+// Thin wrappers — implementation lives in graphics/platform/gfx_platform_*.cpp
 
-VkSurfaceKHR create_win32_surface(VkInstance instance, void *hwnd, void *hinstance)
+VkSurfaceKHR create_platform_surface(VkInstance instance, void* window, void* platform_instance)
 {
-    VkSurfaceKHR surface;
-    VkWin32SurfaceCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    createInfo.hwnd = (HWND)hwnd;
-    createInfo.hinstance = (HINSTANCE)hinstance;
-
-    if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create window surface");
-    }
-
-    return(surface);
-
-}   /* create_win32_surface() */
-
+    return gfx_platform_create_surface(instance, window, platform_instance);
+}
 
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface)
 {
-    vkDestroySurfaceKHR(instance, surface, nullptr);
-
-}   /* destroy_surface() */
+    gfx_platform_destroy_surface(instance, surface);
+}

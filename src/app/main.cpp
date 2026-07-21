@@ -1,4 +1,4 @@
-﻿#include "app/pch.h"
+#include "app/pch.h"
 #include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +10,7 @@
 #include "app/scene_presenter.hpp"
 #include "app/config.h"
 #include "app/user_prefs.hpp"
-#include "app/window_fullscreen.hpp"
+#include "app/platform/app_platform.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
@@ -18,22 +18,13 @@
 
 #include <string>
 #include <vector>
-#include <windows.h>
 
-// Host window defaults (no graphics/network backends in this TU).
-#ifndef WDW_WIDTH
-#define WDW_WIDTH  1024
-#define WDW_HEIGHT 1024
-#endif
-
-static volatile bool keepRunning = true;
 static bool engine_stopped = false;
 static BlockScene scene;
 static CameraController camera;
 static IEngine* engine = nullptr;
 static BlockflowOverlay* overlay = nullptr;
 static ScenePresenter* scene_presenter = nullptr;
-static WindowFullscreenState g_fullscreen{};
 
 static void stop_engine_once()
 {
@@ -43,106 +34,30 @@ static void stop_engine_once()
     engine_stopped = true;
 }
 
-// Hide first so close/Esc feels instant; then stop systems while HWND is still valid.
-static void begin_app_exit(HWND hwnd)
-{
-    if (hwnd)
-        ShowWindow(hwnd, SW_HIDE);
-    keepRunning = false;
-    stop_engine_once();
-    if (hwnd && IsWindow(hwnd))
-        DestroyWindow(hwnd);
-}
-
-static void request_resize_if_engine()
+static void on_resize(void* /*user*/)
 {
     if (engine)
         engine->on_resize();
 }
 
-extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static void on_exit_request(void* /*user*/)
 {
-    ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
-
-    switch (msg)
-    {
-    case WM_SIZE:
-        if (engine)
-            engine->on_resize();
-        break;
-
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN:
-        // Ignore key repeats (bit 30 of lParam).
-        if (lParam & (1 << 30))
-            break;
-        if (wParam == VK_F11)
-        {
-            if (toggle_borderless_fullscreen(hwnd, g_fullscreen))
-                request_resize_if_engine();
-            return 0;
-        }
-        if (wParam == VK_ESCAPE)
-        {
-            if (g_fullscreen.fullscreen)
-            {
-                if (set_borderless_fullscreen(hwnd, g_fullscreen, false))
-                    request_resize_if_engine();
-            }
-            else
-            {
-                // Windowed: Esc quits — hide immediately, then stop graphics/network.
-                begin_app_exit(hwnd);
-            }
-            return 0;
-        }
-        break;
-
-    case WM_CLOSE:
-        // Hide first for responsive close; stop while HWND still valid for teardown.
-        begin_app_exit(hwnd);
-        return 0;
-
-    case WM_DESTROY:
-        keepRunning = false;
-        PostQuitMessage(0);
-        return 0;
-    }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    // Stop systems while native window is still valid (platform hides first).
+    stop_engine_once();
 }
 
 int main()
 {
-    HINSTANCE hInstance = GetModuleHandle(NULL);
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = WndProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = L"Alephium BlockFlow";
-    wc.hIcon = (HICON)LoadImage(NULL, L"resource\\Alephium-Logo-round.ico", IMAGE_ICON, 0, 0,
-                                LR_LOADFROMFILE | LR_DEFAULTSIZE);
-
-    RegisterClass(&wc);
-
-    HWND hwnd = CreateWindow(
-        wc.lpszClassName,
-        wc.lpszClassName,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        WDW_WIDTH, WDW_HEIGHT,
-        NULL, NULL, hInstance, NULL);
-
-    if (!hwnd)
-    {
-        printf("Failed to create window\n");
+    EngineCreateInfo create_info{};
+    create_info.application = app_identity::make();
+    if (!app_platform_create_window(&create_info, app_identity::kName, WDW_WIDTH, WDW_HEIGHT))
         return -1;
-    }
 
     ConfigArray config_array = load_configs("config.json");
     if (config_array.count == 0 || !config_array.configs[0].url)
     {
         printf("Failed to load config\n");
+        app_platform_destroy_window(create_info.window);
         return -1;
     }
 
@@ -170,13 +85,7 @@ int main()
     if (prefs.filter_multi_tx)
         printf("Prefs: filter_multi_tx=on\n");
 
-    // One init path: configure + register all systems, then init_systems / start once.
     engine = create_engine();
-
-    EngineCreateInfo create_info{};
-    create_info.platform_instance = hInstance;
-    create_info.window = hwnd;
-    create_info.application = app_identity::make();
 
     IGraphicsSystem* graphics = create_graphics_system();
     graphics->configure(create_info);
@@ -213,24 +122,12 @@ int main()
 
     engine->start();
 
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
+    app_platform_show_window(create_info.window);
 
-    MSG msg = { 0 };
-    while (keepRunning)
-    {
-        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT)
-                keepRunning = false;
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-
-        // Esc / F11 handled in WndProc (FS-aware). Do not poll GetAsyncKeyState here.
-
-        Sleep(10);
-    }
+    AppPlatformCallbacks cb{};
+    cb.on_resize = &on_resize;
+    cb.on_exit_request = &on_exit_request;
+    app_platform_run_loop(cb);
 
     stop_engine_once();
     if (overlay)

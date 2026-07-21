@@ -5,6 +5,7 @@
   "dependencies": [
     "curl",
     "cjson",
-    "glm"
+    "glm",
+    "zlib"
   ]
 }

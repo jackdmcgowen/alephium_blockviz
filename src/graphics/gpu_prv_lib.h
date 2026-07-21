@@ -20,8 +20,8 @@ void destroy_instance(VkInstance instance);
 void create_debug_messenger(VkInstance instance);
 void destroy_debug_messenger(VkInstance instance);
 
-  //surface.cpp
-VkSurfaceKHR create_win32_surface(VkInstance instance, void* hwnd, void* hinstance);
+  //surface.cpp — delegates to graphics/platform/gfx_platform_*.cpp
+VkSurfaceKHR create_platform_surface(VkInstance instance, void* window, void* platform_instance);
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface);
 
   //device.cpp

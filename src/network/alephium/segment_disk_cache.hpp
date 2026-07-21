@@ -5,7 +5,7 @@
 // Complete historical segments replace network interval fills.
 // Design: docs/segment-disk-cache.md
 //
-// Layout under %LOCALAPPDATA%/AlephiumBlockViz/cache/<domain>/:
+// Layout under <platform cache root>/<domain>/ (see network/platform/net_platform.hpp):
 //   manifest.json              # schema 3 index (RAM-cached after open)
 //   cache.log
 //   segments/G_<id>/meta.json  # bounds + complete + block_count

@@ -16,7 +16,7 @@ Current identities: **app 0.7.0 / engine 0.8.0**. Tagged `main` may lag until re
 ## Map
 
 ```text
-main / Win32 / config.json
+main / app/platform/*  / config.json
         │
         ▼
    app (overlay, ScenePresenter, camera)
@@ -24,10 +24,13 @@ main / Win32 / config.json
         ▼
    engine (BlockVizEngine, ISystem registry)
      ├── network (poll, adapter, confirm) ──► domain BlockScene
+     │     └── network/platform/*  (cache root, process memory)
      └── graphics (render thread, Vulkan)
-              ▲
-              └── IFrameSource::prepare (app ScenePresenter)
+           ├── graphics/platform/*  (surface, ImGui host, screenshot)
+           └── IFrameSource::prepare (app ScenePresenter)
 ```
+
+Platform TUs: [docs/platform.md](../platform.md).
 
 | Layer | Project | Doc |
 |-------|---------|-----|

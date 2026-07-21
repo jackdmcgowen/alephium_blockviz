@@ -44,6 +44,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\src\app\main.cpp" />
+    <ClCompile Include="..\src\app\platform\app_platform_win32.cpp" />
     <ClCompile Include="..\src\app\blockflow_overlay.cpp" />
     <ClCompile Include="..\src\app\scene_presenter.cpp" />
     <ClCompile Include="..\src\domain\block_graph.cpp" />
@@ -52,6 +53,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\app\config.h" />
+    <ClInclude Include="..\src\app\platform\app_platform.hpp" />
     <ClInclude Include="..\src\app\app_identity.hpp" />
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
     <ClInclude Include="..\src\app\camera_controller.hpp" />

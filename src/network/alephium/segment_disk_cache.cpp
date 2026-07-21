@@ -1,10 +1,7 @@
 #include "network/pch.h"
 #include "network/alephium/segment_disk_cache.hpp"
 #include "network/network_domain.hpp"
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
+#include "network/platform/net_platform.hpp"
 
 #include <zlib.h>
 
@@ -19,26 +16,6 @@
 #include <unordered_set>
 
 namespace fs = std::filesystem;
-
-namespace
-{
-std::string local_app_data_()
-{
-#if defined(_WIN32)
-    char* buf = nullptr;
-    size_t len = 0;
-    if (_dupenv_s(&buf, &len, "LOCALAPPDATA") == 0 && buf && buf[0])
-    {
-        std::string s(buf);
-        free(buf);
-        return s;
-    }
-    if (buf)
-        free(buf);
-#endif
-    return ".";
-}
-} // namespace
 
 SegmentDiskCache::SegmentDiskCache(std::string domain_key)
 {
@@ -59,7 +36,7 @@ void SegmentDiskCache::log_event(const char* fmt, ...) const
     if (!enabled())
         return;
     ensure_dirs_();
-    const std::string path = root_dir_() + "\\cache.log";
+    const fs::path path = fs::path(root_dir_()) / "cache.log";
     std::ofstream out(path, std::ios::app);
     if (!out)
         return;
@@ -134,32 +111,36 @@ int64_t SegmentDiskCache::chunk_floor_(int64_t ts_ms, int64_t from_ms)
 
 std::string SegmentDiskCache::root_dir_() const
 {
-    return local_app_data_() + "\\AlephiumBlockViz\\cache\\" + domain_key_;
+    return (fs::path(net_platform_cache_root()) / domain_key_).string();
 }
 
 std::string SegmentDiskCache::manifest_path_() const
 {
-    return root_dir_() + "\\manifest.json";
+    return (fs::path(root_dir_()) / "manifest.json").string();
 }
 
 std::string SegmentDiskCache::segment_dir_(int g_seg) const
 {
-    return root_dir_() + "\\segments\\G_" + std::to_string(g_seg);
+    return (fs::path(root_dir_()) / "segments" / ("G_" + std::to_string(g_seg))).string();
 }
 
 std::string SegmentDiskCache::segment_meta_path_(int g_seg) const
 {
-    return segment_dir_(g_seg) + "\\meta.json";
+    return (fs::path(segment_dir_(g_seg)) / "meta.json").string();
 }
 
 std::string SegmentDiskCache::segment_chunk_path_(int g_seg, int64_t chunk_from) const
 {
-    return segment_dir_(g_seg) + "\\c_" + std::to_string(chunk_from) + ".json.gz";
+    return (fs::path(segment_dir_(g_seg)) /
+            ("c_" + std::to_string(chunk_from) + ".json.gz"))
+        .string();
 }
 
 std::string SegmentDiskCache::legacy_v2_pack_path_(int g_seg) const
 {
-    return root_dir_() + "\\segments\\G_" + std::to_string(g_seg) + ".json.gz";
+    return (fs::path(root_dir_()) / "segments" /
+            ("G_" + std::to_string(g_seg) + ".json.gz"))
+        .string();
 }
 
 bool SegmentDiskCache::ensure_dirs_() const
@@ -167,7 +148,7 @@ bool SegmentDiskCache::ensure_dirs_() const
     if (!enabled())
         return false;
     std::error_code ec;
-    fs::create_directories(root_dir_() + "\\segments", ec);
+    fs::create_directories(fs::path(root_dir_()) / "segments", ec);
     if (ec)
     {
         std::printf("[disk-cache] create_directories failed root=%s ec=%s\n",
@@ -181,7 +162,7 @@ bool SegmentDiskCache::ensure_dirs_() const
 void SegmentDiskCache::wipe_legacy_v1_layout_() const
 {
     std::error_code ec;
-    const fs::path blocks = root_dir_() + "\\blocks";
+    const fs::path blocks = fs::path(root_dir_()) / "blocks";
     if (fs::exists(blocks, ec))
     {
         fs::remove_all(blocks, ec);
@@ -436,7 +417,7 @@ void SegmentDiskCache::garbage_collect_orphans_(const std::vector<SegmentMeta>& 
     for (const SegmentMeta& m : keep)
         live.insert(m.g_seg);
 
-    const fs::path segs = root_dir_() + "\\segments";
+    const fs::path segs = fs::path(root_dir_()) / "segments";
     std::error_code ec;
     if (!fs::exists(segs, ec))
         return;
@@ -507,7 +488,7 @@ void SegmentDiskCache::migrate_v2_packs_if_needed_() const
 {
     if (!enabled())
         return;
-    const fs::path segs = root_dir_() + "\\segments";
+    const fs::path segs = fs::path(root_dir_()) / "segments";
     std::error_code ec;
     if (!fs::exists(segs, ec))
         return;

@@ -1,14 +1,15 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
+#include "graphics/platform/gfx_platform.hpp"
 
-#include <windows.h> //OutputDebugString
+#include <cstdio>
 
 #ifndef NDEBUG
-static const bool enableValidationLayers = TRUE;
-static const bool enableValidationLogging = TRUE;
+static const bool enableValidationLayers = true;
+static const bool enableValidationLogging = true;
 #else
-static const bool enableValidationLayers = FALSE;
-static const bool enableValidationLogging = FALSE;
+static const bool enableValidationLayers = false;
+static const bool enableValidationLogging = false;
 #endif
 
 FILE* validationFile;
@@ -26,7 +27,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
         fprintf(validationFile, "%s\n", pCallbackData->pMessage);
         fflush(validationFile); // survive hard kill during /vulkan-validator re-verify
     }
-    OutputDebugStringA(pCallbackData->pMessage);
+    gfx_platform_debug_log(pCallbackData->pMessage);
 
     return VK_FALSE; // Return VK_FALSE to not abort the call
 
@@ -39,7 +40,7 @@ void create_debug_messenger(VkInstance instance)
 
     if (enableValidationLogging) {
         // CWD is repo root (LocalDebuggerWorkingDirectory); keep logs out of source tree.
-        CreateDirectoryA("build", nullptr);
+        gfx_platform_ensure_directory("build");
         validationFile = fopen("build/debug.log", "a+");
 
         if (!validationFile)

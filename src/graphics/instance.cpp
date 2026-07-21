@@ -1,9 +1,7 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "gpu_prv_lib.h"
 #include "engine_requirements.hpp"
-
-#include <windows.h>
-#include <vulkan/vulkan_win32.h>
+#include "graphics/platform/gfx_platform.hpp"
 
 VkInstance create_instance(const SoftwareIdentity& application,
                            const SoftwareIdentity& engine)
@@ -31,26 +29,25 @@ VkInstance create_instance(const SoftwareIdentity& application,
         engine.version_patch);
     appInfo.apiVersion = kRequiredVulkanApiVersion;
 
+    const char* ext_storage[8] = {};
+    uint32_t ext_count = 0;
+#ifndef NDEBUG
+    ext_storage[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+#endif
+    {
+        const char* surf[4] = {};
+        const uint32_t n = gfx_platform_surface_extension_names(surf, 4);
+        for (uint32_t i = 0; i < n && ext_count < 8; ++i)
+            ext_storage[ext_count++] = surf[i];
+    }
+
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
-    const char* extensions[] =
-    {
+    createInfo.enabledExtensionCount = ext_count;
+    createInfo.ppEnabledExtensionNames = ext_storage;
 #ifndef NDEBUG
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#endif
-
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-    };
     const char* enbl_layers[] = { "VK_LAYER_KHRONOS_validation" };
-#ifndef NDEBUG
-    createInfo.enabledExtensionCount = 3;
-#else
-    createInfo.enabledExtensionCount = 2;
-#endif
-    createInfo.ppEnabledExtensionNames = extensions;
-#ifndef NDEBUG
     createInfo.enabledLayerCount = 1;
     createInfo.ppEnabledLayerNames = enbl_layers;
 #endif

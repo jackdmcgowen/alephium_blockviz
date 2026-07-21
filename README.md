@@ -27,15 +27,19 @@ Historical design archives (not live backlogs): [modularization](docs/graphics-m
 
 ## Build & run
 
+**Windows (current):** MSVC / `sln/alephium_visualizer.sln`  
+**Linux:** in progress — OS code is isolated under `src/*/platform/` ([docs/platform.md](docs/platform.md)).
+
 1. Install [Vulkan SDK](https://vulkan.lunarg.com/) and MSVC (VS 2022+).
-2. From the repo root:
+2. `git submodule update --init --recursive` (Dear ImGui + vcpkg).
+3. From the repo root:
 
 ```bat
 install_deps.bat
 ```
 
-3. Open `sln/alephium_visualizer.sln`, build **Debug|x64** or **Release|x64**.
-4. Run with cwd = repo root so `config.json` and `resource/` resolve.
+4. Open `sln/alephium_visualizer.sln`, build **Debug|x64** or **Release|x64**.
+5. Run with cwd = repo root so `config.json` and `resource/` resolve.
 
 ```json
 [
