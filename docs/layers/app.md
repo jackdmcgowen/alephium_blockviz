@@ -45,10 +45,11 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | Cue | Meaning |
 |-----|---------|
 | **Solid α** | Confirmed bag with all deps live |
-| **Green** | Per-lane frontier tip `H_c` (or walk-anim display) + full `blockDeps` arrows |
-| **Cyan** | Unconfirmed height &gt; `H_c` that deps a domain frontier tip + link arrows into tip |
+| **Green Sobel** | Per-lane frontier tip `H_c` (or walk-anim display) |
+| **Tip dep arrows** | Dual RGBA: shaft = listing block color, tip = dep color (white if missing). Primary confirmed = solid main dual; unconfirmed tips cyan→main; secondary (prior tip) solid→translucent main (α floor &gt; 0). Grow once, freeze; fade when replaced; red death if listing removed. Only selection/hover replay grows again. |
+| **Cyan Sobel** | Unconfirmed roles (outline); arrow shafts no longer stay solid cyan |
 | **Orange** | Missing-dep incompletes (not green/cyan) |
-| **Gold** | Selection (Sobel + ephemeral arrows) |
+| **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
 | **Red** | Removal death fade |
 
 Presentation only — confirmation marks come from **network** into `BlockScene`.

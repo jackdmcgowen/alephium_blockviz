@@ -32,6 +32,17 @@ public:
                    uint32_t radial_segments = kDefaultRadialSegments,
                    float grow_u = 1.0f);
 
+    // Dual RGBA: shaft cylinder uses shaft_rgba; cone tip uses tip_rgba (e.g. listing vs dep block colors).
+    void add_arrow(const glm::vec3& start,
+                   const glm::vec3& end,
+                   const glm::vec4& shaft_rgba,
+                   const glm::vec4& tip_rgba,
+                   float tip_length,
+                   float tip_radius,
+                   float shaft_radius = -1.0f,
+                   uint32_t radial_segments = kDefaultRadialSegments,
+                   float grow_u = 1.0f);
+
     // Append a mesh; indices are local (0 .. vert_count-1) and are rebased.
     void add_mesh(const DebugVertex* verts, uint32_t vert_count,
                   const uint32_t* indices, uint32_t index_count);

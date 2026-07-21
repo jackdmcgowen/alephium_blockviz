@@ -40,6 +40,12 @@ private:
     static constexpr float  kConfirmBlendSec = 0.35f;
     static constexpr float  kSegFadeInSec   = 0.28f;
     static constexpr float  kSegFadeOutSec  = 0.32f;
+    static constexpr float  kCyanToMainSec  = 0.40f;
+    static constexpr float  kSecondaryAlphaSec = 0.50f;
+    static constexpr float  kTipReplaceFadeSec = 0.32f;
+    static constexpr float  kTipSolidAlpha = 0.90f;
+    static constexpr float  kTipSecondaryAlpha = 0.40f; // floor > 0
+    static constexpr uint32_t kMaxTipDepArrows = 2048;
     // Selection BFS dep fan: multi-segment DAG + snappy level-wave anim.
     static constexpr int    kMaxSelDepNodes       = 4096;
     static constexpr int    kMaxSelDepEdges       = 8192;
@@ -49,8 +55,9 @@ private:
     static constexpr float  kSelDepEdgeStagger    = 0.0015f; // within-level micro delay
     static constexpr float  kSelDepMaxStaggerSec  = 0.25f;  // hard cap — fan never waits seconds
 
-    // Growing → Held → Dying (remove only). No unused Fading/Gone.
-    enum class ArrowPhase : uint8_t { Growing, Held, Dying };
+    // Growing → Held → Fading (replaced) | Dying (block removed). Never re-grow.
+    enum class ArrowPhase : uint8_t { Growing, Held, Fading, Dying };
+    enum class TipTier : uint8_t { Primary, Secondary, Unconfirmed };
 
     // Full BFS of block deps from selected root (static gold fan).
     struct SelectionDepEdge
@@ -77,13 +84,17 @@ private:
         glm::vec3  from_pos{ 0.f };
         glm::vec3  to_pos{ 0.f };
         bool       has_pos        = false;
-        float      base_alpha     = 0.95f;
         float      tip_scale      = 1.f;
-        // 0 = cyan (frontier child link), 1 = green (frontier tip deps). Lerps on role change.
-        float      confirm_blend_t         = 0.f;
-        float      confirm_blend_from      = 0.f;
-        float      confirm_blend_start_sec = -1.f;
-        bool       want_green              = false;
+        // Dual main RGBA (listing shaft / dep tip); white tip if dep missing.
+        glm::vec4  shaft_rgba{ 1.f, 1.f, 1.f, 0.9f };
+        glm::vec4  tip_rgba{ 1.f, 1.f, 1.f, 0.9f };
+        TipTier    tier = TipTier::Primary;
+        // Unconfirmed: 0 = pure cyan dual, 1 = full main dual.
+        float      cyan_to_main_u = 1.f;
+        float      cyan_to_main_start = -1.f;
+        // Secondary: 0 = solid, 1 = translucent floor applied.
+        float      secondary_alpha_u = 0.f;
+        float      secondary_fade_start = -1.f;
     };
 
     struct DyingBlock
@@ -105,12 +116,17 @@ private:
     float now_sec_() const;
     void tip_dep_tick_and_draw_(DebugDrawer& debug,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
+                                const std::unordered_map<std::string, glm::vec3>& block_colors,
                                 const std::unordered_set<std::string>& live_nodes,
                                 const std::unordered_set<std::string>& drawn_set,
                                 const std::unordered_set<std::string>& green_display,
                                 const std::unordered_set<std::string>& cyan_owners,
+                                const std::unordered_set<std::string>& unconfirmed_tips,
                                 const std::unordered_set<std::string>& frontier_domain,
                                 float tip_len, float tip_rad, float shaft_r, float clearance);
+
+    // Per-lane previous primary tip hash (for secondary translucent fade).
+    std::string prev_primary_tip_[BlockScene::kLaneCount]{};
 
     // Short colored BFS paths (no edge soup; both ends must be drawn).
     void draw_bfs_traces_(DebugDrawer& debug,
