@@ -47,7 +47,8 @@ Project-specific include paths and PCH file names stay in each `.vcxproj`.
 **Rules**
 
 - First line of product `.cpp`: `#include "<project>/pch.h"` (qualified so projects do not pick the wrong `pch.h`).
-- PCH = **third-party + STL only** — not product headers that change often.
+- Same rule for **platform** TUs (`src/*/platform/*_win32.cpp`) — see [platform.md](platform.md). Audit: `python scripts/check_pch.py`.
+- PCH = **third-party + STL only** — not product headers that change often. Do **not** put `windows.h` in app PCH (OS lives in platform TUs).
 - `.c` files and ImGui third-party TUs: `PrecompiledHeader=NotUsing`.
 
 ## IWYU (include what you use)

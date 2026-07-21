@@ -50,10 +50,33 @@ VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.
 
 Never link both `*_win32` and `*_linux` into the same target. GLFW is linked on Linux/CMake only (not the MSVC product).
 
+## Include isolation (app must stay Vulkan-free)
+
+The **app** MSVC project does **not** add `$(VULKAN_SDK)\Include`. Including any header that pulls `<vulkan/vulkan.h>` fails with **C1083**.
+
+| Consumer | May include |
+|----------|-------------|
+| **app** (product + harnesses) | `gpu_pub_lib.h`, `app/platform/app_platform.hpp`, engine public APIs |
+| **app platform** `*_win32` / `*_linux` | OS headers + **forward decls** of thin graphics hooks — **not** `gfx_platform.hpp` today |
+| **graphics** product TUs | `gfx_platform.hpp`, Vulkan, layer pch |
+| **network** product TUs | `net_platform.hpp`, curl/cJSON, layer pch |
+
+**Incident (2026-07):** `app_platform_*.cpp` included `graphics/platform/gfx_platform.hpp` (which includes Vulkan) → Windows app link/compile broke. Fix: forward-declare `gfx_platform_configure_headless(...)` in the app platform TU (linked via `graphics.lib`). Longer-term: split a Vulkan-free host-hooks header (see [ROADMAP](ROADMAP.md) P1).
+
+## Dual-track smoke
+
+Linux CMake/CI green does **not** prove Windows. After any change under `src/*/platform/**`, CMake, or vcpkg platform deps:
+
+| Track | Gate |
+|-------|------|
+| **Windows (required for product)** | `msbuild sln\alephium_visualizer.sln /p:Configuration=Debug /p:Platform=x64` |
+| **Linux** | CMake product + `scripts/run_vnv.sh` (or GitHub Actions) |
+| **PCH hygiene** | `python scripts/check_pch.py` |
+
 ## Contracts
 
 - **App** owns the event loop and fullscreen; graphics only observes client size via `gfx_platform_get_window_size`.
 - **Graphics** public types stay Vulkan-free (`gpu_pub_lib.h`); native handles remain `void*` in `EngineCreateInfo`.
 - **Network** uses `net_platform_cache_root()` + `std::filesystem` for paths (no hard-coded separators).
 
-See also: Linux expansion plan / roadmap (desktop port).
+See also: [linux.md](linux.md), [ROADMAP.md](ROADMAP.md).

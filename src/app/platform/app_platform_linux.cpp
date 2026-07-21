@@ -1,5 +1,7 @@
 #include "app/platform/app_platform.hpp"
-#include "graphics/platform/gfx_platform.hpp"
+
+// Linked via graphics. Avoid gfx_platform.hpp (Vulkan headers).
+void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
 
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE

@@ -49,7 +49,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Merge `integration/platform/linux/01` → main** after Windows smoke checklist | build | Dual-track green |
+| 1 | **Merge `integration/platform/linux/01` → main** after Windows MSVC product smoke | build | Dual-track: Linux CI ≠ MSVC sln (PCH + include-isolation incidents) |
 
 ---
 
@@ -57,9 +57,11 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 2 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
-| 3 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
-| 4 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
+| 2 | **Include-boundary audit** (extend `check_pch.py` or sibling) | build | Fail if `src/app/**` includes `gfx_platform.hpp` / `vulkan/vulkan.h` |
+| 3 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gfx_platform.hpp` — app can include without Vulkan |
+| 4 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
+| 5 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
+| 6 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
 
 ---
 
@@ -67,12 +69,12 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 10 | History presentation LOD | app · network | Sliding ring in RAM; presentation LOD open |
-| 11 | Second real chain adapter | [network](layers/network.md) | After FakeChain multi-adapter wiring |
-| 12 | CMake-primary on Windows (keep sln optional) | build | One target graph |
-| 13 | Unify Windows host on GLFW | app · graphics | Drop dual host implementations |
-| 14 | AppImage / packaging | ship | Optional |
-| 15 | macOS / MoltenVK | platform | New `*_macos.cpp` — unscheduled |
+| 7 | History presentation LOD | app · network | Sliding ring in RAM; presentation LOD open |
+| 8 | Second real chain adapter | [network](layers/network.md) | After FakeChain multi-adapter wiring |
+| 9 | CMake-primary on Windows (keep sln optional) | build | One target graph |
+| 10 | Unify Windows host on GLFW | app · graphics | Drop dual host implementations |
+| 11 | AppImage / packaging | ship | Optional |
+| 12 | macOS / MoltenVK | platform | New `*_macos.cpp` — unscheduled |
 
 ---
 
@@ -101,7 +103,17 @@ Else
 
 New MSVC product .cpp (PCH=Use)?
   → first line: #include "<area>/pch.h"   (includes platform/*_win32.cpp)
+  → python scripts/check_pch.py
+
+App code needing a graphics platform hook?
+  → do NOT include gfx_platform.hpp (Vulkan)
+  → forward-declare or gpu_pub_lib.h / future host-hooks header
+
+Platform / CMake / Linux-only change?
+  → incomplete until MSVC sln product build is green (dual-track)
 ```
+
+Lessons and include table: [platform.md](platform.md).
 
 ---
 

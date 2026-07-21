@@ -1,6 +1,5 @@
 #include "app/pch.h"
 #include "app/platform/app_platform.hpp"
-#include "graphics/platform/gfx_platform.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -8,6 +7,10 @@
 #include <windows.h>
 
 #include <cstdio>
+
+// Linked via graphics.lib. Do not include gfx_platform.hpp (pulls Vulkan headers;
+// app project has no VULKAN_SDK include path).
+void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
 
 // ImGui Win32 WndProc forward (implemented in imgui_impl_win32.cpp).
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
