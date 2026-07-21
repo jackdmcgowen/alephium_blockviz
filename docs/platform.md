@@ -28,10 +28,12 @@ src/network/platform/
 | MSVC (`sln/*.vcxproj`) | Compile only `*_win32.cpp` |
 | CMake (`CMakeLists.txt`) | `if(WIN32)` → win32 else → linux |
 
+**MSVC PCH:** each `*_win32.cpp` must `#include` the layer pch first (`app/pch.h`, `graphics/pch.h`, or `network/pch.h`) — same rule as other product TUs.
+
 Linux steps: [linux.md](linux.md).  
 VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.sh`.
 
-Never link both `*_win32` and `*_linux` into the same target.
+Never link both `*_win32` and `*_linux` into the same target. GLFW is linked on Linux/CMake only (not the MSVC product).
 
 ## Contracts
 

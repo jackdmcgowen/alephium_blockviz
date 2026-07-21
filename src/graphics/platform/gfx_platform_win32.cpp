@@ -1,3 +1,4 @@
+#include "graphics/pch.h"
 #include "graphics/platform/gfx_platform.hpp"
 
 #ifndef NOMINMAX

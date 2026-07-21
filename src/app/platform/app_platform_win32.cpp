@@ -1,3 +1,4 @@
+#include "app/pch.h"
 #include "app/platform/app_platform.hpp"
 
 #ifndef NOMINMAX
