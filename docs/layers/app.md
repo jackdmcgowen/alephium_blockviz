@@ -69,7 +69,8 @@ Presentation only — confirmation marks come from **network** into `BlockScene`
 | State | Length | Color |
 |-------|--------|--------|
 | Primary | Full immediately (no grow) | Linear dual RGBA along axis: base=listing block, head=dep block (white if missing) |
-| Unconfirmed | Full immediately | Cyan → main dual (color lerp only) |
+| Unconfirmed → unconfirmed | Full immediately | **Cyan both ends** |
+| Unconfirmed → confirmed | Full immediately | Cyan → main dual (color lerp) |
 | Secondary | Full immediately | Main dual; α solid → translucent floor (&gt; 0) |
 | Replaced | Full | Fade α → 0 then erase |
 | Listing removed | Full | Red death α → 0 |

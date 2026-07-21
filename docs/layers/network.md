@@ -51,6 +51,8 @@ Additional policy themes (see header comments on `AlephiumAdapter`): sequential 
 
 **DAG missing fill:** budgeted walk from confirmed tips collects broken edges (parent in graph, dep missing). **≥2** unique missing → inclusive time range `[min_parent_ts, max_parent_ts]` (+ slack, split at max patch) on the priority hole queue. **Exactly 1** missing → sparse **single-hash queue**, drained only after DepCritical ranges are idle (so ranges can resolve clusters first). Exit path: host hides the window (`SW_HIDE`) before engine stop for responsive close.
 
+**Live sequential frontier (H_c):** established only from **network tip heights** (`MainChainCache` / `advance_sequential_tips_`). Disk cache and lagging graph max-height tips are **bag-only** — they must never set green H_c. When net tip is far ahead of a lagging bag, jump frontier to the network tip hash rather than crawling history gaps.
+
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
 **Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.

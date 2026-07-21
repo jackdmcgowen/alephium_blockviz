@@ -497,9 +497,22 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         }
 
         // Compose dual RGBA from cyan blend + main targets.
-        const float u = anim.cyan_to_main_u;
-        glm::vec4 shaft = glm::mix(kCyan, main_shaft, u);
-        glm::vec4 tipc = glm::mix(kCyan, main_tip, u);
+        // Unconfirmed → unconfirmed: cyan both ends (never main dual).
+        const bool dep_confirmed =
+            e.dep_drawn && !e.dep.empty() && scene_.is_confirmed_locked(e.dep);
+        glm::vec4 shaft;
+        glm::vec4 tipc;
+        if (anim.tier == TipTier::Unconfirmed && e.dep_drawn && !dep_confirmed)
+        {
+            shaft = kCyan;
+            tipc = kCyan;
+        }
+        else
+        {
+            const float u = anim.cyan_to_main_u;
+            shaft = glm::mix(kCyan, main_shaft, u);
+            tipc = glm::mix(kCyan, main_tip, u);
+        }
         float a_scale = 1.f;
         if (anim.tier == TipTier::Secondary)
         {
