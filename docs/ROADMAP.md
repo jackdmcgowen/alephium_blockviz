@@ -5,7 +5,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 **Last updated:** 2026-07-21  
-**Versions:** app **1.0.0** · engine **1.0.0** (see identity headers / tags on `main`)
+**Versions:** app **1.1.0** · engine **1.1.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|
