@@ -31,7 +31,11 @@ struct StyleBlockflow
     glm::vec4 select_gold{ 0.94f, 0.76f, 0.29f, 0.88f };
     glm::vec4 walk_trace{ 0.72f, 0.42f, 0.95f, 0.90f }; // multi-hop (≠ gold)
     glm::vec4 tip_green{ 0.24f, 0.86f, 0.52f, 0.86f };
-    glm::vec4 frontier_cyan{ 0.18f, 0.90f, 0.94f, 0.86f };
+    // Unconfirmed tip / frontier-child (high contrast vs green main + lane oranges).
+    // Defaults match death_red; product role is unconfirmed, not only removal fade.
+    glm::vec4 unconfirmed_red{ 1.00f, 0.12f, 0.10f, 0.92f };
+    // Legacy key name in JSON (frontier_cyan); kept for back-compat load only.
+    glm::vec4 frontier_cyan{ 1.00f, 0.12f, 0.10f, 0.92f };
     glm::vec4 incomplete_amber{ 1.00f, 0.54f, 0.12f, 0.88f };
     glm::vec4 death_red{ 1.00f, 0.12f, 0.10f, 0.92f };
 
@@ -48,10 +52,12 @@ struct StyleBlockflow
     {
         return glm::vec4(tip_green.r, tip_green.g, tip_green.b, sobel_intensity);
     }
+    // Unconfirmed role Sobel (was cyan frontier).
     glm::vec4 sobel_frontier() const
     {
-        return glm::vec4(frontier_cyan.r, frontier_cyan.g, frontier_cyan.b, sobel_intensity);
+        return glm::vec4(unconfirmed_red.r, unconfirmed_red.g, unconfirmed_red.b, sobel_intensity);
     }
+    glm::vec4 sobel_unconfirmed() const { return sobel_frontier(); }
     glm::vec4 sobel_incomplete() const
     {
         return glm::vec4(incomplete_amber.r, incomplete_amber.g, incomplete_amber.b,
@@ -142,12 +148,22 @@ private:
             walk_trace = v;
         if (read_vec4_(cJSON_GetObjectItem(root, "tip_green"), v))
             tip_green = v;
+        if (read_vec4_(cJSON_GetObjectItem(root, "death_red"), v))
+            death_red = v;
+        // Prefer unconfirmed_red; else death_red; else legacy frontier_cyan.
+        if (read_vec4_(cJSON_GetObjectItem(root, "unconfirmed_red"), v))
+            unconfirmed_red = v;
+        else if (read_vec4_(cJSON_GetObjectItem(root, "death_red"), v))
+            unconfirmed_red = v;
+        else if (read_vec4_(cJSON_GetObjectItem(root, "frontier_cyan"), v))
+        {
+            frontier_cyan = v;
+            unconfirmed_red = v;
+        }
         if (read_vec4_(cJSON_GetObjectItem(root, "frontier_cyan"), v))
             frontier_cyan = v;
         if (read_vec4_(cJSON_GetObjectItem(root, "incomplete_amber"), v))
             incomplete_amber = v;
-        if (read_vec4_(cJSON_GetObjectItem(root, "death_red"), v))
-            death_red = v;
 
         cJSON_Delete(root);
         return true;

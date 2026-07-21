@@ -92,6 +92,7 @@ public:
     {
         if (running_)
         {
+            // Poller flush_disk_cache runs inside stop().
             stop_backend_locked_();
             running_ = false;
         }

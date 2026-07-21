@@ -1,6 +1,7 @@
 ﻿#include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
 #include "graphics/frame/frame_shared_state.hpp"
+#include "graphics/frame/profiling/frame_profiler.hpp"
 #include "graphics/debug/debug_drawer.h"
 #include "domain/alph_block.hpp"
 #include "app/ui_chrome.hpp"
@@ -19,6 +20,66 @@
 #include "imgui_impl_vulkan.h"
 #include <windows.h>
 
+namespace
+{
+const char* bound_label(FrameBoundClass b)
+{
+    switch (b)
+    {
+    case FrameBoundClass::Cpu:         return "CPU";
+    case FrameBoundClass::Gpu:         return "GPU";
+    case FrameBoundClass::PresentSync: return "PRESENT/SYNC";
+    default:                          return "unknown";
+    }
+}
+
+void draw_profiler_hud(const FrameTimingSnapshot& snap)
+{
+    ImGui::SetNextWindowBgAlpha(0.82f);
+    ImGui::SetNextWindowPos(ImVec2(12.f, 12.f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Frame profiler (F3)", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::End();
+        return;
+    }
+    if (!snap.valid)
+    {
+        ImGui::TextUnformatted("Waiting for samples…");
+        ImGui::End();
+        return;
+    }
+    ImGui::Text("frame %.2f ms | CPU %.2f | GPU %.2f | bound %s",
+                snap.frame_ms, snap.cpu_ms, snap.gpu_ms, bound_label(snap.bound));
+    ImGui::Text("samples %llu", static_cast<unsigned long long>(snap.sample_index));
+    if (ImGui::BeginTable("scopes", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+    {
+        ImGui::TableSetupColumn("scope");
+        ImGui::TableSetupColumn("cpu");
+        ImGui::TableSetupColumn("gpu");
+        ImGui::TableSetupColumn("med cpu");
+        ImGui::TableSetupColumn("med gpu");
+        ImGui::TableHeadersRow();
+        for (uint32_t i = 0; i < snap.scope_count; ++i)
+        {
+            const FrameTimingScope& s = snap.scopes[i];
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(s.name);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.3f", s.cpu_ms);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.3f", s.gpu_ms);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.3f", s.cpu_median_ms);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.3f", s.gpu_median_ms);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+} // namespace
+
 void GraphicsSystem::render_loop()
 {
     const double frameTimeMin = 1000.0 / 60; // ~16.67ms for 60Hz
@@ -36,6 +97,7 @@ void GraphicsSystem::render_loop()
 
         QueryPerformanceCounter(&t1);
 
+        // Host-frame wall for profiler starts here (paired with end_host_frame).
         g_debugDrawer.clear();
 
         std::string selected_hash_local;
@@ -125,6 +187,73 @@ void GraphicsSystem::render_loop()
                 camera_->set_live_scroll_z(live_z);
 
                 camera_->tick(last_frame_dt_sec_);
+
+                // Same-frame cull: set near/far from eye + ring span BEFORE frustum
+                // so prepare() culls with the same clip this frame's UBO will use.
+                {
+                    const float eye_z = camera_->scroll_z();
+                    const int64_t window_ms =
+                        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+                    const int G_live =
+                        window_ms > 0 && now_ms > genesis_ms
+                            ? static_cast<int>((now_ms - genesis_ms) / window_ms)
+                            : 0;
+                    const float older_sec = eye_z - live_z;
+                    int cam_k = 0;
+                    if (older_sec >= 1.f && window_ms > 0)
+                        cam_k = static_cast<int>(
+                            older_sec / (static_cast<float>(window_ms) * 0.001f));
+                    cam_k = std::clamp(cam_k, 0, std::max(0, G_live));
+                    float vis_lo = 0.f, vis_hi = 0.f;
+                    bool have = false;
+                    float seg_w = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * mps;
+                    // Match presenter render ring: centered ±ALPH_RENDER_RING_HALF.
+                    for (int d = -ALPH_RENDER_RING_HALF; d <= ALPH_RENDER_RING_HALF; ++d)
+                    {
+                        const int k = cam_k + d;
+                        if (k < 0 || k > G_live)
+                            continue;
+                        const int G = std::max(0, G_live - k);
+                        int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
+                        int64_t to_ms = from_ms + window_ms;
+                        if (k == 0 && now_ms < to_ms)
+                            to_ms = std::max(from_ms + 1, now_ms);
+                        const float z0 =
+                            -static_cast<float>(from_ms - origin_ms) * 0.001f * mps;
+                        const float z1 =
+                            -static_cast<float>(to_ms - origin_ms) * 0.001f * mps;
+                        const float zn = std::min(z0, z1);
+                        const float zo = std::max(z0, z1);
+                        if (!have)
+                        {
+                            vis_lo = zn;
+                            vis_hi = zo;
+                            have = true;
+                            seg_w = std::max(1.f, zo - zn);
+                        }
+                        else
+                        {
+                            vis_lo = std::min(vis_lo, zn);
+                            vis_hi = std::max(vis_hi, zo);
+                        }
+                    }
+                    constexpr float kHardFarCap = 20000.f;
+                    constexpr float kMinNear = 0.5f;
+                    constexpr float kLayoutR = 20.f * 1.35f;
+                    float near_z = kMinNear;
+                    float far_z = Camera::kDefaultFarZ;
+                    if (have)
+                    {
+                        const float z_dist = std::max(std::abs(vis_hi - eye_z),
+                                                      std::abs(vis_lo - eye_z));
+                        const float pad = std::max(seg_w * 0.35f, 40.f);
+                        far_z = std::min(
+                            kHardFarCap,
+                            std::max(near_z + 50.f, z_dist + kLayoutR + 40.f + pad));
+                    }
+                    camera_->set_clip(near_z, far_z);
+                }
+
                 frame_frustum = camera_->frustum();
                 fin.frustum = &frame_frustum;
                 fin.camera_eye = camera_->camera().eye;
@@ -133,13 +262,14 @@ void GraphicsSystem::render_loop()
                     scene_->set_camera_scroll_z(camera_->scroll_z());
             }
 
-            frame_source_->prepare(fin, fout, &g_debugDrawer);
+            {
+                auto prep = frame_profiler_.cpu_scope("Prepare");
+                frame_source_->prepare(fin, fout, &g_debugDrawer);
+            }
 
             if (camera_)
             {
-                // Dynamic near/far from visible segment span (presenter suggestion).
-                // Applied after prepare so this frame's UBO matches draw-set depth;
-                // next frame's cull frustum picks up the tighter clip.
+                // Refine clip from presenter if present (matches prepass in common cases).
                 if (fout.has_clip_suggestion)
                 {
                     const float n = std::max(0.5f, fout.suggested_near_z);
@@ -159,7 +289,10 @@ void GraphicsSystem::render_loop()
             submit.instance_count = fout.instances.size();
             submit.camera = camera_ ? camera_->ubo() : CameraUBO{};
             submit.client_seq = ++submit_seq_;
-            publish_frame(submit, fout.pick_map, fout.sobel_outlines);
+            {
+                auto pub = frame_profiler_.cpu_scope("PublishUpload");
+                publish_frame(submit, fout.pick_map, fout.sobel_outlines);
+            }
 
             frame_ui = std::move(fout.ui);
             frame_ui.selected_hash = selected_hash_local;
@@ -187,13 +320,43 @@ void GraphicsSystem::render_loop()
         if (ImGui::IsKeyPressed(ImGuiKey_F12, false))
             request_screenshot(nullptr);
 
+        // F3 → toggle frame profiler HUD (+ enable sampling when shown).
+        if (ImGui::IsKeyPressed(ImGuiKey_F3, false))
+        {
+            profiler_hud_ = !profiler_hud_;
+            if (profiler_hud_ && !frame_profiler_.enabled())
+                frame_profiler_.set_enabled(true);
+            else if (!profiler_hud_)
+                frame_profiler_.set_enabled(false);
+        }
+
         if (overlay_)
+        {
+            auto ui = frame_profiler_.cpu_scope("OverlayUi");
             overlay_->draw();
+        }
+
+        if (profiler_hud_ && frame_profiler_.enabled())
+        {
+            FrameTimingSnapshot snap{};
+            frame_profiler_.copy_snapshot(snap);
+            draw_profiler_hud(snap);
+        }
 
         ImGui::Render();
-        render();
+        {
+            auto sub = frame_profiler_.cpu_scope("SubmitPresent");
+            render();
+        }
         // Capture after present path paints ImGui (end of frame content).
         consume_and_save_screenshot_();
+
+        // Work wall (before 60 Hz pad) — used for profiler frame_ms / bound class.
+        LARGE_INTEGER t_work{};
+        QueryPerformanceCounter(&t_work);
+        const float work_ms = static_cast<float>(
+            (t_work.QuadPart - t1.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart));
+        frame_profiler_.end_host_frame(work_ms);
 
         do
         {
@@ -220,6 +383,13 @@ void GraphicsSystem::render()
 
     if (begin.run_deferred_resize)
         resize_internal();
+
+    // After wait_frame for this slot: resolve prior GPU timestamps, then arm recording.
+    if (frame_profiler_.enabled())
+    {
+        frame_profiler_.on_frame_slot_ready(device, static_cast<uint32_t>(currentFrame));
+        frame_profiler_.begin_record(static_cast<uint32_t>(currentFrame));
+    }
 
     // Pick resolve for previous frame's pending GPU readback (engine policy).
     if (inFlightFrames[currentFrame].pendingPick)
@@ -261,8 +431,11 @@ void GraphicsSystem::render()
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
-    record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                          /*defer_present=*/want_sobel);
+    {
+        auto rec = frame_profiler_.cpu_scope("RecordMain");
+        record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                              /*defer_present=*/want_sobel);
+    }
 
     if (want_sobel)
     {
@@ -290,6 +463,7 @@ void GraphicsSystem::render()
         sctx.recorder = &frame_recorder_;
         sctx.frame_sync = &frame_sync_;
         sctx.presenter = &frame_presenter_;
+        sctx.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
         sobel_async_.submit(sobel_pipe_, sctx, begin.frame_index, acq.image_index);
     }
     else

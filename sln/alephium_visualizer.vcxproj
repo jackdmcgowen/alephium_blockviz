@@ -152,7 +152,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;z.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
@@ -177,7 +177,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;z.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>

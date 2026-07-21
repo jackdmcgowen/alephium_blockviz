@@ -45,13 +45,55 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | Cue | Meaning |
 |-----|---------|
 | **Solid α** | Confirmed bag with all deps live |
-| **Green** | Per-lane frontier tip `H_c` (or walk-anim display) + full `blockDeps` arrows |
-| **Cyan** | Unconfirmed height &gt; `H_c` that deps a domain frontier tip + link arrows into tip |
-| **Orange** | Missing-dep incompletes (not green/cyan) |
-| **Gold** | Selection (Sobel + ephemeral arrows) |
-| **Red** | Removal death fade |
+| **Green Sobel** | Per-lane frontier tip `H_c` (or walk-anim display) |
+| **Tip dep arrows** | See **Rule book** below |
+| **Red Sobel** | Unconfirmed roles (outline) — high contrast vs green main |
+| **Orange** | Missing-dep incompletes (not green/unconfirmed red) |
+| **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
+| **Red (fade)** | Removal death α → 0 (same family as unconfirmed) |
 
-Presentation only — confirmation marks come from **network** into `BlockScene`.
+Presentation only — confirmation marks come from **network** into `BlockScene` (anchor tips + forward novelty: all-deps-Main ⇒ Main).
+
+### Rule book — tip arrows & live segment planes
+
+**Tip roles**
+
+| Role | Who | Deps |
+|------|-----|------|
+| Primary confirmed | Domain `H_c` / walk hop | All live deps |
+| Unconfirmed tip | Per-lane max-height unconfirmed in ring | All live deps |
+| Secondary | Prior primary after tip advance | Full fan while retained |
+
+**Tip arrow appearance (not selection gold)**
+
+| State | Length | Color |
+|-------|--------|--------|
+| Primary | Full immediately (no grow) | Linear dual RGBA along axis: base=listing block, head=dep block (white if missing) |
+| Unconfirmed → unconfirmed | Full immediately | **Red both ends** |
+| Unconfirmed → confirmed | Full immediately | Red → main dual (color lerp) |
+| Secondary | Full immediately | Main dual; α solid → translucent floor (&gt; 0) |
+| Replaced | Full | Fade α → 0 then erase |
+| Listing removed | Full | Red death α → 0 |
+| Selection / hover | May grow | Gold; **only** these re-grow on select/Replay/hover |
+
+**Segment rings (three-ring model)**
+
+| Ring | Size | Role |
+|------|------|------|
+| **Render** | **7** G-windows, camera-centered (`cam_k±3`, clamped) | Cubes, tip arrows, Sobel, selection — **all non-plane draw** |
+| **Load** | **15** G-windows, camera-centered (`cam_k±7`) | Disk-first body (adapter) + **barrier planes only** (presenter) |
+| **Live poll** | last **~8s** of open G | Tip growth (not a separate G length) |
+
+**Live segment barrier planes**
+
+- **Do not** draw a plane for the open live segment interior (`k=0` / `G=G_live`).
+- **Do** draw planes for completed boundaries (`k≥1`) **out to the load ring** (both directions).
+- **No** cubes / arrows / outlines outside the **render** ring.
+- When live G rolls, the previous live G becomes historical and then gets a plane.
+
+**Frustum**
+
+- Cull frustum near/far must match this frame’s camera UBO (clip set before prepare cull).
 
 ### Sobel colors (app → graphics)
 

@@ -16,6 +16,7 @@
 // Presentation (solid/green/cyan/orange/gold) lives in ScenePresenter — not here.
 #include "network/alephium/block_fetch_pool.hpp"
 #include "network/alephium/main_chain_cache.hpp"
+#include "network/alephium/segment_disk_cache.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 
@@ -55,6 +56,10 @@ public:
     void full_reset();
 
     void set_fetch_pool(BlockFetchPool* pool) { fetch_pool_ = pool; }
+    // Domain id for disk cache (mainnet/testnet); Debug disables cache.
+    void set_disk_cache_domain(int domain);
+    // Persist all windows with blocks (call on stop / domain switch / Esc path).
+    void flush_disk_cache();
 
     void on_start();
     // Publish loading/activity HUD into BlockScene (call after poll/drain).
@@ -115,6 +120,49 @@ private:
     void enqueue_uncles_from_block_(const AlphBlock& alph);
     void label_tips_needing_reflood_();
     void refresh_lookback_floors_();
+    // Disk cache: whole G_seg units replace network interval fills.
+    void bootstrap_disk_cache_();
+    // Admit pending disk bootstrap blocks (budgeted) — avoids startup hitch.
+    int  pump_bootstrap_admit_(int max_blocks);
+    bool bootstrap_admit_pending_() const;
+    void maybe_persist_verified_segments_(bool force = false);
+    bool try_fill_window_from_disk_(int lookback_k);
+    // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
+    void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
+                                          int64_t to_ms, bool open_live_edge = false);
+    // Seed history_slots_fetched_ from disk presence (subset or all grid keys).
+    void mark_window_present_chunks_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
+                                                int64_t to_ms, bool open_live_edge,
+                                                const std::vector<int64_t>* present_keys,
+                                                bool all_keys);
+    // Dep-critical / eye timeline hole for priority interval patches.
+    enum class HolePriority : uint8_t { Bulk = 0, Eye = 1, DepCritical = 2 };
+    struct TimelineHole
+    {
+        int64_t      from_ms = 0;
+        int64_t      to_ms = 0;
+        HolePriority priority = HolePriority::Bulk;
+        int          g_seg = -1;
+        std::string  parent_hash;
+    };
+    void register_dep_hole_(const std::string& parent_hash);
+    // DAG scan: collect broken edges; range if multi-missing, else single queue.
+    struct BrokenDepStats
+    {
+        int64_t ts_min = 0;
+        int64_t ts_max = 0;
+        int     n_edges = 0;
+        int     n_unique_missing = 0;
+        std::vector<std::string> single_hashes; // when n_unique_missing==1
+    };
+    BrokenDepStats scan_broken_deps_(int node_budget);
+    void maybe_enqueue_dag_range_(const BrokenDepStats& st);
+    void enqueue_single_block_(const std::string& hash);
+    int  pump_single_block_fetches_(int max_n);
+    bool dep_critical_holes_pending_() const;
+    bool pump_priority_holes_(int max_chunks);
+    void mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms);
+    void set_disk_cache_event_(const char* fmt, ...);
     bool height_in_lookback_(uint32_t lane, int height) const;
     int  effective_lookback_floor_(uint32_t lane) const;
     // Extra older history unlocked by camera Z, in milliseconds (time, not heights).
@@ -211,6 +259,13 @@ private:
 
     void mark_scene_confirmed_(const std::string& hash);
     void mark_scene_confirmed_(const std::string& hash, int from, int to, int height);
+    // Anchor green H_c to network tip (chain_walk jump allowed).
+    void mark_scene_anchor_(const std::string& hash, int from, int to, int height);
+    // Forward novelty: if ALL known deps are Main, mark B Main (no is_main).
+    // Returns true if hash is Main after call (already was, or newly promoted).
+    bool try_forward_promote_(const std::string& hash);
+    // After promote/admit: re-try pending tips + confirm-fill parents.
+    void after_main_or_admit_(const std::string& hash);
     // Mark in-pool deps of a confirmed block as main (no is_main API).
     void propagate_main_from_confirmed_deps_(const std::string& confirmed_hash);
     // If tip is > H_c+1, walk deps to current frontier; confirm path; set walk anim.
@@ -291,8 +346,8 @@ private:
         bool    want_newest_refresh = false;
     };
     std::vector<LookbackWindowSlot> lookback_windows_;
-    // Active fetch ring (absolute indices); size ≤ kSegmentRingSize.
-    int active_ring_[3]{};
+    // Active load/fetch ring (lookback k); size ≤ kSegmentRingSize (load ring).
+    int active_ring_[ALPH_LOAD_RING_SEGMENTS]{};
     int active_ring_n_ = 0;
     int64_t genesis_ms_ = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     bool    genesis_resolved_ = false;
@@ -308,8 +363,34 @@ private:
     // Load-once: chunk from_ms successfully admitted (not mere HTTP attempt).
     // Re-GET only after fail/prune invalidation, or live tip force_newest.
     std::unordered_set<int64_t> history_slots_fetched_;
+    // Priority variable-range patches (missing deps / eye) before bulk newest-first.
+    std::vector<TimelineHole> timeline_holes_;
+    // Sparse single-hash GETs — only after DepCritical ranges are idle.
+    std::deque<std::string> single_block_q_;
+    std::unordered_set<std::string> single_block_queued_;
+    static constexpr int64_t kMinPatchMs = 8'000;
+    static constexpr int64_t kMaxPatchMs = 180'000;
+    static constexpr int kMaxSingleBlockQueue = 48;
+    static constexpr int kMaxSingleBlockPerDrain = 2;
+    // Verified segment disk cache (per domain); bootstrap + persist closed windows.
+    SegmentDiskCache disk_cache_;
+    bool disk_cache_bootstrapped_ = false;
+    int  disk_cache_bootstrap_blocks_ = 0;
+    // Chunked admit after load_recent (avoids multi-second hitch).
+    std::vector<SegmentDiskCache::CachedBlock> bootstrap_pending_;
+    size_t bootstrap_admit_i_ = 0;
+    std::vector<int> bootstrap_segment_ids_;
+    int bootstrap_g_live_ = -1;
+    bool bootstrap_windows_marked_ = false;
+    std::unordered_set<int> disk_segment_admitted_; // G complete on disk / admitted
+    std::unordered_map<int, int> disk_cache_saved_count_; // G → last saved block count
+    int64_t disk_cache_last_live_save_ms_ = 0;
+    int64_t disk_cache_last_persist_ms_ = 0;
+    char disk_cache_last_event_[160] = {};
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
+    // Topmost live 60s subsegment has been force-refreshed at least once this session.
+    bool live_edge_refreshed_ = false;
     // Deferred non-interval results when interval budget is preferred.
     std::deque<HttpIoPool::Result> deferred_fetch_results_;
 
@@ -342,8 +423,8 @@ private:
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     static constexpr int kMaxChunksPerPoll = 4;
     static constexpr int kMaxChunksPerDrain = 2;
-    // Triple-buffer ring: at most 3 active lookback windows for fetch/HUD/draw.
-    static constexpr int kSegmentRingSize = 3;
+    // Load ring: disk-first body (15 G). Render ring is app-side (7 centered).
+    static constexpr int kSegmentRingSize = ALPH_LOAD_RING_SEGMENTS;
     static constexpr int kInitialSegmentCount = 2; // bootstrap windows 0 and 1
     static constexpr int kBootstrapChunksPerPoll = 16;
     static constexpr int kBootstrapChunksPerDrain = 4;
@@ -351,5 +432,7 @@ private:
     static constexpr int kChunkMaxRetries = 3;
     // Past this fraction of current segment toward older → bump effective k.
     static constexpr float kPrefetchHysteresis = 0.40f;
-    static constexpr int kAheadChunksPerDrain = 4; // prioritize filling k+1,k+2
+    static constexpr int kAheadChunksPerDrain = 4;
+    // Disk bootstrap admit budget per drain_verify tick.
+    static constexpr int kBootstrapAdmitPerDrain = 2500;
 };

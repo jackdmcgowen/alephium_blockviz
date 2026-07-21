@@ -6,17 +6,22 @@
 void BlockGraph::apply(const GraphDelta& delta)
 {
     std::lock_guard<std::mutex> lock(mu_);
+    bool changed = false;
 
     for (const NodeId& id : delta.remove_nodes)
     {
-        nodes_.erase(id);
+        if (nodes_.erase(id) != 0)
+            changed = true;
         out_edges_.erase(id);
         for (auto& kv : out_edges_)
         {
             auto& edges = kv.second;
+            const size_t before = edges.size();
             edges.erase(std::remove_if(edges.begin(), edges.end(),
                                        [&](const GraphEdge& e) { return e.to == id || e.from == id; }),
                         edges.end());
+            if (edges.size() != before)
+                changed = true;
         }
     }
 
@@ -25,6 +30,7 @@ void BlockGraph::apply(const GraphDelta& delta)
         if (n.id.empty())
             continue;
         nodes_[n.id] = n;
+        changed = true;
     }
 
     for (const GraphEdge& e : delta.upsert_edges)
@@ -42,8 +48,13 @@ void BlockGraph::apply(const GraphDelta& delta)
             }
         }
         if (!exists)
+        {
             list.push_back(e);
+            changed = true;
+        }
     }
+    if (changed)
+        ++generation_;
 }
 
 bool BlockGraph::contains(const NodeId& id) const
@@ -63,13 +74,19 @@ std::optional<GraphNode> BlockGraph::get(const NodeId& id) const
 
 std::vector<GraphNode> BlockGraph::nodes_snapshot() const
 {
+    std::vector<GraphNode> out = nodes_snapshot_unsorted();
+    std::sort(out.begin(), out.end(),
+              [](const GraphNode& a, const GraphNode& b) { return a.id < b.id; });
+    return out;
+}
+
+std::vector<GraphNode> BlockGraph::nodes_snapshot_unsorted() const
+{
     std::lock_guard<std::mutex> lock(mu_);
     std::vector<GraphNode> out;
     out.reserve(nodes_.size());
     for (const auto& kv : nodes_)
         out.push_back(kv.second);
-    std::sort(out.begin(), out.end(),
-              [](const GraphNode& a, const GraphNode& b) { return a.id < b.id; });
     return out;
 }
 
@@ -85,6 +102,7 @@ std::vector<GraphEdge> BlockGraph::edges_from(const NodeId& id) const
 void BlockGraph::prune(int64_t min_timestamp_ms, size_t max_nodes)
 {
     std::lock_guard<std::mutex> lock(mu_);
+    bool changed = false;
 
     if (min_timestamp_ms > 0)
     {
@@ -98,6 +116,7 @@ void BlockGraph::prune(int64_t min_timestamp_ms, size_t max_nodes)
         {
             nodes_.erase(id);
             out_edges_.erase(id);
+            changed = true;
         }
     }
 
@@ -118,15 +137,26 @@ void BlockGraph::prune(int64_t min_timestamp_ms, size_t max_nodes)
         {
             nodes_.erase(sorted[i].id);
             out_edges_.erase(sorted[i].id);
+            changed = true;
         }
     }
+    if (changed)
+        ++generation_;
 }
 
 void BlockGraph::clear()
 {
     std::lock_guard<std::mutex> lock(mu_);
+    if (!nodes_.empty() || !out_edges_.empty())
+        ++generation_;
     nodes_.clear();
     out_edges_.clear();
+}
+
+uint64_t BlockGraph::generation() const
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    return generation_;
 }
 
 size_t BlockGraph::node_count() const

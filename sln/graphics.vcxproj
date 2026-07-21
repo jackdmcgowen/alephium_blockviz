@@ -136,6 +136,8 @@
     <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp" />
+    <ClCompile Include="..\src\graphics\frame\profiling\timestamp_query_pool.cpp" />
+    <ClCompile Include="..\src\graphics\frame\profiling\frame_profiler.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp" />
     <ClCompile Include="..\src\graphics\frame\selection_state.cpp" />
     <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp" />

@@ -354,6 +354,13 @@ void GraphicsSystem::init()
         std::printf("[engine] frame DAG: %s\n", g.debug_order_string().c_str());
     }
 
+    // Frame profiler: TIMESTAMP pools per in-flight slot (off until enabled).
+    if (!frame_profiler_.create(device, deviceProps.limits.timestampPeriod,
+                                MAX_FRAMES_IN_FLIGHT))
+    {
+        std::printf("[gfx] FrameProfiler: create failed (CPU scopes only if re-created)\n");
+    }
+
     inited_ = true;
 }   /* GraphicsSystem::init() */
 
@@ -617,6 +624,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.view_proj = &g_viewProj;
     rp.imgui_draw_data = ImGui::GetDrawData();
     rp.transition_color_to_present = !defer_present;
+    rp.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
 
     frame_recorder_.record_main(rp);
 
@@ -662,6 +670,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
             pick.instance_buffer = frame_resources_.instance_buffer();
             pick.index_buffer = frame_resources_.index_buffer();
             pick.instance_count = static_cast<uint32_t>(instanceCount);
+            pick.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
             picker_.record_pass(pick);
             inFlightFrames[currentFrame].pendingPick = true;
             inFlightFrames[currentFrame].pickKind = request;
@@ -680,6 +689,23 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 }   /* record_command_buffer() */
 
 
+void GraphicsSystem::enable_frame_profiler(bool enabled)
+{
+    frame_profiler_.set_enabled(enabled);
+    if (enabled)
+        profiler_hud_ = true;
+}
+
+bool GraphicsSystem::frame_profiler_enabled() const
+{
+    return frame_profiler_.enabled();
+}
+
+void GraphicsSystem::copy_frame_timing_snapshot(FrameTimingSnapshot& out) const
+{
+    frame_profiler_.copy_snapshot(out);
+}
+
 void GraphicsSystem::cleanup()
 {
     vkDeviceWaitIdle(device);
@@ -687,6 +713,8 @@ void GraphicsSystem::cleanup()
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    frame_profiler_.destroy(device);
 
     if (g_meshArena)
     {

@@ -27,11 +27,12 @@ Exact logo SVG geometry is in the brand guide; orange below matches common Aleph
 | Token | Hex / float | Use |
 |-------|-------------|-----|
 | `tip_green` | `#3DDC84` | Frontier tip Sobel / green arrows |
-| `frontier_cyan` | `#2EE6F0` | Cyan frontier-child links |
+| `unconfirmed_red` | `#FF1F1A` | Unconfirmed tip / frontier-child (same hex as death; steady outline vs α fade) |
+| `frontier_cyan` | (legacy) | JSON key still accepted; product role is unconfirmed red |
 | `incomplete_amber` | `#FF8A1F` | Incomplete / orange Sobel (not brand CTA) |
 | `select_gold` | `#F0C14A` | Selection / gold Sobel |
 | `uncle_violet` | `#B847F2` | Ghost uncle tint |
-| `death_red` | `#FF1F1A` | Removal fade |
+| `death_red` | `#FF1F1A` | Removal fade (α → 0) |
 
 ## Shard lanes (16)
 

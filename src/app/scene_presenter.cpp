@@ -25,7 +25,7 @@ constexpr float kLayoutBaseRadius = 20.0f;
 
 // Colors from StyleBlockflow::global() (brand tokens / style_blockflow.json).
 inline const StyleBlockflow& sty() { return StyleBlockflow::global(); }
-inline glm::vec4 kCyanArrowColor() { return sty().frontier_cyan; }
+inline glm::vec4 kUnconfirmedArrowColor() { return sty().unconfirmed_red; }
 inline glm::vec4 kGreenArrowColor() { return sty().tip_green; }
 inline glm::vec4 kDeathArrowColor() { return sty().death_red; }
 inline glm::vec4 kSelectionArrowColor() { return sty().select_gold; }
@@ -42,8 +42,8 @@ glm::vec4 bfs_thread_color(int thread_id)
 {
     const StyleBlockflow& s = sty();
     const glm::vec4 palette[] = {
-        s.frontier_cyan, s.tip_green, s.incomplete_amber, s.select_gold,
-        s.frontier_cyan * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
+        s.unconfirmed_red, s.tip_green, s.incomplete_amber, s.select_gold,
+        s.unconfirmed_red * 0.75f + glm::vec4(0.1f, 0.1f, 0.12f, 0.f),
         s.tip_green * 0.7f + glm::vec4(0.15f, 0.12f, 0.1f, 0.f),
         s.incomplete_amber * 0.65f + glm::vec4(0.12f, 0.1f, 0.15f, 0.f),
     };
@@ -246,39 +246,57 @@ std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_ha
     return out;
 }
 
+// RULEBOOK (tip_dep only — selection/hover are separate and may re-grow):
+// - Primary confirmed: solid dual-RGBA gradient listing→dep (white head if missing).
+// - Unconfirmed tip: full length immediately; color cyan→main dual over cyan_to_main_sec.
+// - Secondary (prior tip): solid→translucent main (alpha floor > 0).
+// - No length grow/restart for tip keys; leave-active → Fading; listing dead → Dying.
+// - Barrier planes: never for open live k=0.
 void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
+    const std::unordered_map<std::string, glm::vec3>& block_colors,
     const std::unordered_set<std::string>& live_nodes,
     const std::unordered_set<std::string>& drawn_set,
     const std::unordered_set<std::string>& green_display,
     const std::unordered_set<std::string>& cyan_owners,
+    const std::unordered_set<std::string>& unconfirmed_tips,
     const std::unordered_set<std::string>& frontier_domain,
     float tip_len, float tip_rad, float shaft_r, float clearance)
 {
     const float now = now_sec_();
     constexpr uint32_t kDepRadial = 8;
-    constexpr uint32_t kMaxDepArrows = 512;
+    const glm::vec4 kMissingWhite(1.f, 1.f, 1.f, kTipSolidAlpha);
+    const glm::vec4 kUnc = kUnconfirmedArrowColor();
 
     struct ActiveEdge
     {
         std::string key;
+        std::string listing;
+        std::string dep;
         glm::vec3 from_pos{};
         glm::vec3 to_pos{};
         int stagger_i = 0;
-        bool green = false;
+        TipTier tier = TipTier::Primary;
+        bool dep_drawn = false;
     };
 
     std::unordered_set<std::string> active_keys;
-    active_keys.reserve(64);
+    active_keys.reserve(128);
     std::vector<ActiveEdge> active;
-    active.reserve(64);
+    active.reserve(128);
 
-    auto add_edges_from = [&](const std::string& listing_hash, bool green,
+    auto placement_rgb = [&](const std::string& h) -> glm::vec3 {
+        auto it = block_colors.find(h);
+        if (it != block_colors.end())
+            return it->second;
+        return glm::vec3(0.7f, 0.7f, 0.75f);
+    };
+
+    auto add_edges_from = [&](const std::string& listing_hash, TipTier tier,
                               bool only_to_frontier_deps, int stagger_base) {
         if (listing_hash.empty() || live_nodes.count(listing_hash) == 0)
             return;
-        // Both ends must be drawn this frame (filters / segment cull).
         if (drawn_set.count(listing_hash) == 0)
             return;
         auto d = scene_.detail_store().get(listing_hash);
@@ -291,38 +309,99 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         int stagger_i = 0;
         for (const std::string& dep_hash : d->deps)
         {
-            if (dep_hash.empty() || live_nodes.count(dep_hash) == 0)
-                continue;
-            if (drawn_set.count(dep_hash) == 0)
+            if (dep_hash.empty())
                 continue;
             if (only_to_frontier_deps && frontier_domain.count(dep_hash) == 0)
                 continue;
+            // Prefer live+drawn deps for main dual color; allow missing → white tip.
+            const bool dep_live = live_nodes.count(dep_hash) != 0;
+            const bool dep_drawn = drawn_set.count(dep_hash) != 0;
             auto dep_it = positions.find(dep_hash);
-            if (dep_it == positions.end())
+            if (!dep_live || dep_it == positions.end())
+            {
+                // Missing: still show arrow toward a ghost offset if listing known.
+                if (!dep_live)
+                {
+                    ActiveEdge e;
+                    e.key = tip_edge_key(listing_hash, dep_hash);
+                    e.listing = listing_hash;
+                    e.dep = dep_hash;
+                    e.from_pos = listing_it->second;
+                    e.to_pos = listing_it->second + glm::vec3(0.f, 0.f, 2.f);
+                    e.stagger_i = stagger_base + stagger_i++;
+                    e.tier = tier;
+                    e.dep_drawn = false;
+                    active_keys.insert(e.key);
+                    active.push_back(std::move(e));
+                }
+                continue;
+            }
+            if (!dep_drawn)
                 continue;
             ActiveEdge e;
             e.key = tip_edge_key(listing_hash, dep_hash);
+            e.listing = listing_hash;
+            e.dep = dep_hash;
             e.from_pos = listing_it->second;
             e.to_pos = dep_it->second;
             e.stagger_i = stagger_base + stagger_i++;
-            e.green = green;
+            e.tier = tier;
+            e.dep_drawn = true;
             active_keys.insert(e.key);
             active.push_back(std::move(e));
         }
     };
 
     int tip_stagger_base = 0;
-    // Green: display frontier tip â†’ all live blockDeps.
+    // Primary confirmed tips: full deps, solid main dual.
     for (const std::string& tip : green_display)
     {
-        add_edges_from(tip, /*green=*/true, /*only_to_frontier_deps=*/false, tip_stagger_base);
+        add_edges_from(tip, TipTier::Primary, /*only_to_frontier=*/false, tip_stagger_base);
         tip_stagger_base += 2;
     }
-    // Cyan: frontier children â†’ only edges into domain frontier tips.
+    // Unconfirmed tips: full deps, cyan→main.
+    for (const std::string& tip : unconfirmed_tips)
+    {
+        if (green_display.count(tip))
+            continue;
+        add_edges_from(tip, TipTier::Unconfirmed, false, tip_stagger_base);
+        tip_stagger_base += 2;
+    }
+    // Secondary: previous primary tips still live (translucent main); also cyan_owners
+    // that are not already unconfirmed full tips.
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        const std::string& prev = prev_primary_tip_[lane];
+        if (prev.empty() || green_display.count(prev) || unconfirmed_tips.count(prev))
+            continue;
+        if (live_nodes.count(prev) == 0)
+            continue;
+        add_edges_from(prev, TipTier::Secondary, false, tip_stagger_base);
+        tip_stagger_base += 2;
+    }
     for (const std::string& owner : cyan_owners)
     {
-        add_edges_from(owner, /*green=*/false, /*only_to_frontier_deps=*/true, tip_stagger_base);
+        if (green_display.count(owner) || unconfirmed_tips.count(owner))
+            continue;
+        add_edges_from(owner, TipTier::Secondary, /*only_to_frontier=*/true, tip_stagger_base);
         tip_stagger_base += 2;
+    }
+
+    // After emit: remember primary tips so next advance keeps them as secondary.
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        std::string primary;
+        for (const std::string& tip : green_display)
+        {
+            auto n = scene_.graph().get(tip);
+            if (n && static_cast<int>(n->lane) == lane)
+            {
+                primary = tip;
+                break;
+            }
+        }
+        if (!primary.empty())
+            prev_primary_tip_[lane] = primary;
     }
 
     for (const ActiveEdge& e : active)
@@ -331,46 +410,123 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         anim.from_pos = e.from_pos;
         anim.to_pos = e.to_pos;
         anim.has_pos = true;
-        anim.base_alpha = e.green ? kGreenArrowColor().a : kCyanArrowColor().a;
         anim.tip_scale = 1.f;
 
-        // Cyan â†’ green color blend when the same edge key changes role.
-        if (anim.want_green != e.green)
-        {
-            const float cur = (anim.confirm_blend_start_sec < 0.f)
-                                  ? anim.confirm_blend_t
-                                  : glm::mix(anim.confirm_blend_from, anim.want_green ? 1.f : 0.f,
-                                             std::clamp((now - anim.confirm_blend_start_sec) /
-                                                            kConfirmBlendSec,
-                                                        0.f, 1.f));
-            anim.confirm_blend_from = cur;
-            anim.confirm_blend_start_sec = now;
-            anim.want_green = e.green;
-        }
+        const glm::vec3 list_rgb = placement_rgb(e.listing);
+        const glm::vec3 dep_rgb =
+            e.dep_drawn ? placement_rgb(e.dep) : glm::vec3(1.f, 1.f, 1.f);
+        const glm::vec4 main_shaft(list_rgb, kTipSolidAlpha);
+        const glm::vec4 main_tip = e.dep_drawn ? glm::vec4(dep_rgb, kTipSolidAlpha)
+                                               : kMissingWhite;
 
+        // Tip deps: full length immediately (no grow animation / never restart).
         if (anim.birth_sec < 0.f)
         {
-            anim.birth_sec = now + kArrowStagger * static_cast<float>(e.stagger_i);
-            anim.phase = ArrowPhase::Growing;
-            anim.confirm_blend_t = e.green ? 1.f : 0.f;
-            anim.confirm_blend_start_sec = -1.f;
-            anim.want_green = e.green;
-        }
-        else if (anim.phase == ArrowPhase::Growing)
-        {
-            const float age = now - anim.birth_sec;
-            if (age >= kArrowGrowSec)
-                anim.phase = ArrowPhase::Held;
-        }
-        else if (anim.phase == ArrowPhase::Dying)
-        {
-            // Edge returned to active set while dying â€” revive.
+            anim.birth_sec = now;
             anim.phase = ArrowPhase::Held;
-            anim.fade_start_sec = 0.f;
+            anim.tier = e.tier;
+            if (e.tier == TipTier::Unconfirmed)
+            {
+                anim.cyan_to_main_u = 0.f;
+                anim.cyan_to_main_start = now;
+                anim.shaft_rgba = kUnc;
+                anim.tip_rgba = kUnc;
+            }
+            else
+            {
+                anim.cyan_to_main_u = 1.f;
+                anim.cyan_to_main_start = -1.f;
+                anim.shaft_rgba = main_shaft;
+                anim.tip_rgba = main_tip;
+            }
+            anim.secondary_alpha_u = 0.f;
+            if (e.tier == TipTier::Secondary)
+                anim.secondary_fade_start = now;
         }
+        else
+        {
+            // Never re-enter Growing for tip keys.
+            if (anim.phase == ArrowPhase::Growing)
+                anim.phase = ArrowPhase::Held;
+            if (anim.phase == ArrowPhase::Dying || anim.phase == ArrowPhase::Fading)
+            {
+                anim.phase = ArrowPhase::Held;
+                anim.fade_start_sec = 0.f;
+            }
+
+            if (anim.tier != e.tier)
+            {
+                if (e.tier == TipTier::Secondary && anim.tier == TipTier::Primary)
+                {
+                    anim.secondary_fade_start = now;
+                    anim.secondary_alpha_u = 0.f;
+                }
+                if (e.tier == TipTier::Primary)
+                {
+                    anim.secondary_alpha_u = 0.f;
+                    anim.secondary_fade_start = -1.f;
+                    anim.cyan_to_main_u = 1.f;
+                }
+                if (e.tier == TipTier::Unconfirmed && anim.cyan_to_main_u >= 1.f)
+                {
+                    anim.cyan_to_main_u = 0.f;
+                    anim.cyan_to_main_start = now;
+                }
+                anim.tier = e.tier;
+            }
+        }
+
+        // Advance cyan→main for unconfirmed.
+        if (anim.tier == TipTier::Unconfirmed && anim.cyan_to_main_u < 1.f)
+        {
+            const float t0 =
+                anim.cyan_to_main_start >= 0.f ? anim.cyan_to_main_start : now;
+            anim.cyan_to_main_u =
+                std::clamp((now - t0) / kCyanToMainSec, 0.f, 1.f);
+        }
+        else if (anim.tier != TipTier::Unconfirmed)
+            anim.cyan_to_main_u = 1.f;
+
+        // Secondary solid→translucent floor.
+        if (anim.tier == TipTier::Secondary)
+        {
+            if (anim.secondary_fade_start < 0.f)
+                anim.secondary_fade_start = now;
+            anim.secondary_alpha_u = std::clamp(
+                (now - anim.secondary_fade_start) / kSecondaryAlphaSec, 0.f, 1.f);
+        }
+
+        // Compose dual RGBA from cyan blend + main targets.
+        // Unconfirmed → unconfirmed: cyan both ends (never main dual).
+        const bool dep_confirmed =
+            e.dep_drawn && !e.dep.empty() && scene_.is_confirmed_locked(e.dep);
+        glm::vec4 shaft;
+        glm::vec4 tipc;
+        if (anim.tier == TipTier::Unconfirmed && e.dep_drawn && !dep_confirmed)
+        {
+            shaft = kUnc;
+            tipc = kUnc;
+        }
+        else
+        {
+            const float u = anim.cyan_to_main_u;
+            shaft = glm::mix(kUnc, main_shaft, u);
+            tipc = glm::mix(kUnc, main_tip, u);
+        }
+        float a_scale = 1.f;
+        if (anim.tier == TipTier::Secondary)
+        {
+            a_scale = glm::mix(1.f, kTipSecondaryAlpha / kTipSolidAlpha, anim.secondary_alpha_u);
+        }
+        else if (anim.tier == TipTier::Primary)
+            a_scale = 1.f;
+        shaft.a = kTipSolidAlpha * a_scale;
+        tipc.a = kTipSolidAlpha * a_scale;
+        anim.shaft_rgba = shaft;
+        anim.tip_rgba = tipc;
     }
 
-    // Inactive / removed: red death if listing gone; erase otherwise (no red for role leave).
+    // Inactive: Fading if both live (replaced tip deps); Dying if listing gone.
     for (auto it = tip_dep_anims_.begin(); it != tip_dep_anims_.end(); )
     {
         const std::string& key = it->first;
@@ -382,18 +538,16 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             continue;
         }
 
-        if (anim.phase == ArrowPhase::Dying)
+        if (anim.phase == ArrowPhase::Dying || anim.phase == ArrowPhase::Fading)
         {
             ++it;
             continue;
         }
 
         const bool listing_live = live_nodes.count(listing) != 0;
-        const bool dep_live = live_nodes.count(dep) != 0;
-
-        if (!listing_live || !dep_live)
+        if (!listing_live)
         {
-            if (!listing_live && anim.has_pos)
+            if (anim.has_pos)
             {
                 anim.phase = ArrowPhase::Dying;
                 anim.fade_start_sec = now;
@@ -406,82 +560,111 @@ void ScenePresenter::tip_dep_tick_and_draw_(
 
         if (active_keys.count(key) == 0)
         {
-            it = tip_dep_anims_.erase(it);
+            // Replaced tip deps: fade out (not instant erase).
+            anim.phase = ArrowPhase::Fading;
+            anim.fade_start_sec = now;
+            ++it;
             continue;
         }
         ++it;
     }
 
-    uint32_t drawn = 0;
-    for (auto it = tip_dep_anims_.begin(); it != tip_dep_anims_.end(); )
+    // Draw with priority: Primary > Unconfirmed > Secondary > Growing > Fading.
+    std::vector<DepArrowAnim*> draw_list;
+    draw_list.reserve(tip_dep_anims_.size());
+    for (auto& kv : tip_dep_anims_)
     {
-        if (drawn >= kMaxDepArrows)
-            break;
-        DepArrowAnim& anim = it->second;
-        if (!anim.has_pos)
-        {
-            ++it;
-            continue;
-        }
+        if (kv.second.has_pos)
+            draw_list.push_back(&kv.second);
+    }
+    std::sort(draw_list.begin(), draw_list.end(), [](const DepArrowAnim* a, const DepArrowAnim* b) {
+        auto score = [](const DepArrowAnim* x) {
+            int s = 0;
+            if (x->phase == ArrowPhase::Held)
+                s += 100;
+            else if (x->phase == ArrowPhase::Growing)
+                s += 50;
+            else if (x->phase == ArrowPhase::Fading)
+                s += 10;
+            if (x->tier == TipTier::Primary)
+                s += 30;
+            else if (x->tier == TipTier::Unconfirmed)
+                s += 20;
+            else
+                s += 10;
+            return s;
+        };
+        return score(a) > score(b);
+    });
 
+    uint32_t drawn = 0;
+    for (DepArrowAnim* panim : draw_list)
+    {
+        if (drawn >= kMaxTipDepArrows)
+            break;
+        DepArrowAnim& anim = *panim;
         glm::vec3 from_inset, to_inset;
         if (!inset_segment(anim.from_pos, anim.to_pos, clearance, from_inset, to_inset))
-        {
-            ++it;
             continue;
-        }
 
-        float grow_u = 1.f;
-        float alpha = anim.base_alpha;
-
-        // Advance confirm blend toward target.
-        float blend = anim.confirm_blend_t;
-        if (anim.confirm_blend_start_sec >= 0.f)
-        {
-            const float u = std::clamp((now - anim.confirm_blend_start_sec) / kConfirmBlendSec,
-                                       0.f, 1.f);
-            blend = glm::mix(anim.confirm_blend_from, anim.want_green ? 1.f : 0.f, u);
-            anim.confirm_blend_t = blend;
-            if (u >= 1.f)
-                anim.confirm_blend_start_sec = -1.f;
-        }
-        else
-        {
-            blend = anim.want_green ? 1.f : 0.f;
-            anim.confirm_blend_t = blend;
-        }
-
-        glm::vec4 color = glm::mix(kCyanArrowColor(), kGreenArrowColor(), blend);
+        // Tip deps: always full length (grow_u=1); only selection/hover re-grow.
+        constexpr float grow_u = 1.f;
+        glm::vec4 shaft = anim.shaft_rgba;
+        glm::vec4 tipc = anim.tip_rgba;
 
         if (anim.phase == ArrowPhase::Growing)
+            anim.phase = ArrowPhase::Held;
+
+        if (anim.phase == ArrowPhase::Fading)
         {
-            const float age = now - anim.birth_sec;
-            if (age <= 0.f)
-            {
-                ++it;
-                continue;
-            }
-            grow_u = std::clamp(age / kArrowGrowSec, 0.f, 1.f);
-            if (grow_u >= 1.f)
-                anim.phase = ArrowPhase::Held;
+            const float t =
+                std::clamp((now - anim.fade_start_sec) / kTipReplaceFadeSec, 0.f, 1.f);
+            shaft.a *= (1.f - t);
+            tipc.a *= (1.f - t);
         }
         else if (anim.phase == ArrowPhase::Dying)
         {
-            color = kDeathArrowColor();
             const float t = std::clamp((now - anim.fade_start_sec) / kDeathSec, 0.f, 1.f);
-            alpha = anim.base_alpha * (1.f - t);
+            const glm::vec4 death = kDeathArrowColor();
+            shaft = death;
+            tipc = death;
+            shaft.a *= (1.f - t);
+            tipc.a *= (1.f - t);
+        }
+
+        if (shaft.a < 0.01f && tipc.a < 0.01f &&
+            (anim.phase == ArrowPhase::Fading || anim.phase == ArrowPhase::Dying))
+            continue;
+
+        // Linear gradient base→head along arrow (listing color → dep color).
+        debug.add_arrow(from_inset, to_inset, shaft, tipc, tip_len * anim.tip_scale,
+                        tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, kDepRadial, grow_u);
+        ++drawn;
+    }
+
+    // Erase finished fades/deaths.
+    for (auto it = tip_dep_anims_.begin(); it != tip_dep_anims_.end(); )
+    {
+        DepArrowAnim& anim = it->second;
+        if (anim.phase == ArrowPhase::Fading)
+        {
+            const float t =
+                std::clamp((now - anim.fade_start_sec) / kTipReplaceFadeSec, 0.f, 1.f);
             if (t >= 1.f)
             {
                 it = tip_dep_anims_.erase(it);
                 continue;
             }
         }
-
-        color.a = alpha;
-        debug.add_arrow(from_inset, to_inset, color,
-                        tip_len * anim.tip_scale, tip_rad * anim.tip_scale,
-                        shaft_r * anim.tip_scale, kDepRadial, grow_u);
-        ++drawn;
+        else if (anim.phase == ArrowPhase::Dying)
+        {
+            const float t = std::clamp((now - anim.fade_start_sec) / kDeathSec, 0.f, 1.f);
+            if (t >= 1.f)
+            {
+                it = tip_dep_anims_.erase(it);
+                continue;
+            }
+        }
         ++it;
     }
 }
@@ -609,8 +792,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
     std::unique_lock<std::mutex> lock(scene_.mutex());
 
-    const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot();
-
     // Sticky session origin: set once. Never recompute from min block ts — that
     // jumps live_z / attached camera every time older history admits.
     int64_t timeline_origin_ms = scene_.timeline_origin_ms();
@@ -621,23 +802,55 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         scene_.set_timeline_origin_ms(timeline_origin_ms);
     }
 
-    // Spacing unchanged: base_radius=20, meters_per_second=1, 16 lanes.
-    LayoutParams layout_params;
-    layout_params.meters_per_second = meters_per_second;
-    layout_params.base_radius = kLayoutBaseRadius;
-    layout_params.lane_count = 16;
-    layout_params.timeline_origin_ms = timeline_origin_ms;
+    const int64_t window_ms =
+        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
+    const int64_t genesis_ms = scene_.genesis_ms() > 0
+                                   ? scene_.genesis_ms()
+                                   : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    const uint64_t graph_gen = scene_.graph_generation();
 
-    LayoutResult layout = layout_.build(graph_nodes, layout_params);
+    // Rebuild layout only when graph or timeline mapping changes (camera-only frames reuse).
+    if (layout_cache_.graph_gen != graph_gen || layout_cache_.origin_ms != timeline_origin_ms ||
+        layout_cache_.genesis_ms != genesis_ms || layout_cache_.window_ms != window_ms)
+    {
+        const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot_unsorted();
+        LayoutParams layout_params;
+        layout_params.meters_per_second = meters_per_second;
+        layout_params.base_radius = kLayoutBaseRadius;
+        layout_params.lane_count = 16;
+        layout_params.timeline_origin_ms = timeline_origin_ms;
+
+        layout_cache_.layout = layout_.build(graph_nodes, layout_params);
+        layout_cache_.live_nodes.clear();
+        layout_cache_.live_nodes.reserve(graph_nodes.size());
+        layout_cache_.by_g.clear();
+        layout_cache_.by_hash.clear();
+        layout_cache_.by_hash.reserve(layout_cache_.layout.placements.size() * 2 + 1);
+
+        auto g_of = [&](int64_t ts_ms) -> int {
+            if (window_ms <= 0 || ts_ms <= genesis_ms)
+                return 0;
+            return static_cast<int>((ts_ms - genesis_ms) / window_ms);
+        };
+        for (size_t i = 0; i < layout_cache_.layout.placements.size(); ++i)
+        {
+            const PlacedBlock& p = layout_cache_.layout.placements[i];
+            layout_cache_.live_nodes.insert(p.hash);
+            layout_cache_.by_hash[p.hash] = i;
+            layout_cache_.by_g[g_of(p.timestamp_ms)].push_back(i);
+        }
+        layout_cache_.graph_gen = graph_gen;
+        layout_cache_.origin_ms = timeline_origin_ms;
+        layout_cache_.genesis_ms = genesis_ms;
+        layout_cache_.window_ms = window_ms;
+    }
+
+    const LayoutResult& layout = layout_cache_.layout;
     const auto& block_positions = layout.positions;
+    const std::unordered_set<std::string>& live_nodes = layout_cache_.live_nodes;
 
     // Network HUD (segments) — already under scene mutex.
     const BlockScene::NetworkHud hud = scene_.network_hud_locked();
-
-    std::unordered_set<std::string> live_nodes;
-    live_nodes.reserve(graph_nodes.size());
-    for (const GraphNode& n : graph_nodes)
-        live_nodes.insert(n.id);
 
     const float now = now_sec_();
     update_death_and_walk_(live_nodes, block_positions, now);
@@ -679,69 +892,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     int hc_by_lane[BlockScene::kLaneCount];
     scene_.copy_confirmed_heights_locked(hc_by_lane);
 
-    std::unordered_set<std::string> cyan_owners;
-    cyan_owners.reserve(32);
-    for (const GraphNode& n : graph_nodes)
-    {
-        if (n.id.empty() || live_nodes.count(n.id) == 0)
-            continue;
-        if (scene_.is_confirmed_locked(n.id) || scene_.is_uncle_locked(n.id) ||
-            n.role == BlockRole::Uncle)
-            continue;
-        if (n.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
-            continue;
-        const int hc = hc_by_lane[n.lane];
-        if (hc < 0 || n.height <= hc)
-            continue;
-
-        auto d = scene_.detail_store().get(n.id);
-        if (!d)
-            continue;
-        bool refs_frontier = false;
-        for (const std::string& dep : d->deps)
-        {
-            if (!dep.empty() && frontier_domain.count(dep) != 0)
-            {
-                refs_frontier = true;
-                break;
-            }
-        }
-        if (refs_frontier)
-            cyan_owners.insert(n.id);
-    }
-
-    std::unordered_map<std::string, bool> missing_dep;
-    missing_dep.reserve(graph_nodes.size());
-    std::vector<std::string> incomplete_pool;
-    incomplete_pool.reserve(64);
-    for (const GraphNode& n : graph_nodes)
-    {
-        bool missing = false;
-        if (auto d = scene_.detail_store().get(n.id))
-        {
-            for (const std::string& dep : d->deps)
-            {
-                if (dep.empty())
-                    continue;
-                if (live_nodes.count(dep) == 0)
-                {
-                    missing = true;
-                    break;
-                }
-            }
-        }
-        missing_dep[n.id] = missing;
-        if (missing && green_display.count(n.id) == 0 && cyan_owners.count(n.id) == 0)
-            incomplete_pool.push_back(n.id);
-    }
-
-    auto is_solid = [&](const std::string& h) -> bool {
-        if (!scene_.is_confirmed_locked(h))
-            return false;
-        auto it = missing_dep.find(h);
-        return !(it != missing_dep.end() && it->second);
-    };
-
     if (!in.selected_hash.empty())
     {
         auto lit = block_positions.find(in.selected_hash);
@@ -752,28 +902,23 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
     }
 
-    out.instances.reserve(layout.placements.size());
-    out.pick_map.reserve(layout.placements.size());
     // Slightly higher on dark canvas so unconfirmed cubes remain readable.
     constexpr float kUnconfirmedAlpha = 0.48f;
     const float scale = kDefaultBlockScale;
 
     // ------------------------------------------------------------------
-    // Client-side sliding triple-buffer (immediate on camera Z). Does not wait
-    // for network HUD poll cadence. Network still only *fetches* the ring.
+    // Client-side render ring: ALPH_RENDER_RING_SEGMENTS (7) windows centered
+    // on cam_k (±ALPH_RENDER_RING_HALF). At live tip (cam_k=0) clamps to 0..6.
+    // Does not wait for network HUD; fetch/load rings are adapter-owned.
     // ------------------------------------------------------------------
-    constexpr int kRingSize = 3;
+    constexpr int kRingSize = ALPH_RENDER_RING_SEGMENTS;
+    constexpr int kRingHalf = ALPH_RENDER_RING_HALF;
     const float eye_z = scene_.camera_scroll_z();
     const float R_cull = kLayoutBaseRadius * 1.35f;
-    const int64_t window_ms =
-        static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     float seg_width_z = static_cast<float>(ALPH_LOOKBACK_WINDOW_SECONDS) * meters_per_second;
 
     const int64_t now_ms =
         static_cast<int64_t>(std::time(nullptr)) * 1000;
-    const int64_t genesis_ms = scene_.genesis_ms() > 0
-                                   ? scene_.genesis_ms()
-                                   : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     const int G_live =
         window_ms > 0 && now_ms > genesis_ms
             ? static_cast<int>((now_ms - genesis_ms) / window_ms)
@@ -796,11 +941,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     };
     ClientSeg client_ring[kRingSize]{};
     int n_client = 0;
-    for (int d = 0; d < kRingSize; ++d)
+    // Centered corridor: cam_k - half … cam_k + half (clamp to [0, G_live]).
+    for (int d = -kRingHalf; d <= kRingHalf; ++d)
     {
         const int k = cam_k + d;
-        if (k > G_live)
-            break;
+        if (k < 0 || k > G_live)
+            continue;
         const int G = std::max(0, G_live - k);
         int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
         int64_t to_ms = from_ms + window_ms;
@@ -862,14 +1008,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         int64_t to_ms = 0;
         int     k = -1;
     };
-    TimeWin merged[8]{};
+    TimeWin merged[16]{};
     int n_merged = 0;
     auto add_win = [&](int64_t from_ms, int64_t to_ms, int k) {
         if (from_ms <= 0 && to_ms <= 0)
             return;
         if (to_ms <= from_ms)
             return;
-        if (n_merged >= 8)
+        if (n_merged >= 16)
             return;
         merged[n_merged].from_ms = from_ms;
         merged[n_merged].to_ms = to_ms;
@@ -949,7 +1095,97 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
     // Small pad for boundary jitter only — not a second full-segment draw range.
     const float ring_z_pad = std::max(8.f, seg_width_z * 0.02f);
-    (void)R_cull;
+
+    // G_seg set for client ring + fading lookbacks — role/instance work stays O(ring).
+    std::unordered_set<int> active_g;
+    active_g.reserve(16);
+    for (int i = 0; i < n_client; ++i)
+        active_g.insert(std::max(0, G_live - client_ring[i].k));
+    for (const auto& kv : seg_fade_alpha_)
+    {
+        if (kv.second <= 0.02f)
+            continue;
+        if (kv.first > G_live)
+            continue;
+        active_g.insert(std::max(0, G_live - kv.first));
+    }
+    std::vector<size_t> ring_indices;
+    ring_indices.reserve(4096);
+    for (int G : active_g)
+    {
+        auto it = layout_cache_.by_g.find(G);
+        if (it == layout_cache_.by_g.end())
+            continue;
+        ring_indices.insert(ring_indices.end(), it->second.begin(), it->second.end());
+    }
+
+    // Role classification only over ring placements (not full graph N).
+    std::unordered_set<std::string> cyan_owners;
+    cyan_owners.reserve(32);
+    std::unordered_map<std::string, bool> missing_dep;
+    missing_dep.reserve(ring_indices.size() + 32);
+    std::vector<std::string> incomplete_pool;
+    incomplete_pool.reserve(64);
+    for (size_t idx : ring_indices)
+    {
+        if (idx >= layout.placements.size())
+            continue;
+        const PlacedBlock& p = layout.placements[idx];
+        if (p.hash.empty())
+            continue;
+        if (scene_.is_confirmed_locked(p.hash) || scene_.is_uncle_locked(p.hash) ||
+            p.is_uncle)
+        {
+            // Still need missing_dep for solids on confirmed ring blocks.
+        }
+        else if (p.lane < static_cast<uint8_t>(BlockScene::kLaneCount))
+        {
+            const int hc = hc_by_lane[p.lane];
+            if (hc >= 0 && p.height > hc)
+            {
+                bool refs_frontier = false;
+                scene_.detail_store().visit(p.hash, [&](const AlphBlock& d) {
+                    for (const std::string& dep : d.deps)
+                    {
+                        if (!dep.empty() && frontier_domain.count(dep) != 0)
+                        {
+                            refs_frontier = true;
+                            break;
+                        }
+                    }
+                });
+                if (refs_frontier)
+                    cyan_owners.insert(p.hash);
+            }
+        }
+
+        bool missing = false;
+        scene_.detail_store().visit(p.hash, [&](const AlphBlock& d) {
+            for (const std::string& dep : d.deps)
+            {
+                if (dep.empty())
+                    continue;
+                if (live_nodes.count(dep) == 0)
+                {
+                    missing = true;
+                    break;
+                }
+            }
+        });
+        missing_dep[p.hash] = missing;
+        if (missing && green_display.count(p.hash) == 0 && cyan_owners.count(p.hash) == 0)
+            incomplete_pool.push_back(p.hash);
+    }
+
+    auto is_solid = [&](const std::string& h) -> bool {
+        if (!scene_.is_confirmed_locked(h))
+            return false;
+        auto it = missing_dep.find(h);
+        // Off-ring confirmed: treat complete if not classified this frame.
+        if (it == missing_dep.end())
+            return true;
+        return !it->second;
+    };
 
     auto block_in_visible_segment = [&](int64_t ts_ms) -> bool {
         if (n_merged <= 0 && n_client <= 0)
@@ -996,6 +1232,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
+        // Cheap Z-slab reject before frustum (ring pad already tight).
+        if (!force && have_vis_z)
+        {
+            if (placed.pos.z < vis_z_lo - ring_z_pad || placed.pos.z > vis_z_hi + ring_z_pad)
+                return false;
+        }
+        // Lateral distance cull when free-looking away from the ring.
+        if (!force)
+        {
+            const float lat2 = placed.pos.x * placed.pos.x + placed.pos.y * placed.pos.y;
+            const float rmax = R_cull + 8.f;
+            if (lat2 > rmax * rmax)
+                return false;
+        }
         const glm::vec3 half = in.instance_half_extents * scale;
         if (!force && in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
             return false;
@@ -1011,8 +1261,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             alpha = std::min(alpha, 0.55f); // uncles always slightly translucent
         float seg_a = fade_for_ts(placed.timestamp_ms);
         // No forced floor — off-ring / faded blocks stay hidden.
-        if (seg_a < 0.02f)
+        if (seg_a < 0.02f && !force)
             return false;
+        if (force && seg_a < 0.02f)
+            seg_a = 1.f; // selection/walk always visible when forced
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
@@ -1049,9 +1301,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     std::unordered_set<std::string> walk_force;
     collect_selection_dep_force_(walk_force);
 
+    out.instances.reserve(std::min(ring_indices.size() + 64, size_t(kMaxInstances)));
+    out.pick_map.reserve(out.instances.capacity());
+
     std::unordered_set<std::string> drawn;
-    for (const PlacedBlock& placed : layout.placements)
+    drawn.reserve(ring_indices.size() + 32);
+    for (size_t idx : ring_indices)
     {
+        if (idx >= layout.placements.size())
+            continue;
+        const PlacedBlock& placed = layout.placements[idx];
         if (!block_in_visible_segment(placed.timestamp_ms))
             continue;
         if (!passes_txn_filter(placed))
@@ -1062,29 +1321,31 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             drawn.insert(placed.hash);
     }
 
-    // Force-draw highlight roles so Sobel can resolve them — only if segment
-    // is in the draw set (or selection/hover, always).
-    for (const PlacedBlock& placed : layout.placements)
-    {
-        if (drawn.count(placed.hash))
-            continue;
-        const bool is_sel =
-            (!in.selected_hash.empty() && placed.hash == in.selected_hash) ||
-            (!in.hovered_hash.empty() && placed.hash == in.hovered_hash);
-        const bool is_walk = walk_force.count(placed.hash) != 0;
-        if (!is_sel && !is_walk && !block_in_visible_segment(placed.timestamp_ms))
-            continue;
-        // Multi-tx filter: still force selected/hovered/walk; other force roles must pass.
-        if (!is_sel && !is_walk && !passes_txn_filter(placed))
-            continue;
-        const bool force = is_sel || is_walk || missing_dep[placed.hash] ||
-                           green_display.count(placed.hash) ||
-                           cyan_owners.count(placed.hash);
-        if (!force)
-            continue;
+    // Force-draw highlight roles via hash map (no full placement scan).
+    auto try_force_hash = [&](const std::string& h, bool always) {
+        if (h.empty() || drawn.count(h))
+            return;
+        auto it = layout_cache_.by_hash.find(h);
+        if (it == layout_cache_.by_hash.end())
+            return;
+        const PlacedBlock& placed = layout.placements[it->second];
+        if (!always && !block_in_visible_segment(placed.timestamp_ms))
+            return;
+        if (!always && !passes_txn_filter(placed))
+            return;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
-    }
+    };
+    try_force_hash(in.selected_hash, /*always=*/true);
+    try_force_hash(in.hovered_hash, /*always=*/true);
+    for (const std::string& h : walk_force)
+        try_force_hash(h, /*always=*/true);
+    for (const std::string& h : green_display)
+        try_force_hash(h, /*always=*/false);
+    for (const std::string& h : cyan_owners)
+        try_force_hash(h, /*always=*/false);
+    for (const std::string& h : incomplete_pool)
+        try_force_hash(h, /*always=*/false);
 
     // Dynamic near/far from visible segment Z span (+ lateral pad).
     {
@@ -1220,11 +1481,49 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const float shaft_r = tip_rad * 0.4f;
         const float clearance = std::max(0.55f, meters_per_second * 0.12f * 8.f);
         constexpr uint32_t kDepRadial = 8;
-        constexpr uint32_t kMaxDepArrows = 512;
+        constexpr uint32_t kMaxHoverArrows = 1024;
 
-        tip_dep_tick_and_draw_(*debug, block_positions, live_nodes, drawn, green_display,
-                               cyan_owners, frontier_domain, tip_len, tip_rad, shaft_r,
-                               clearance);
+        // Per-lane unconfirmed max-height tip (main dual-color path, cyan→main).
+        std::unordered_set<std::string> unconfirmed_tips;
+        {
+            int best_h[BlockScene::kLaneCount];
+            std::string best_id[BlockScene::kLaneCount];
+            for (int i = 0; i < BlockScene::kLaneCount; ++i)
+            {
+                best_h[i] = -1;
+                best_id[i].clear();
+            }
+            for (const PlacedBlock& p : layout.placements)
+            {
+                if (p.hash.empty() || drawn.count(p.hash) == 0)
+                    continue;
+                if (p.lane >= BlockScene::kLaneCount)
+                    continue;
+                if (scene_.is_confirmed_locked(p.hash) || p.is_uncle ||
+                    scene_.is_uncle_locked(p.hash))
+                    continue;
+                if (green_display.count(p.hash))
+                    continue;
+                const int h = p.height;
+                if (h > best_h[p.lane])
+                {
+                    best_h[p.lane] = h;
+                    best_id[p.lane] = p.hash;
+                }
+            }
+            for (int i = 0; i < BlockScene::kLaneCount; ++i)
+                if (!best_id[i].empty())
+                    unconfirmed_tips.insert(best_id[i]);
+        }
+
+        std::unordered_map<std::string, glm::vec3> block_colors;
+        block_colors.reserve(layout.placements.size());
+        for (const PlacedBlock& p : layout.placements)
+            block_colors[p.hash] = p.color;
+
+        tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, drawn,
+                               green_display, cyan_owners, unconfirmed_tips, frontier_domain,
+                               tip_len, tip_rad, shaft_r, clearance);
         draw_bfs_traces_(*debug, block_positions, drawn);
 
         uint32_t arrow_count = 0;
@@ -1241,7 +1540,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             // Hover / misc ephemeral (own small budget).
             if (drawn.count(from_hash) == 0 || drawn.count(to_hash) == 0)
                 return;
-            if (arrow_count >= kMaxDepArrows)
+            if (arrow_count >= kMaxHoverArrows)
                 return;
             glm::vec3 from_inset, to_inset;
             if (!inset_segment(from, to, clearance, from_inset, to_inset))
@@ -1426,15 +1725,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
         }
 
-        // Barrier planes from client ring (immediate on cam_k change) + fade alpha.
-        if (n_client > 0)
+        // Barrier planes on closed segment boundaries out to the LOAD ring (15),
+        // both directions. Cubes/arrows/Sobel stay on the RENDER ring (7) only.
+        // Never for open live interior (k=0 / G=G_live tip edge).
         {
+            constexpr int kPlaneHalf = ALPH_LOAD_RING_SEGMENTS / 2; // 7 → span 15
             const float plane_half = kLayoutBaseRadius * 8.f;
             const float cross_eps = std::max(0.5f, seg_width_z * 0.02f);
             float bold_z = 0.f;
             bool have_bold = false;
+            // Bold the closed segment under the eye (render-ring membership).
             for (int i = 0; i < n_client; ++i)
             {
+                if (client_ring[i].k <= 0)
+                    continue;
                 if (eye_z >= client_ring[i].z_new - cross_eps &&
                     eye_z <= client_ring[i].z_old + cross_eps)
                 {
@@ -1443,23 +1747,25 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     break;
                 }
             }
-            // Fading-out segments still draw planes until alpha ~0.
-            for (const auto& kv : seg_fade_alpha_)
+            for (int d = -kPlaneHalf; d <= kPlaneHalf; ++d)
             {
-                if (kv.second < 0.02f)
-                    continue;
-                const int k = kv.first;
-                if (k > G_live)
-                    continue;
+                const int k = cam_k + d;
+                if (k <= 0 || k > G_live)
+                    continue; // no open-live plane
                 const int G = std::max(0, G_live - k);
+                if (G >= G_live)
+                    continue;
                 const int64_t from_ms = genesis_ms + static_cast<int64_t>(G) * window_ms;
-                const float past_z =
+                const float z_edge =
                     ts_to_z(from_ms, timeline_origin_ms, meters_per_second);
-                // from is older edge for window (higher Z when genesis < now).
-                const float z_edge = past_z; // past edge of segment k
+                if (std::abs(z_edge - eye_z) < std::max(2.f, seg_width_z * 0.05f))
+                    continue;
                 const bool bold = have_bold && std::abs(z_edge - bold_z) < 0.25f;
+                // Steady α for load-only planes; render-ring planes can use cube fade.
+                const float in_render = fade_for_k(k);
+                const float fa = (in_render > 0.02f) ? in_render : 0.07f;
                 glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
-                col.a *= kv.second;
+                col.a *= fa;
                 debug->add_z_plane_quad(z_edge, plane_half, col);
             }
         }
@@ -1579,6 +1885,13 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.net_switching = hud.switching;
         out.ui.cache_pressure_level = hud.cache_pressure_level;
         out.ui.browse_mode = hud.browse_mode;
+        out.ui.disk_cache_segments = hud.disk_cache_segments;
+        out.ui.disk_cache_mb = hud.disk_cache_mb;
+        out.ui.disk_cache_boot_blocks = hud.disk_cache_boot_blocks;
+        std::snprintf(out.ui.disk_cache_path, sizeof(out.ui.disk_cache_path), "%s",
+                      hud.disk_cache_path);
+        std::snprintf(out.ui.disk_cache_last_event, sizeof(out.ui.disk_cache_last_event), "%s",
+                      hud.disk_cache_last_event);
         out.ui.timeline_origin_ms = timeline_origin_ms;
         out.ui.genesis_ms =
             scene_.genesis_ms() > 0 ? scene_.genesis_ms() : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;

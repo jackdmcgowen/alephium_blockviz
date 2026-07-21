@@ -28,6 +28,7 @@ void NetworkPoller::start(const Config& cfg)
     cfg_ = cfg;
     base_url_copy_ = cfg.base_url;
     adapter_.configure({ cfg.lookback_ms, cfg.poll_interval_ms });
+    adapter_.set_disk_cache_domain(domain_);
     adapter_.full_reset();
     fetch_pool_.start(cfg.base_url, kFetchWorkers);
     adapter_.set_fetch_pool(&fetch_pool_);
@@ -40,12 +41,15 @@ void NetworkPoller::stop()
     running_ = false;
     if (thread_.joinable())
         thread_.join();
+    // After loop exits: write all windows with blocks (escape / domain switch / exit).
+    adapter_.flush_disk_cache();
     adapter_.set_fetch_pool(nullptr);
     fetch_pool_.stop();
 }
 
 void NetworkPoller::prepare_domain_switch()
 {
+    adapter_.flush_disk_cache();
     adapter_.full_reset();
 }
 
@@ -54,6 +58,7 @@ void NetworkPoller::set_domain_meta(int domain, const std::string& base_url)
     domain_ = domain;
     base_url_copy_ = base_url;
     cfg_.base_url = base_url;
+    adapter_.set_disk_cache_domain(domain);
 }
 
 void NetworkPoller::thread_main()

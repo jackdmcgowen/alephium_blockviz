@@ -10,8 +10,15 @@
   "select_gold": [0.94, 0.76, 0.29, 0.88],
   "walk_trace": [0.72, 0.42, 0.95, 0.90],
   "tip_green": [0.24, 0.86, 0.52, 0.86],
-  "frontier_cyan": [0.18, 0.90, 0.94, 0.86],
+  "unconfirmed_red": [1.0, 0.12, 0.10, 0.92],
+  "frontier_cyan": [1.0, 0.12, 0.10, 0.92],
   "incomplete_amber": [1.0, 0.54, 0.12, 0.88],
   "death_red": [1.0, 0.12, 0.10, 0.92],
+  "missing_dep_white": [1.0, 1.0, 1.0, 0.9],
+  "tip_arrow_solid_alpha": 0.90,
+  "tip_arrow_secondary_alpha": 0.40,
+  "cyan_to_main_sec": 0.40,
+  "secondary_alpha_sec": 0.50,
+  "tip_replace_fade_sec": 0.32,
   "bfs_alpha_scale": 0.55
 }

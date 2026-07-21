@@ -59,6 +59,12 @@ struct UiSnapshot
     int         cache_pressure_level  = 0;
     // 0 = Live mode, 1 = History mode (live tip build halted).
     int         browse_mode           = 0;
+    // Segment disk cache HUD.
+    int         disk_cache_segments   = 0;
+    int         disk_cache_mb         = 0;
+    int         disk_cache_boot_blocks = 0;
+    char        disk_cache_path[200]  = {};
+    char        disk_cache_last_event[160] = {};
 
     // Timeline segments (mirror BlockScene::TimeSegment).
     static constexpr int kMaxTimeSegments = 32;
