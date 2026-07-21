@@ -110,6 +110,8 @@ void AlephiumAdapter::reset_stats()
     pending_fill_parents_.clear();
     history_slots_fetched_.clear();
     timeline_holes_.clear();
+    single_block_q_.clear();
+    single_block_queued_.clear();
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
     live_edge_refreshed_ = false;
@@ -1177,15 +1179,213 @@ int AlephiumAdapter::poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force)
     return added > 0 ? added : 1;
 }
 
+void AlephiumAdapter::enqueue_single_block_(const std::string& hash)
+{
+    if (hash.empty() || scene_.graph().contains(hash))
+        return;
+    if (broken_dep_failed_.count(hash) || (fetch_pool_ && fetch_pool_->is_failed(hash)))
+        return;
+    if (!single_block_queued_.insert(hash).second)
+        return;
+    if (static_cast<int>(single_block_q_.size()) >= kMaxSingleBlockQueue)
+    {
+        single_block_queued_.erase(hash);
+        return;
+    }
+    single_block_q_.push_back(hash);
+}
+
+bool AlephiumAdapter::dep_critical_holes_pending_() const
+{
+    for (const TimelineHole& h : timeline_holes_)
+    {
+        if (h.priority == HolePriority::DepCritical)
+            return true;
+    }
+    return false;
+}
+
+int AlephiumAdapter::pump_single_block_fetches_(int max_n)
+{
+    if (max_n <= 0)
+        return 0;
+    // Only after dep-critical ranges are quiet so ranges can resolve many misses first.
+    if (dep_critical_holes_pending_())
+        return 0;
+    if (fetch_pool_ && fetch_pool_->io().inflight_intervals() > 0)
+        return 0;
+    if (live_catchup_active_)
+        return 0;
+
+    int n = 0;
+    while (n < max_n && !single_block_q_.empty())
+    {
+        std::string h = std::move(single_block_q_.front());
+        single_block_q_.pop_front();
+        single_block_queued_.erase(h);
+        if (h.empty() || scene_.graph().contains(h))
+            continue;
+        if (enqueue_missing_dep_(h) || (fetch_pool_ && fetch_pool_->enqueue(h)))
+            ++n;
+        else if (!scene_.graph().contains(h))
+        {
+            // Re-queue later if pool full.
+            enqueue_single_block_(h);
+            break;
+        }
+    }
+    return n;
+}
+
+AlephiumAdapter::BrokenDepStats AlephiumAdapter::scan_broken_deps_(int node_budget)
+{
+    BrokenDepStats st;
+    if (node_budget <= 0)
+        return st;
+
+    std::unordered_set<std::string> missing_set;
+    std::unordered_set<std::string> visited;
+    std::deque<std::string> q;
+
+    // Seed from confirmed frontiers (same spirit as BFS phase A).
+    for (int lane = 0; lane < BlockScene::kLaneCount; ++lane)
+    {
+        const NodeId tip = scene_.confirmed_tip_hash(static_cast<uint32_t>(lane));
+        if (!tip.empty())
+            q.push_back(tip);
+    }
+    if (q.empty())
+    {
+        for (const NodeId& tip : scene_.tip_ids())
+        {
+            if (!tip.empty())
+                q.push_back(tip);
+        }
+    }
+
+    int expanded = 0;
+    while (!q.empty() && expanded < node_budget)
+    {
+        const std::string cur = std::move(q.front());
+        q.pop_front();
+        if (cur.empty() || !visited.insert(cur).second)
+            continue;
+        ++expanded;
+
+        auto node = scene_.graph().get(cur);
+        if (!node)
+            continue;
+        if (!height_in_lookback_(node->lane, static_cast<int>(node->height)))
+            continue;
+
+        const int64_t pts = block_timestamp_ms_(cur);
+        scene_.detail_store().visit(cur, [&](const AlphBlock& d) {
+            for (const std::string& dep : d.deps)
+            {
+                if (dep.empty())
+                    continue;
+                if (scene_.graph().contains(dep))
+                {
+                    if (visited.count(dep) == 0)
+                        q.push_back(dep);
+                    continue;
+                }
+                // Broken edge: present parent → missing dep.
+                ++st.n_edges;
+                missing_set.insert(dep);
+                if (pts > 0)
+                {
+                    if (st.ts_min == 0 || pts < st.ts_min)
+                        st.ts_min = pts;
+                    if (pts > st.ts_max)
+                        st.ts_max = pts;
+                }
+            }
+        });
+    }
+
+    st.n_unique_missing = static_cast<int>(missing_set.size());
+    if (st.n_unique_missing == 1)
+        st.single_hashes.assign(missing_set.begin(), missing_set.end());
+    return st;
+}
+
+void AlephiumAdapter::maybe_enqueue_dag_range_(const BrokenDepStats& st)
+{
+    if (st.n_unique_missing < 2 || st.ts_min <= 0 || st.ts_max < st.ts_min)
+        return;
+
+    const int64_t slack =
+        static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
+    int64_t from_ts = std::max<int64_t>(0, st.ts_min - slack);
+    int64_t to_ts = st.ts_max + slack;
+
+    // Split into ≤ kMaxPatchMs windows covering [from_ts, to_ts).
+    while (from_ts < to_ts)
+    {
+        int64_t chunk_to = std::min(to_ts, from_ts + kMaxPatchMs);
+        if (chunk_to - from_ts < kMinPatchMs && chunk_to < to_ts)
+            chunk_to = std::min(to_ts, from_ts + kMinPatchMs);
+
+        bool dup = false;
+        for (const TimelineHole& h : timeline_holes_)
+        {
+            if (h.priority == HolePriority::DepCritical && h.from_ms <= from_ts &&
+                h.to_ms >= chunk_to)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+        {
+            TimelineHole hole;
+            hole.from_ms = from_ts;
+            hole.to_ms = chunk_to;
+            hole.priority = HolePriority::DepCritical;
+            hole.parent_hash = "dag-span";
+            if (genesis_resolved_ && genesis_ms_ > 0)
+                hole.g_seg = global_segment_id_((from_ts + chunk_to) / 2);
+            timeline_holes_.push_back(std::move(hole));
+        }
+        from_ts = chunk_to;
+    }
+    if (timeline_holes_.size() > 64)
+        timeline_holes_.erase(timeline_holes_.begin(),
+                              timeline_holes_.begin() +
+                                  static_cast<std::ptrdiff_t>(timeline_holes_.size() - 64));
+}
+
 void AlephiumAdapter::register_dep_hole_(const std::string& parent_hash)
 {
     if (parent_hash.empty())
         return;
+
+    // Count missing deps on this parent; singles go to hash queue, not a micro-range.
+    int missing = 0;
+    std::string only_missing;
+    scene_.detail_store().visit(parent_hash, [&](const AlphBlock& d) {
+        for (const std::string& dep : d.deps)
+        {
+            if (dep.empty() || scene_.graph().contains(dep))
+                continue;
+            ++missing;
+            only_missing = dep;
+        }
+    });
+    if (missing == 0)
+        return;
+    if (missing == 1)
+    {
+        enqueue_single_block_(only_missing);
+        return;
+    }
+
     int64_t to_ts = block_timestamp_ms_(parent_hash);
     if (to_ts <= 0)
         return;
 
-    // First try: ~2–3 block periods of older time + small slack (variable patch).
+    // Multi-missing parent: variable patch around parent (+ pad for older deps).
     const int64_t pad =
         static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 * 3;
     const int64_t slack =
@@ -1197,7 +1397,6 @@ void AlephiumAdapter::register_dep_hole_(const std::string& parent_hash)
     if (to_end - from_ts > kMaxPatchMs)
         from_ts = to_end - kMaxPatchMs;
 
-    // Dedup overlapping open holes for same parent.
     for (const TimelineHole& h : timeline_holes_)
     {
         if (h.parent_hash == parent_hash && h.from_ms <= from_ts && h.to_ms >= to_end)
@@ -1212,7 +1411,6 @@ void AlephiumAdapter::register_dep_hole_(const std::string& parent_hash)
     if (genesis_resolved_ && genesis_ms_ > 0)
         hole.g_seg = global_segment_id_(to_ts);
     timeline_holes_.push_back(std::move(hole));
-    // Cap queue growth.
     if (timeline_holes_.size() > 64)
         timeline_holes_.erase(timeline_holes_.begin(),
                               timeline_holes_.begin() +
@@ -1311,36 +1509,10 @@ bool AlephiumAdapter::pump_priority_holes_(int max_chunks)
 
 int AlephiumAdapter::request_history_slot_for_block_(const std::string& hash)
 {
-    // Prefer priority hole queue (variable range); also enqueue classic slot as fallback.
+    // Routes through register_dep_hole_: single missing → single_q; multi → range queue.
+    // Does not force an immediate poll for singles (pump drains ranges first).
     register_dep_hole_(hash);
-
-    int64_t to_ts = block_timestamp_ms_(hash);
-    if (to_ts <= 0)
-    {
-        auto n = scene_.graph().get(hash);
-        if (!n || n->height < 0)
-            return 0;
-        const NodeId tip = scene_.confirmed_tip_hash(n->lane);
-        int64_t tip_ts = block_timestamp_ms_(tip);
-        if (tip_ts <= 0)
-            tip_ts = static_cast<int64_t>(std::time(nullptr)) * 1000;
-        auto tip_n = scene_.graph().get(tip);
-        const int tip_h =
-            tip_n ? static_cast<int>(tip_n->height) : static_cast<int>(n->height);
-        const int dh = tip_h - static_cast<int>(n->height);
-        to_ts = tip_ts - static_cast<int64_t>(dh) *
-                             static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
-        if (to_ts < 0)
-            to_ts = 0;
-    }
-
-    // Variable patch around parent (clamped), not fixed 60s only.
-    const int64_t pad =
-        static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 * 3;
-    const int64_t from_ts = std::max<int64_t>(0, to_ts - pad);
-    const int64_t to_slack =
-        to_ts + static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000;
-    return poll_time_slot_(from_ts, to_slack);
+    return 1;
 }
 
 bool AlephiumAdapter::tip_pending_confirmation_() const
@@ -1655,8 +1827,10 @@ bool AlephiumAdapter::enqueue_missing_dep_(const std::string& dep_hash)
 int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
 {
     // When a confirmed block has missing deps:
-    //   live chain  → per-hash fetch (build the live pool tightly)
-    //   historical  → time-slot interval poll (no hash crawl)
+    //   live multi  → per-hash (tight tip) or range if many
+    //   live single → deferred single queue
+    //   historical multi → time range (DAG / parent pad); never bulk hash crawl
+    //   historical single → deferred single only (no micro-range)
     if (parent_hash.empty())
         return 0;
 
@@ -1683,13 +1857,27 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
 
     if (!is_live_block_(parent_hash))
     {
-        // History: never hash-fetch from DFS/confirm. One time-based window.
         pending_fill_parents_.erase(parent_hash);
-        const int added = request_history_slot_for_block_(parent_hash);
-        adapter_vlog("[adapter] history hole parent=%s missing~=%d time-slot added=%d "
-                    "(no hash fetch)\n",
-                    parent_hash.c_str(), missing, added);
-        return 0; // do not gate Steady on historical hash fills
+        if (missing == 1)
+        {
+            enqueue_single_block_(missing_deps[0]);
+            adapter_vlog("[adapter] history single missing → single_q parent=%s\n",
+                        parent_hash.c_str());
+            return 0;
+        }
+        // Multi-missing: range hole (no immediate poll — pump_priority_holes_ drains).
+        register_dep_hole_(parent_hash);
+        adapter_vlog("[adapter] history multi missing~=%d → range hole parent=%s\n",
+                    missing, parent_hash.c_str());
+        return 0;
+    }
+
+    // Live: single → sparse queue; multi → hash fill (tight live pool).
+    if (missing == 1)
+    {
+        enqueue_single_block_(missing_deps[0]);
+        pending_fill_parents_.insert(parent_hash);
+        return 1;
     }
 
     int enqueued = 0;
@@ -2987,6 +3175,9 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     for (int i = 0; i < active_ring_n_ && fetched < max_chunks; ++i)
         fill_win(active_ring_[i]);
 
+    // Single-hash residuals only after ranges + bulk for this pump slice.
+    (void)pump_single_block_fetches_(kMaxSingleBlockPerDrain);
+
     if (fetched > 0)
         last_chunk_pump_ms_ = static_cast<int64_t>(std::time(nullptr)) * 1000;
     return fetched;
@@ -3834,16 +4025,24 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
     drain_fetch_results_(ib, kMaxFetchAdmitsPerDrain);
     recheck_confirm_fill_parents_();
 
-    // Presenter walk / UI requested missing blocks (hash GET or history chunk).
+    // Presenter walk / UI requested missing blocks → single queue (ranges via DAG scan).
     {
         auto want = scene_.drain_block_fetch_requests(8);
         for (const std::string& h : want)
         {
             if (h.empty() || scene_.graph().contains(h))
                 continue;
-            if (!enqueue_missing_dep_(h))
-                request_history_slot_for_block_(h);
+            enqueue_single_block_(h);
         }
+    }
+
+    // Budgeted DAG scan: multi-broken → range hole; lone missing → single queue.
+    {
+        const BrokenDepStats st = scan_broken_deps_(48);
+        if (st.n_unique_missing >= 2)
+            maybe_enqueue_dag_range_(st);
+        else if (st.n_unique_missing == 1 && !st.single_hashes.empty())
+            enqueue_single_block_(st.single_hashes[0]);
     }
 
     // History mode: cam_k >= 1 (live tip window k0 outside sliding view).

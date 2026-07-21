@@ -43,6 +43,17 @@ static void stop_engine_once()
     engine_stopped = true;
 }
 
+// Hide first so close/Esc feels instant; then stop systems while HWND is still valid.
+static void begin_app_exit(HWND hwnd)
+{
+    if (hwnd)
+        ShowWindow(hwnd, SW_HIDE);
+    keepRunning = false;
+    stop_engine_once();
+    if (hwnd && IsWindow(hwnd))
+        DestroyWindow(hwnd);
+}
+
 static void request_resize_if_engine()
 {
     if (engine)
@@ -81,20 +92,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             }
             else
             {
-                // Windowed: Esc quits (historical behavior).
-                keepRunning = false;
-                stop_engine_once();
-                DestroyWindow(hwnd);
+                // Windowed: Esc quits — hide immediately, then stop graphics/network.
+                begin_app_exit(hwnd);
             }
             return 0;
         }
         break;
 
     case WM_CLOSE:
-        // Stop render/network while HWND + surface are still valid, then destroy.
-        keepRunning = false;
-        stop_engine_once();
-        DestroyWindow(hwnd);
+        // Hide first for responsive close; stop while HWND still valid for teardown.
+        begin_app_exit(hwnd);
         return 0;
 
     case WM_DESTROY:

@@ -143,6 +143,20 @@ private:
         std::string  parent_hash;
     };
     void register_dep_hole_(const std::string& parent_hash);
+    // DAG scan: collect broken edges; range if multi-missing, else single queue.
+    struct BrokenDepStats
+    {
+        int64_t ts_min = 0;
+        int64_t ts_max = 0;
+        int     n_edges = 0;
+        int     n_unique_missing = 0;
+        std::vector<std::string> single_hashes; // when n_unique_missing==1
+    };
+    BrokenDepStats scan_broken_deps_(int node_budget);
+    void maybe_enqueue_dag_range_(const BrokenDepStats& st);
+    void enqueue_single_block_(const std::string& hash);
+    int  pump_single_block_fetches_(int max_n);
+    bool dep_critical_holes_pending_() const;
     bool pump_priority_holes_(int max_chunks);
     void mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms);
     void set_disk_cache_event_(const char* fmt, ...);
@@ -341,8 +355,13 @@ private:
     std::unordered_set<int64_t> history_slots_fetched_;
     // Priority variable-range patches (missing deps / eye) before bulk newest-first.
     std::vector<TimelineHole> timeline_holes_;
+    // Sparse single-hash GETs — only after DepCritical ranges are idle.
+    std::deque<std::string> single_block_q_;
+    std::unordered_set<std::string> single_block_queued_;
     static constexpr int64_t kMinPatchMs = 8'000;
     static constexpr int64_t kMaxPatchMs = 180'000;
+    static constexpr int kMaxSingleBlockQueue = 48;
+    static constexpr int kMaxSingleBlockPerDrain = 2;
     // Verified segment disk cache (per domain); bootstrap + persist closed windows.
     SegmentDiskCache disk_cache_;
     bool disk_cache_bootstrapped_ = false;
