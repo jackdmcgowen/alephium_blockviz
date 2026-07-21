@@ -29,6 +29,9 @@ jobs:
             libglfw3-dev libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
+      - name: PCH include audit
+        run: python3 scripts/check_pch.py
+
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \

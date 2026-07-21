@@ -1,10 +1,11 @@
 # Roadmap / priority backlog
 
 Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/README.md](layers/README.md).  
-Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).
+Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).  
+Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
-**Last updated:** 2026-07-19  
-**Versions:** app **0.8.0** · engine **0.9.0** (see identity headers)
+**Last updated:** 2026-07-21  
+**Versions:** app **1.0.0** · engine **1.0.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|
@@ -24,13 +25,18 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | Confirmed tips + evolved frontier (`H_c`, walks, cyan/orange) | Network marks · app presents · graphics Sobel |
 | Detail store slim + selection refill (PR11) | [network](layers/network.md) |
 | Build PCH / `/MP` / incremental shaders | [build-performance](build-performance.md) |
-| Living layer docs (app, engine, graphics, network) | [layers/](layers/README.md) |
-| Scene UX + graphics pipeline modular work (feature branch) | multi-tx filter, billboards, dep hover, PSO/frame split — on `feature/graphics-pipeline-descriptor-modular` |
-| Offline **Debug / FakeChain** simulator | [network](layers/network.md) `fake/fake_chain_simulator.*`; Network panel Debug selectable |
-| Domain / detail **unit tests** | `vnv/mod/tests/` · `mod_domain` |
-| Borderless **fullscreen** (F11 / Esc exit FS) | App `window_fullscreen.hpp`; graphics resizes only |
-| Graphics **visual regression** harness (V1) | `vnv/int/tests/visual/` · `int_visual` |
-| **VnV framework** (mod/int/bench layout + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `scripts/run_vnv.ps1` |
+| Living layer docs (app, engine, graphics, network, domain) | [layers/](layers/README.md) |
+| Offline **Debug / FakeChain** simulator | [network](layers/network.md) |
+| Domain / network **mod** unit tests | `vnv/mod/tests/` · CMake + MSVC |
+| Config persistence + prune policy | `user_prefs.json` · `BlockScene::prune` |
+| **Segment disk cache** (gzip segments, bootstrap) | [segment-disk-cache.md](segment-disk-cache.md) · shipped 1.0 |
+| Frame profiler + bench harness | F3 HUD · `bench_frame_profiler` |
+| **Platform seams** (`app`/`graphics`/`network` `*_win32` / `*_linux`) | [platform.md](platform.md) |
+| **Linux CMake + GLFW product build** | [linux.md](linux.md) · `CMakeLists.txt` |
+| **Headless present** (`VK_EXT_headless_surface`) + GPU PNG readback | `--headless` harnesses |
+| **Linux VnV runner** + GitHub Actions mod CI | `scripts/run_vnv.sh` · `.github/workflows/linux-ci.yml` |
+| Graphics visual / bench harnesses (portable host) | `int_visual` · `bench_frame_profiler` |
+| **VnV framework** (mod/int/bench + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `run_vnv.ps1` |
 
 ---
 
@@ -38,7 +44,9 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Segment disk cache** (verified BFS → disk; bootstrap on start) | [network](layers/network.md) · [design](segment-disk-cache.md) | Branch `feature/segment-disk-cache`; design landed; implement P1–P3 |
+| 1 | **Merge / dual-track smoke** (Windows sln + Linux mod + headless int PNG size) | build · docs | Branch `integration/platform/linux/01` before `main` |
+| 2 | **Golden policy** for multi-platform int (separate goldens or looser CI thresholds) | graphics · vnv | lavapipe ≠ desktop ≠ Windows blit |
+| 3 | **CI headless int hard gate** (drop `continue-on-error` once stable) | ci | Locks present/readback path |
 
 ---
 
@@ -46,11 +54,12 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 4 | **Config persistence** (last domain, filters) | [app](layers/app.md) | **Done on `feature/p1-config-persistence-prune`** — `user_prefs.json` |
-| 5 | Graph + detail **retention / prune** policy | [domain](layers/domain.md) · [network](layers/network.md) | **Done on branch** — `BlockScene::prune`, poller + FakeChain hooks |
-| 6 | **`docs/layers/domain.md`** | docs | **Done on branch** |
-
-*(Mark fully Done in the Done table after merge to main.)*
+| 4 | **PCH include audit** in CI/pre-commit (`scripts/check_pch.py`) | build | Prevents MSVC rebuild miss on new platform TUs |
+| 5 | CRT helpers (`local_time`, etc.) under `src/common/` | shared | Kill remaining `localtime_s` / `_WIN32` in shared TUs |
+| 6 | Prefer **GPU screenshot always**; demote GDI+/window blit | graphics | One capture path |
+| 7 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
+| 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
+| 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
 
 ---
 
@@ -58,14 +67,12 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 7 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection full BFS fan shipped on feature branch; avoid scene-wide edge soup |
-| 7b | **Sharded group-dependency walk** (separate view) | [app](layers/app.md) | Not block-parent BFS; abstract clique / group topology — different product surface |
-| 8 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP open questions from confirmed-tips design |
-| 9 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature, not a networking platform rewrite |
-| 10 | **History depth + LOD** presentation | app · network | Sliding 3-slot view + keep-all-loaded in RAM; presentation LOD still open |
-| 10b | **Disk / session block cache** | [network](layers/network.md) | **Promoted → P0** as segment disk cache — see [segment-disk-cache.md](segment-disk-cache.md) |
-| 11 | **Second real chain** adapter | [network](layers/network.md) | Only after FakeChain proves multi-adapter wiring |
-| 12 | Headless / client-driven **frame test seam** | [engine](layers/engine.md) · [graphics](layers/graphics.md) | Only if automated GPU / CI tests become a goal |
+| 10 | History presentation LOD | app · network | Sliding ring in RAM; presentation LOD open |
+| 11 | Second real chain adapter | [network](layers/network.md) | After FakeChain multi-adapter wiring |
+| 12 | CMake-primary on Windows (keep sln optional) | build | One target graph |
+| 13 | Unify Windows host on GLFW | app · graphics | Drop dual host implementations |
+| 14 | AppImage / packaging | ship | Optional |
+| 15 | macOS / MoltenVK | platform | New `*_macos.cpp` — unscheduled |
 
 ---
 
@@ -80,6 +87,21 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 | Structured logging frameworks | printf + ImGui OK |
 | Multi-chain **marketplace** UI | Product non-goal |
 | Production auth / retry / multi-endpoint HA platform | REST poll is enough for v1 |
+| DRM display-plane present as CI path | Headless surface is enough |
+
+---
+
+## Portability rule of thumb
+
+```text
+Touches OS / WSI / paths / process / CRT?
+  → src/<layer>/platform/* or src/common/*
+Else
+  → domain / engine / network policy / app presenter
+
+New MSVC product .cpp (PCH=Use)?
+  → first line: #include "<area>/pch.h"   (includes platform/*_win32.cpp)
+```
 
 ---
 

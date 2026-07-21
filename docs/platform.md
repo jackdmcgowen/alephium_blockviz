@@ -30,6 +30,19 @@ src/network/platform/
 
 **MSVC PCH:** each `*_win32.cpp` must `#include` the layer pch first (`app/pch.h`, `graphics/pch.h`, or `network/pch.h`) — same rule as other product TUs.
 
+```text
+# Audit (repo root) — fails if a PCH=Use .cpp misses the leading include
+python3 scripts/check_pch.py
+```
+
+### Checklist: new platform `.cpp`
+
+1. Name `src/<layer>/platform/<area>_platform_<os>.cpp`  
+2. First line: `#include "<layer>/pch.h"` (MSVC projects)  
+3. Add TU only to the correct OS list (vcxproj: win32 only; CMake: `if(WIN32)` branch)  
+4. No product headers that change often in PCH  
+5. Run `python3 scripts/check_pch.py`
+
 Linux steps: [linux.md](linux.md).  
 VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.sh`.
 

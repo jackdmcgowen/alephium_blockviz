@@ -2,6 +2,7 @@
 #include "graphics/graphics_system.hpp"
 #include "graphics/platform/gfx_platform.hpp"
 #include "graphics/gpu_prv_lib.h"
+#include "common/time_util.hpp"
 
 #include <cstdio>
 #include <ctime>
@@ -17,11 +18,8 @@ std::string make_default_path()
 
     const std::time_t t = std::time(nullptr);
     std::tm tm_local{};
-#if defined(_WIN32)
-    localtime_s(&tm_local, &t);
-#else
-    localtime_r(&t, &tm_local);
-#endif
+    if (!blockviz::local_time(tm_local, t))
+        tm_local = {};
     char name[256]{};
     std::snprintf(name, sizeof(name), "docs/images/capture_%04d%02d%02d_%02d%02d%02d.png",
                   tm_local.tm_year + 1900, tm_local.tm_mon + 1, tm_local.tm_mday,

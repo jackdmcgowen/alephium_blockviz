@@ -52,6 +52,9 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 ## Build hygiene (PCH / includes)
 
 - Product `.cpp` files start with `#include "<area>/pch.h"` (`graphics/`, `network/`, `engine/`, `app/`).
+- **Platform TUs count as product TUs:** `src/*/platform/*_win32.cpp` must include that layer’s pch first (MSVC `PrecompiledHeader=Use`). See [docs/platform.md](docs/platform.md).
+- Audit: `python3 scripts/check_pch.py` (run before claiming Windows build green after adding TUs).
 - Do not put frequently edited product headers into PCH files.
 - Prefer forward declarations in headers; keep `gpu_pub_lib.h` Vulkan-free.
 - New static-lib systems: copy `sln/_template_system.vcxproj.example` and add a project-local PCH.
+- OS / WSI / process / cache-root code goes in `platform/*_<os>.cpp`, not shared product TUs.
