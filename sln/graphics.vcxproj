@@ -127,6 +127,7 @@
     <ClCompile Include="..\src\graphics\pipeline.cpp" />
     <ClCompile Include="..\src\graphics\shader.cpp" />
     <ClCompile Include="..\src\graphics\surface.cpp" />
+    <ClCompile Include="..\src\graphics\platform\gfx_platform_common.cpp" />
     <ClCompile Include="..\src\graphics\platform\gfx_platform_win32.cpp" />
     <ClCompile Include="..\src\graphics\swapchain.cpp" />
     <ClCompile Include="..\src\graphics\validation.cpp" />

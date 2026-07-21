@@ -173,6 +173,7 @@ add_library(graphics STATIC
   src/graphics/surface.cpp
   src/graphics/swapchain.cpp
   src/graphics/validation.cpp
+  src/graphics/platform/gfx_platform_common.cpp
   src/graphics/graphics_system.cpp
   src/graphics/frame/frame_sync.cpp
   src/graphics/frame/frame_resources.cpp

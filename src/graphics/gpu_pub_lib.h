@@ -21,10 +21,13 @@ struct SoftwareIdentity
 struct EngineCreateInfo
 {
     void*    platform_instance = nullptr; // HINSTANCE | display / unused on GLFW
-    void*    window            = nullptr; // HWND | GLFWwindow*
+    void*    window            = nullptr; // HWND | GLFWwindow* | headless sentinel
     uint32_t width             = 0;
     uint32_t height            = 0;
     bool     enable_validation = true;    // Debug default true
+    // VK_EXT_headless_surface: no OS window; swapchain present is non-display.
+    // Requires width/height. Screenshots use GPU readback (not desktop blit).
+    bool     headless          = false;
 
     // Host-owned application identity → VkApplicationInfo application fields
     SoftwareIdentity application{};

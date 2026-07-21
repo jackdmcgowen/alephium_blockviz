@@ -82,7 +82,19 @@ Same suites as Windows `.\scripts\run_vnv.ps1` where ported:
 
 Image compare (Linux): `vnv/int/tests/visual/compare_images.py` (needs Pillow).
 
-**CI:** `.github/workflows/linux-ci.yml` builds everything and runs **mod only** (GPU goldens are machine-sensitive; Linux window capture may still be stub-quality until swapchain readback).
+**CI:** `.github/workflows/linux-ci.yml` builds everything, runs **mod**, and optionally smokes **headless** `int_visual` (continue-on-error until goldens stabilize).
+
+### Headless (no DISPLAY)
+
+Uses **`VK_EXT_headless_surface`** + GPU swapchain readback for PNGs:
+
+```bash
+./build/bin/int_visual --headless --case fake_overview \
+  --out vnv/int/tests/visual/out/fake_overview/actual.png
+./scripts/run_vnv.sh --int --headless
+```
+
+Requires a Vulkan ICD (Mesa lavapipe is fine for smoke).
 
 ### GPU drivers (local)
 

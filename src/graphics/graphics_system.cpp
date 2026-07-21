@@ -28,6 +28,8 @@
 #include "imgui_impl_vulkan.h"
 #include "graphics/platform/gfx_platform.hpp"
 
+// ensure configure can call headless setup
+
 // Avoid Vulkan SDK-only vk_enum_string_helper.h (not always in distro headers).
 static void check_vk_result(VkResult err)
 {
@@ -162,6 +164,7 @@ void GraphicsSystem::configure(const EngineCreateInfo& info)
 {
     create_info_ = info;
     configured_ = true;
+    gfx_platform_configure_headless(info.headless, info.width, info.height);
 }
 
 void GraphicsSystem::init()
@@ -177,18 +180,25 @@ void GraphicsSystem::init()
     const EngineCreateInfo& info = create_info_;
     void* hInst = info.platform_instance;
     void* hwnd_ = info.window;
+    headless_ = info.headless || gfx_platform_is_headless();
+    gfx_platform_configure_headless(headless_, info.width, info.height);
 
     uint32_t client_w = 0, client_h = 0;
     gfx_platform_get_window_size(hwnd_, &client_w, &client_h);
     width = info.width ? info.width : client_w;
     height = info.height ? info.height : client_h;
+    if (width == 0)
+        width = headless_ ? 1280u : WDW_WIDTH;
+    if (height == 0)
+        height = headless_ ? 720u : WDW_HEIGHT;
 
     this->hInstance = hInst;
     this->hwnd = hwnd_;
 
     const SoftwareIdentity engine_id = blockviz_engine::identity();
-    instance = create_instance(info.application, engine_id);
-    create_debug_messenger(instance);
+    instance = create_instance(info.application, engine_id, info.enable_validation);
+    if (info.enable_validation)
+        create_debug_messenger(instance);
     surface = create_platform_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     log_engine_startup(deviceProps, engine_id);

@@ -73,6 +73,7 @@ static void print_usage()
         "  --out <path>    Output PNG path (default: vnv/int/tests/visual/out/<case>/actual.png)\n"
         "  --warmup-ms N   Override warmup milliseconds\n"
         "  --width N --height N\n"
+        "  --headless      VK_EXT_headless_surface (no DISPLAY/window)\n"
         "  --list\n");
 }
 
@@ -84,6 +85,7 @@ int main(int argc, char** argv)
     int width = VIS_WDW_W;
     int height = VIS_WDW_H;
     bool list_only = false;
+    bool headless = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -97,6 +99,8 @@ int main(int argc, char** argv)
             width = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--height") == 0 && i + 1 < argc)
             height = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--headless") == 0)
+            headless = true;
         else if (std::strcmp(argv[i], "--list") == 0)
             list_only = true;
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
@@ -138,6 +142,9 @@ int main(int argc, char** argv)
     EngineCreateInfo create_info{};
     create_info.application = app_identity::make();
     create_info.enable_validation = false;
+    create_info.headless = headless;
+    create_info.width = static_cast<uint32_t>(width);
+    create_info.height = static_cast<uint32_t>(height);
     if (!app_platform_create_window(&create_info, "Blockviz Visual Tests",
                                     static_cast<uint32_t>(width),
                                     static_cast<uint32_t>(height)))

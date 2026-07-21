@@ -1,5 +1,6 @@
 #include "app/pch.h"
 #include "app/platform/app_platform.hpp"
+#include "graphics/platform/gfx_platform.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -72,6 +73,8 @@ bool toggle_borderless_fullscreen(HWND hwnd, WindowFullscreenState& st)
 volatile bool g_running = true;
 HWND g_hwnd = nullptr;
 HINSTANCE g_hinstance = nullptr;
+bool g_headless = false;
+int g_headless_token = 1;
 WindowFullscreenState g_fullscreen{};
 AppPlatformCallbacks g_cb{};
 
@@ -150,6 +153,27 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
     if (!create_info)
         return false;
 
+    if (create_info->headless)
+    {
+        const uint32_t w = width ? width : (create_info->width ? create_info->width : 1280u);
+        const uint32_t h = height ? height : (create_info->height ? create_info->height : 720u);
+        g_headless = true;
+        g_running = true;
+        g_hwnd = nullptr;
+        g_hinstance = GetModuleHandle(nullptr);
+        gfx_platform_configure_headless(true, w, h);
+        create_info->platform_instance = g_hinstance;
+        create_info->window = &g_headless_token;
+        create_info->width = w;
+        create_info->height = h;
+        create_info->headless = true;
+        std::printf("[app] headless host %ux%u (VK_EXT_headless_surface)\n", w, h);
+        return true;
+    }
+
+    g_headless = false;
+    gfx_platform_configure_headless(false, 0, 0);
+
     g_hinstance = GetModuleHandle(nullptr);
     g_running = true;
     g_fullscreen = {};
@@ -200,6 +224,8 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
 
 void app_platform_show_window(void* window)
 {
+    if (g_headless)
+        return;
     HWND hwnd = static_cast<HWND>(window ? window : g_hwnd);
     if (!hwnd)
         return;
@@ -209,6 +235,8 @@ void app_platform_show_window(void* window)
 
 void app_platform_hide_window(void* window)
 {
+    if (g_headless)
+        return;
     HWND hwnd = static_cast<HWND>(window ? window : g_hwnd);
     if (hwnd)
         ShowWindow(hwnd, SW_HIDE);
@@ -216,6 +244,11 @@ void app_platform_hide_window(void* window)
 
 void app_platform_destroy_window(void* window)
 {
+    if (g_headless)
+    {
+        g_running = false;
+        return;
+    }
     HWND hwnd = static_cast<HWND>(window ? window : g_hwnd);
     if (hwnd && IsWindow(hwnd))
         DestroyWindow(hwnd);
@@ -258,6 +291,8 @@ void app_platform_request_quit()
 
 void app_platform_poll_events()
 {
+    if (g_headless)
+        return;
     MSG msg = {};
     while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
     {
@@ -276,6 +311,8 @@ void app_platform_sleep_ms(int ms)
 
 void app_platform_raise_window(void* window)
 {
+    if (g_headless)
+        return;
     HWND hwnd = static_cast<HWND>(window ? window : g_hwnd);
     if (!hwnd)
         return;

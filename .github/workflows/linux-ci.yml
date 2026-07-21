@@ -25,7 +25,7 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 pkg-config \
-            libvulkan-dev vulkan-tools glslang-tools glslc \
+            libvulkan-dev vulkan-tools glslang-tools glslc mesa-vulkan-drivers \
             libglfw3-dev libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
@@ -46,10 +46,20 @@ jobs:
       - name: ctest mod
         run: ctest --test-dir build --output-on-failure -R 'mod_'
 
-      # GPU harnesses: compile-only in free CI (no reliable DISPLAY/ICD golden parity).
       - name: Confirm GPU harness binaries exist
         run: |
           test -x build/bin/int_visual
           test -x build/bin/bench_frame_profiler
           ./build/bin/int_visual --list
           ./build/bin/bench_frame_profiler --list
+
+      # Headless present + GPU PNG readback (VK_EXT_headless_surface). Soft until goldens stabilize.
+      - name: Headless int_visual smoke
+        continue-on-error: true
+        run: |
+          mkdir -p vnv/int/tests/visual/out/fake_overview
+          ./build/bin/int_visual --headless --case fake_overview \
+            --out vnv/int/tests/visual/out/fake_overview/actual.png \
+            --warmup-ms 2500
+          test -s vnv/int/tests/visual/out/fake_overview/actual.png
+          test "$(wc -c < vnv/int/tests/visual/out/fake_overview/actual.png)" -gt 256

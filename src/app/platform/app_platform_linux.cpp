@@ -1,18 +1,23 @@
 #include "app/platform/app_platform.hpp"
+#include "graphics/platform/gfx_platform.hpp"
 
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
 #endif
 #include <GLFW/glfw3.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 namespace
 {
 volatile bool g_running = true;
 GLFWwindow* g_window = nullptr;
 bool g_fullscreen = false;
+bool g_headless = false;
+int g_headless_token = 1; // non-null sentinel for EngineCreateInfo.window
 int g_win_x = 100, g_win_y = 100, g_win_w = WDW_WIDTH, g_win_h = WDW_HEIGHT;
 AppPlatformCallbacks g_cb{};
 
@@ -99,6 +104,28 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
     if (!create_info)
         return false;
 
+    if (create_info->headless)
+    {
+        const uint32_t w = width ? width : (create_info->width ? create_info->width : 1280u);
+        const uint32_t h = height ? height : (create_info->height ? create_info->height : 720u);
+        g_headless = true;
+        g_running = true;
+        g_window = nullptr;
+        g_win_w = static_cast<int>(w);
+        g_win_h = static_cast<int>(h);
+        gfx_platform_configure_headless(true, w, h);
+        create_info->platform_instance = nullptr;
+        create_info->window = &g_headless_token;
+        create_info->width = w;
+        create_info->height = h;
+        create_info->headless = true;
+        std::printf("[app] headless host %ux%u (VK_EXT_headless_surface)\n", w, h);
+        return true;
+    }
+
+    g_headless = false;
+    gfx_platform_configure_headless(false, 0, 0);
+
     if (!glfwInit())
     {
         std::printf("Failed to initialize GLFW\n");
@@ -139,6 +166,8 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
 
 void app_platform_show_window(void* window)
 {
+    if (g_headless)
+        return;
     GLFWwindow* w = static_cast<GLFWwindow*>(window ? window : g_window);
     if (w)
         glfwShowWindow(w);
@@ -146,6 +175,8 @@ void app_platform_show_window(void* window)
 
 void app_platform_hide_window(void* window)
 {
+    if (g_headless)
+        return;
     GLFWwindow* w = static_cast<GLFWwindow*>(window ? window : g_window);
     if (w)
         glfwHideWindow(w);
@@ -153,6 +184,11 @@ void app_platform_hide_window(void* window)
 
 void app_platform_destroy_window(void* window)
 {
+    if (g_headless)
+    {
+        g_running = false;
+        return;
+    }
     GLFWwindow* w = static_cast<GLFWwindow*>(window ? window : g_window);
     if (w)
     {
@@ -200,7 +236,7 @@ void app_platform_request_quit()
 
 void app_platform_poll_events()
 {
-    if (!g_window)
+    if (g_headless || !g_window)
         return;
     glfwPollEvents();
     if (glfwWindowShouldClose(g_window))
@@ -211,6 +247,11 @@ void app_platform_sleep_ms(int ms)
 {
     if (ms <= 0)
         return;
+    if (g_headless)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        return;
+    }
     // Sub-sleeps so harnesses remain responsive to close events.
     const int slice = 10;
     int left = ms;
@@ -226,6 +267,8 @@ void app_platform_sleep_ms(int ms)
 
 void app_platform_raise_window(void* window)
 {
+    if (g_headless)
+        return;
     GLFWwindow* w = static_cast<GLFWwindow*>(window ? window : g_window);
     if (w)
         glfwFocusWindow(w);

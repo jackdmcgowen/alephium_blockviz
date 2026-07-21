@@ -416,7 +416,12 @@ void GraphicsSystem::render()
     const FramePresenter::AcquireResult acq =
         frame_presenter_.acquire(device, swapchain, frame_sync_, begin.frame_index);
     if (!acq.ok)
+    {
+        last_swapchain_image_valid_ = false;
         return; // OUT_OF_DATE: resize next begin; do not submit/present
+    }
+    last_swapchain_image_index_ = acq.image_index;
+    last_swapchain_image_valid_ = true;
 
     // App builds colored outline list; graphics draws all in one pass (no role names).
     const bool want_sobel =

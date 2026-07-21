@@ -62,6 +62,12 @@ uint32_t gfx_platform_surface_extension_names(const char** names, uint32_t capac
 {
     if (!names || capacity < 2)
         return 0;
+    if (gfx_platform_is_headless())
+    {
+        names[0] = VK_KHR_SURFACE_EXTENSION_NAME;
+        names[1] = VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME;
+        return 2;
+    }
     names[0] = VK_KHR_SURFACE_EXTENSION_NAME;
     names[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
     return 2;
@@ -71,6 +77,9 @@ VkSurfaceKHR gfx_platform_create_surface(VkInstance instance,
                                          void* window,
                                          void* platform_instance)
 {
+    if (gfx_platform_is_headless())
+        return gfx_platform_create_headless_surface(instance);
+
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     VkWin32SurfaceCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
@@ -89,6 +98,14 @@ void gfx_platform_destroy_surface(VkInstance instance, VkSurfaceKHR surface)
 
 void gfx_platform_get_window_size(void* window, uint32_t* out_w, uint32_t* out_h)
 {
+    if (gfx_platform_is_headless())
+    {
+        if (out_w)
+            *out_w = gfx_platform_headless_width();
+        if (out_h)
+            *out_h = gfx_platform_headless_height();
+        return;
+    }
     uint32_t w = 0, h = 0;
     if (window)
     {
@@ -107,16 +124,29 @@ void gfx_platform_get_window_size(void* window, uint32_t* out_w, uint32_t* out_h
 
 void gfx_platform_imgui_init(void* window)
 {
+    if (gfx_platform_is_headless())
+        return;
     ImGui_ImplWin32_Init(window);
 }
 
 void gfx_platform_imgui_shutdown()
 {
+    if (gfx_platform_is_headless())
+        return;
     ImGui_ImplWin32_Shutdown();
 }
 
 void gfx_platform_imgui_new_frame()
 {
+    if (gfx_platform_is_headless())
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(static_cast<float>(gfx_platform_headless_width()),
+                                static_cast<float>(gfx_platform_headless_height()));
+        if (io.DeltaTime <= 0.f)
+            io.DeltaTime = 1.f / 60.f;
+        return;
+    }
     ImGui_ImplWin32_NewFrame();
 }
 

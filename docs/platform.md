@@ -33,6 +33,8 @@ src/network/platform/
 Linux steps: [linux.md](linux.md).  
 VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.sh`.
 
+**Headless:** `EngineCreateInfo.headless` → `VK_EXT_headless_surface` (no OS window). Screenshots use GPU swapchain readback (`TRANSFER_SRC` + `gfx_platform_write_png_rgba`). Shared helpers in `gfx_platform_common.cpp`.
+
 Never link both `*_win32` and `*_linux` into the same target. GLFW is linked on Linux/CMake only (not the MSVC product).
 
 ## Contracts

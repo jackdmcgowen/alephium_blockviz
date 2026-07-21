@@ -13,7 +13,8 @@
 
   //instance.cpp — app identity from host; engine identity from engine layer
 VkInstance create_instance(const SoftwareIdentity& application,
-                           const SoftwareIdentity& engine);
+                           const SoftwareIdentity& engine,
+                           bool enable_validation = true);
 void destroy_instance(VkInstance instance);
 
   //validation.cpp
