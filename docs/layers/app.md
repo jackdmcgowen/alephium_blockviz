@@ -52,7 +52,8 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | **Orange** | Missing-dep incompletes (not green/unconfirmed red) |
 | **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
 | **Red (fade)** | Removal death α → 0 (same family as unconfirmed) |
-| **Gray Z-slab** | Queued **history** network interval fill; α-fades when admitted (never live tip) |
+| **Gray volume** | Queued **history** subsegment network fill (translucent AABB); α-fades when admitted (never live tip) |
+| Segments rail | Compact “Segments (N)” line; **hover tooltip** for per-k load/blocks |
 
 Presentation only — confirmation marks come from **network** into `BlockScene` (anchor tips + forward novelty: all-deps-Main ⇒ Main).
 

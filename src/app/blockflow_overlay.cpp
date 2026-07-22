@@ -966,30 +966,34 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::TextColored(ImVec4(1.f, 0.85f, 0.3f, 1.f),
                            "Timeline RAM large — history kept until hard cap");
 
-    // Sliding triple-buffer ring (older→newer); load % per active window.
-    if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
+    // Sliding ring summary — full per-window detail on hover (tooltip).
+    if (ui.segment_count > 0)
     {
         const int nshow =
             std::min(ui.segment_count, UiSnapshot::kMaxTimeSegments);
-        for (int i = 0; i < nshow; ++i)
+        ImGui::TextDisabled("Segments (%d) · hover for detail", nshow);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
-            const auto& s = ui.segments[i];
-            const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
-            const float span_s = static_cast<float>(span_ms) * 0.001f;
-            const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
-            const bool is_live = (s.index == 0);
-            const char* tag =
-                is_live ? "Live" : (s.confirmed_full ? "full" : "loading");
-            ImGui::PushID(i);
-            if (is_live)
-                ImGui::Text("Live k%d  %.0fs", s.index, span_s);
-            else
-                ImGui::Text("k%d  %.0fs", s.index, span_s);
-            ImGui::ProgressBar(ratio, ImVec2(-1.f, 0.f),
-                               s.confirmed_full ? "100%" : nullptr);
-            ImGui::TextDisabled("  %d blks · %d%% · %s", s.block_count,
-                                static_cast<int>(ratio * 100.f + 0.5f), tag);
-            ImGui::PopID();
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("Lookback windows (older -> newer in ring)");
+            ImGui::Separator();
+            for (int i = 0; i < nshow; ++i)
+            {
+                const auto& s = ui.segments[i];
+                const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
+                const float span_s = static_cast<float>(span_ms) * 0.001f;
+                const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
+                const bool is_live = (s.index == 0);
+                const char* tag =
+                    is_live ? "Live" : (s.confirmed_full ? "full" : "loading");
+                if (is_live)
+                    ImGui::Text("k%d Live  %.0fs  %d%%  %d blks  %s", s.index, span_s,
+                                static_cast<int>(ratio * 100.f + 0.5f), s.block_count, tag);
+                else
+                    ImGui::Text("k%d       %.0fs  %d%%  %d blks  %s", s.index, span_s,
+                                static_cast<int>(ratio * 100.f + 0.5f), s.block_count, tag);
+            }
+            ImGui::EndTooltip();
         }
     }
 

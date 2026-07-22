@@ -1890,8 +1890,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
             }
 
-            const float slab_half = kLayoutBaseRadius * 7.5f;
-            const glm::vec4 base_col(0.48f, 0.48f, 0.52f, 0.14f);
+            // Slightly inside barrier plane span so volume frames the shard ring.
+            const float slab_half = kLayoutBaseRadius * 6.5f;
+            const glm::vec4 base_col(0.48f, 0.48f, 0.52f, 0.11f);
             for (const auto& kv : fill_slab_anims_)
             {
                 const FillSlabAnim& a = kv.second;

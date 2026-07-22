@@ -74,19 +74,39 @@ void DebugDrawer::add_z_slab(float z0, float z1, float half_xy, const glm::vec4&
     const float s = half_xy > 1e-4f ? half_xy : 1.f;
     const float za = z0 < z1 ? z0 : z1;
     const float zb = z0 < z1 ? z1 : z0;
-    // End caps (double-sided quads).
-    add_z_plane_quad(za, s, color);
-    add_z_plane_quad(zb, s, color);
-    // Corner edges along Z (wire box silhouette).
-    const glm::vec4 edge(color.r, color.g, color.b, std::min(1.f, color.a * 2.2f));
-    const glm::vec3 c00(-s, -s, za), c01(-s, -s, zb);
-    const glm::vec3 c10( s, -s, za), c11( s, -s, zb);
-    const glm::vec3 c20( s,  s, za), c21( s,  s, zb);
-    const glm::vec3 c30(-s,  s, za), c31(-s,  s, zb);
-    add_line(c00, c01, edge);
-    add_line(c10, c11, edge);
-    add_line(c20, c21, edge);
-    add_line(c30, c31, edge);
+
+    // 8 corners of axis-aligned box.
+    const glm::vec3 p[8] = {
+        { -s, -s, za }, { s, -s, za }, { s, s, za }, { -s, s, za }, // z = za
+        { -s, -s, zb }, { s, -s, zb }, { s, s, zb }, { -s, s, zb }, // z = zb
+    };
+    DebugVertex v[8];
+    for (int i = 0; i < 8; ++i)
+        v[i] = { p[i], color };
+
+    // Six faces, both windings (tri pipeline culls back faces).
+    auto face = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t front[6] = { a, b, c, a, c, d };
+        const uint32_t back[6]  = { a, c, b, a, d, c };
+        add_mesh(v, 8, front, 6);
+        add_mesh(v, 8, back, 6);
+    };
+    face(0, 1, 2, 3); // za
+    face(4, 7, 6, 5); // zb
+    face(0, 4, 5, 1); // -Y
+    face(3, 2, 6, 7); // +Y
+    face(0, 3, 7, 4); // -X
+    face(1, 5, 6, 2); // +X
+
+    // Wire silhouette (12 edges) at higher alpha.
+    const glm::vec4 edge(color.r, color.g, color.b, std::min(1.f, color.a * 2.4f));
+    static const int eidx[12][2] = {
+        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, // za ring
+        { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 }, // zb ring
+        { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, // pillars
+    };
+    for (const auto& e : eidx)
+        add_line(p[e[0]], p[e[1]], edge);
 }
 
 void DebugDrawer::append_tri(uint32_t i0, uint32_t i1, uint32_t i2)
