@@ -4,8 +4,8 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).  
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
-**Last updated:** 2026-07-21  
-**Versions:** app **1.1.0** · engine **1.1.0** (see identity headers / tags on `main`)
+**Last updated:** 2026-07-21 (docs pass: README platform matrix, P0 refresh)  
+**Versions:** app **1.2.0** · engine **1.2.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|
@@ -36,12 +36,16 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | **Headless present** (`VK_EXT_headless_surface`) + GPU PNG readback | `--headless` harnesses |
 | **Linux VnV runner** + GitHub Actions mod CI | `scripts/run_vnv.sh` · `.github/workflows/linux-ci.yml` |
 | Graphics visual / bench harnesses (portable host) | `int_visual` · `bench_frame_profiler` |
-| **VnV framework** (mod/int/bench + dual slns) | `vnv/` · `scripts/sync_solutions.ps1` · `run_vnv.ps1` |
+| **VnV framework** (unit/system/bench + dual slns) | `vnv/` · [TESTING.md](../vnv/TESTING.md) · `run_vnv.ps1` |
 | **PCH include audit** (`scripts/check_pch.py`) | CI + AGENTS |
+| **App include-boundary audit** (`scripts/check_include_boundary.py`) | App must not include Vulkan / `gfx_platform.hpp` |
 | CRT helpers (`common/time_util.hpp`, `env_util.hpp`) | Portable local_time / env flags |
 | **GPU screenshot primary**; window blit opt-in | `BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1` |
 | **Multi-platform goldens** + headless CI hard gate | `goldens/linux_headless/` · `compare_images.py --profile` |
 | **Dual-track smoke** script | `scripts/smoke_dual_track.sh` |
+| **Linux platform on `main`** (1.1.0) | CMake product, headless, GHA mod CI, dual-track docs |
+| **IPass frame graph** (pipelines as nodes) | `frame/passes/*` + `SamplerTable`; F12 pre-present GPU readback |
+| **Int visual cases** | `fake_overview`, `fake_side_cam`, `fake_selection_sobel` |
 
 ---
 
@@ -49,7 +53,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Merge `integration/platform/linux/01` → main** after Windows MSVC product smoke | build | Dual-track: Linux CI ≠ MSVC sln (PCH + include-isolation incidents) |
+| 1 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gfx_platform.hpp` — app can include without Vulkan |
 
 ---
 
@@ -57,11 +61,9 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 2 | **Include-boundary audit** (extend `check_pch.py` or sibling) | build | Fail if `src/app/**` includes `gfx_platform.hpp` / `vulkan/vulkan.h` |
-| 3 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gfx_platform.hpp` — app can include without Vulkan |
-| 4 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
-| 5 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
-| 6 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
+| 2 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
+| 3 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
+| 4 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
 
 ---
 
@@ -75,6 +77,8 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | 10 | Unify Windows host on GLFW | app · graphics | Drop dual host implementations |
 | 11 | AppImage / packaging | ship | Optional |
 | 12 | macOS / MoltenVK | platform | New `*_macos.cpp` — unscheduled |
+| 13 | Graph-driven frame record (full IPass executor) | graphics | Topology is registered; multi-queue still in `SobelAsyncPass` |
+| 14 | Physical VnV path rename (`mod`→`unit`, `int`→`system/functional`, `bench`→`system/bench`) | vnv | Docs already use taxonomy in [vnv/TESTING.md](../vnv/TESTING.md); migrate when convenient |
 
 ---
 

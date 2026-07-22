@@ -1,4 +1,9 @@
-# VnV · bench
+# VnV · system · bench
+
+**Tier:** **System · bench** — multi-system stack; **performance** pass/fail (not a separate product world).  
+**Taxonomy:** [../TESTING.md](../TESTING.md).
+
+> Sibling of functional system tests (`vnv/int/`). Same idea as shipping the product: engine + graphics (+ network as needed). Different criteria: **timing baselines**, not pixel goldens.
 
 Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timestamps).
 
@@ -37,6 +42,4 @@ Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timesta
 - Warmup ~2s, then ~120 distinct snapshot samples  
 - Tracks frame/cpu/gpu + pass scopes (`Prepare`, `MainColorDepth`, …)
 
-## Compare
-
-`run_vnv.ps1 -Bench` compares actual JSON to baseline. Missing baseline → fail with hint to `-UpdateBaselines`.
+How to add a case: [TESTING.md § System · bench](../TESTING.md#tier-c--system--bench-detail).

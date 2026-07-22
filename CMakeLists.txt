@@ -170,6 +170,7 @@ add_library(graphics STATIC
   src/graphics/instance.cpp
   src/graphics/pipeline.cpp
   src/graphics/shader.cpp
+  src/graphics/sampler.cpp
   src/graphics/surface.cpp
   src/graphics/swapchain.cpp
   src/graphics/validation.cpp
@@ -178,9 +179,14 @@ add_library(graphics STATIC
   src/graphics/frame/frame_sync.cpp
   src/graphics/frame/frame_resources.cpp
   src/graphics/frame/frame_descriptors.cpp
-  src/graphics/frame/frame_recorder.cpp
   src/graphics/frame/frame_presenter.cpp
   src/graphics/frame/frame_graph/frame_task_graph.cpp
+  src/graphics/frame/passes/main_scene_pass.cpp
+  src/graphics/frame/passes/picker_pass.cpp
+  src/graphics/frame/passes/sobel_resources.cpp
+  src/graphics/frame/passes/outline_pass.cpp
+  src/graphics/frame/passes/sobel_compute_pass.cpp
+  src/graphics/frame/passes/edge_overlay_pass.cpp
   src/graphics/frame/profiling/timestamp_query_pool.cpp
   src/graphics/frame/profiling/frame_profiler.cpp
   src/graphics/frame/frame_shared_state.cpp
@@ -190,10 +196,6 @@ add_library(graphics STATIC
   src/graphics/frame/frame_loop.cpp
   src/graphics/frame/screenshot.cpp
   src/graphics/frame/swapchain_targets.cpp
-  src/graphics/frame/picker.cpp
-  src/graphics/pipelines/sobel_pipeline.cpp
-  src/graphics/pipelines/cube_pipeline.cpp
-  src/graphics/pipelines/picker_pipeline.cpp
   ${GFX_PLATFORM_SRC}
   ${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp
 )

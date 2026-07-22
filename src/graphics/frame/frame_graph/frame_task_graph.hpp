@@ -80,6 +80,8 @@ void access_to_barrier(ResourceAccess access, VkImageLayout& layout,
                        VkPipelineStageFlags2& stage, VkAccessFlags2& access_mask,
                        VkImageAspectFlags& aspect);
 
+class IPass;
+
 class FrameTaskGraph
 {
 public:
@@ -87,6 +89,10 @@ public:
 
     // Returns pass index.
     uint32_t add_pass(PassNode node);
+
+    // Register an IPass node: fills name, queue, and declare_resources reads/writes.
+    // Record callback is optional (multi-queue executor may record elsewhere).
+    uint32_t register_pass(IPass& pass, PassRecordFn record = {});
 
     // Dependency: `to` runs after `from`. Barrier describes transition for `resource`.
     void add_edge(uint32_t from, uint32_t to, ImageBarrierEdge barrier);

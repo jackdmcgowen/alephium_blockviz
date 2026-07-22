@@ -204,6 +204,7 @@ void GraphicsSystem::init()
     log_engine_startup(deviceProps, engine_id);
     create_device(instance, physicalDevice, surface, &device, &queues_);
     buffer_manager_.reset(device, &deviceMemProps);
+    sampler_table_.create(device);
 
     swapchainImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -216,40 +217,35 @@ void GraphicsSystem::init()
     create_swapchain_targets();
     create_frame_resources();
     create_frame_descriptors();
-    cube_pipe_.create(device, frame_descriptors_.layout(), swapchainImageFormat,
-                      swapchain_targets_.depth_format(), width, height,
-                      swapchain_targets_.sample_count(),
-                      swapchain_targets_.alpha_to_coverage());
     {
-        PickerResourcesCreateInfo pr{};
-        pr.device = device;
-        pr.mem_props = &deviceMemProps;
-        pr.width = width;
-        pr.height = height;
-        pr.depth_format = swapchain_targets_.depth_format();
-        picker_.create_resources(pr);
-        picker_.create_staging(&buffer_manager_);
+        frame_graph::PassCreateInfo pci{};
+        pci.device = device;
+        pci.mem_props = &deviceMemProps;
+        pci.buffers = &buffer_manager_;
+        pci.samplers = &sampler_table_;
+        pci.color_format = swapchainImageFormat;
+        pci.depth_format = swapchain_targets_.depth_format();
+        pci.width = width;
+        pci.height = height;
+        pci.samples = swapchain_targets_.sample_count();
+        pci.alpha_to_coverage = swapchain_targets_.alpha_to_coverage();
+        pci.frame_ubo_layout = frame_descriptors_.layout();
+        pci.graphics_family = queues_.family_index(QueueType::_3D);
+        pci.compute_family = queues_.family_index(QueueType::CMP);
+        main_scene_pass_.create(pci);
+        // Picker is 1×; selection pick uses cleared depth (independent of MSAA scene depth).
+        picker_pass_.create(pci);
+        sobel_resources_.create(pci);
+        outline_pass_.attach(&sobel_resources_);
+        sobel_compute_pass_.attach(&sobel_resources_);
+        edge_overlay_pass_.attach(&sobel_resources_);
+        outline_pass_.create(pci);
+        sobel_compute_pass_.create(pci);
+        edge_overlay_pass_.create(pci);
     }
-    // Picker is 1Ã—; selection pick uses cleared depth (independent of MSAA scene depth).
-    picker_pipe_.create(device, frame_descriptors_.layout(), picker_.color_format(),
-                        swapchain_targets_.depth_format(), width, height,
-                        VK_SAMPLE_COUNT_1_BIT);
     create_command_pool();
     create_sync_objects();
-
-    {
-        SobelPipelineCreateInfo sci{};
-        sci.device = device;
-        sci.mem_props = &deviceMemProps;
-        sci.width = width;
-        sci.height = height;
-        sci.depth_format = swapchain_targets_.depth_format();
-        sci.frame_ubo_layout = frame_descriptors_.layout();
-        sci.graphics_family = queues_.family_index(QueueType::_3D);
-        sci.compute_family = queues_.family_index(QueueType::CMP);
-        sobel_pipe_.create(sci);
-        sobel_async_.create(device);
-    }
+    sobel_async_.create(device);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -321,15 +317,16 @@ void GraphicsSystem::init()
         printf("Failed to create g_meshArena for debug drawing\n");
     }
 
-    // G2: document frame pass DAG topology (barriers live on edges).
+    // Frame pass DAG topology: IPass nodes + dependency edges (barriers on edges).
+    // Multi-queue submit remains in SobelAsyncPass; graph documents order + access.
     {
         using namespace frame_graph;
         FrameTaskGraph g;
-        const uint32_t main_p = g.add_pass(PassNode{ "MainColorDepth", QueueType::_3D, {} });
-        const uint32_t pick_p = g.add_pass(PassNode{ "Picker", QueueType::_3D, {} });
-        const uint32_t sel_p  = g.add_pass(PassNode{ "SelectionDepth", QueueType::_3D, {} });
-        const uint32_t sob_p  = g.add_pass(PassNode{ "SobelAsyncCMP", QueueType::CMP, {} });
-        const uint32_t ovl_p  = g.add_pass(PassNode{ "EdgeOverlay", QueueType::_3D, {} });
+        const uint32_t main_p = g.register_pass(main_scene_pass_);
+        const uint32_t pick_p = g.register_pass(picker_pass_);
+        const uint32_t sel_p  = g.register_pass(outline_pass_);
+        const uint32_t sob_p  = g.register_pass(sobel_compute_pass_);
+        const uint32_t ovl_p  = g.register_pass(edge_overlay_pass_);
         const uint32_t pre_p  = g.add_pass(PassNode{ "Present", QueueType::_3D, {} });
         ImageBarrierEdge e{};
         e.resource = ResourceId::SwapchainColor;
@@ -447,26 +444,34 @@ void GraphicsSystem::resize_internal()
         frame_sync_.create(info);
     }
     {
-        PickerResourcesCreateInfo pr{};
-        pr.device = device;
-        pr.mem_props = &deviceMemProps;
-        pr.width = width;
-        pr.height = height;
-        pr.depth_format = swapchain_targets_.depth_format();
-        picker_.recreate_resources(pr);
-    }
-    {
         sobel_async_.wait_idle(device);
-        SobelPipelineCreateInfo sci{};
-        sci.device = device;
-        sci.mem_props = &deviceMemProps;
-        sci.width = width;
-        sci.height = height;
-        sci.depth_format = swapchain_targets_.depth_format();
-        sci.frame_ubo_layout = frame_descriptors_.layout();
-        sci.graphics_family = queues_.family_index(QueueType::_3D);
-        sci.compute_family = queues_.family_index(QueueType::CMP);
-        sobel_pipe_.recreate(sci);
+        frame_graph::PassCreateInfo pci{};
+        pci.device = device;
+        pci.mem_props = &deviceMemProps;
+        pci.buffers = &buffer_manager_;
+        pci.samplers = &sampler_table_;
+        pci.color_format = swapchainImageFormat;
+        pci.depth_format = swapchain_targets_.depth_format();
+        pci.width = width;
+        pci.height = height;
+        pci.samples = swapchain_targets_.sample_count();
+        pci.alpha_to_coverage = swapchain_targets_.alpha_to_coverage();
+        pci.frame_ubo_layout = frame_descriptors_.layout();
+        pci.graphics_family = queues_.family_index(QueueType::_3D);
+        pci.compute_family = queues_.family_index(QueueType::CMP);
+        main_scene_pass_.recreate(pci);
+        picker_pass_.recreate(pci);
+        // Resources first (images + descriptors), then PSOs that bind their layouts.
+        outline_pass_.destroy(device);
+        sobel_compute_pass_.destroy(device);
+        edge_overlay_pass_.destroy(device);
+        sobel_resources_.recreate(pci);
+        outline_pass_.attach(&sobel_resources_);
+        sobel_compute_pass_.attach(&sobel_resources_);
+        edge_overlay_pass_.attach(&sobel_resources_);
+        outline_pass_.create(pci);
+        sobel_compute_pass_.create(pci);
+        edge_overlay_pass_.create(pci);
     }
 
     s_resized = true;
@@ -592,11 +597,16 @@ UiSnapshot GraphicsSystem::copy_ui_snapshot() const
 }
 
 void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
-                                         VkPrimitiveTopology topology, bool defer_present)
+                                         VkPrimitiveTopology topology, bool defer_present,
+                                         bool capture_screenshot)
 {
-    FrameRecordParams rp{};
-    rp.cmd = buffer;
-    rp.image_index = imageIndex;
+    FrameProfiler* prof = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
+    main_scene_pass_.begin_command_buffer(buffer, prof);
+
+    frame_graph::PassRecordParams rp{};
+    rp.base.cmd = buffer;
+    rp.base.frame_index = static_cast<uint32_t>(currentFrame);
+    rp.base.image_index = imageIndex;
     rp.topology = topology;
     rp.after_resize = s_resized;
     rp.width = width;
@@ -611,9 +621,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.samples = swapchain_targets_.sample_count();
     rp.resolve_color_view = msaa ? swapchain_targets_.color_view(imageIndex) : VK_NULL_HANDLE;
     rp.resolve_color_image = msaa ? swapchainImages[imageIndex] : VK_NULL_HANDLE;
-    rp.cube_pipeline = cube_pipe_.pipeline;
-    rp.cube_layout = cube_pipe_.layout;
-    rp.descriptor_set = frame_descriptors_.set();
+    rp.frame_ubo_set = frame_descriptors_.set();
     rp.vertex_buffer = frame_resources_.vertex_buffer();
     rp.instance_buffer = frame_resources_.instance_buffer();
     rp.index_buffer = frame_resources_.index_buffer();
@@ -622,10 +630,11 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.debug_drawer = &g_debugDrawer;
     rp.view_proj = &g_viewProj;
     rp.imgui_draw_data = ImGui::GetDrawData();
-    rp.transition_color_to_present = !defer_present;
-    rp.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
+    // Screenshot needs COLOR_ATTACHMENT after draws so we can TRANSFER before PRESENT.
+    rp.transition_color_to_present = !defer_present && !capture_screenshot;
+    rp.profiler = prof;
 
-    frame_recorder_.record_main(rp);
+    main_scene_pass_.record(rp);
 
     // Pick policy stays on the engine (after main pass, same command buffer).
     {
@@ -654,23 +663,12 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 
         if (request != PickKind::None)
         {
-            PickerRecordParams pick{};
-            pick.cmd = buffer;
+            frame_graph::PassRecordParams pick = rp;
             pick.mouse_x = static_cast<uint32_t>(mx);
             pick.mouse_y = static_cast<uint32_t>(my);
-            pick.width = width;
-            pick.height = height;
-            pick.viewport_extent = swapchainExtent;
-            pick.image_layout_undefined = s_resized;
-            pick.pipeline = picker_pipe_.pipeline;
-            pick.pipeline_layout = picker_pipe_.layout;
-            pick.descriptor_set = frame_descriptors_.set();
-            pick.vertex_buffer = frame_resources_.vertex_buffer();
-            pick.instance_buffer = frame_resources_.instance_buffer();
-            pick.index_buffer = frame_resources_.index_buffer();
-            pick.instance_count = static_cast<uint32_t>(instanceCount);
+            pick.picker_image_undefined = s_resized;
             pick.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
-            picker_.record_pass(pick);
+            picker_pass_.record(pick);
             inFlightFrames[currentFrame].pendingPick = true;
             inFlightFrames[currentFrame].pickKind = request;
         }
@@ -683,7 +681,15 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
 
     // Async Sobel path adds depth barriers and ends the CB in SobelAsyncPass::submit.
     if (!defer_present)
-        frame_recorder_.end(buffer);
+    {
+        if (capture_screenshot)
+        {
+            const VkImage present_img =
+                msaa ? swapchainImages[imageIndex] : rp.color_image;
+            record_screenshot_before_present_(buffer, present_img);
+        }
+        main_scene_pass_.end_command_buffer(buffer);
+    }
 
 }   /* record_command_buffer() */
 
@@ -723,7 +729,10 @@ void GraphicsSystem::cleanup()
     }
 
     sobel_async_.destroy(device);
-    sobel_pipe_.destroy(device);
+    outline_pass_.destroy(device);
+    sobel_compute_pass_.destroy(device);
+    edge_overlay_pass_.destroy(device);
+    sobel_resources_.destroy(device);
 
     // Descriptors reference UBO in frame_resources — free pool before buffers.
     frame_descriptors_.destroy(device);
@@ -747,9 +756,10 @@ void GraphicsSystem::cleanup()
         inFlightFrames[i].overlayCommandBuffer = VK_NULL_HANDLE;
     }
 
-    picker_.destroy(device);
-    picker_pipe_.destroy(device);
-    cube_pipe_.destroy(device);
+    picker_pass_.destroy(device);
+    main_scene_pass_.destroy(device);
+    destroy_screenshot_staging_();
+    sampler_table_.destroy(device);
 
     swapchain_targets_.destroy(device);
     destroy_swapchain(device, swapchain);

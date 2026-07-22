@@ -9,7 +9,7 @@
 //   frame/frame_loop.cpp    — render_loop / render (outline_count → async Sobel)
 //   frame/gpu_frame_publish.cpp  — publish_frame / apply_published_frame
 //   frame/selection_state.cpp    — selection, hover, multi-tx filter, detail refill
-// Sobel: pipelines/sobel_pipeline.* + frame/sobel_async_pass.* (not GS methods)
+// Sobel: frame/passes/* IPass nodes + frame/sobel_async_pass.* (not GS methods)
 // See docs/layers/graphics.md (living module map).
 
 #include <vulkan/vulkan.h>
@@ -30,13 +30,14 @@
 #include "engine/engine.hpp"
 #include "graphics/frame/frame_descriptors.hpp"
 #include "graphics/frame/frame_presenter.hpp"
-#include "graphics/frame/frame_recorder.hpp"
 #include "graphics/frame/frame_resources.hpp"
 #include "graphics/frame/frame_sync.hpp"
-#include "graphics/frame/picker.hpp"
-#include "graphics/pipelines/cube_pipeline.hpp"
-#include "graphics/pipelines/picker_pipeline.hpp"
-#include "graphics/pipelines/sobel_pipeline.hpp"
+#include "graphics/frame/passes/main_scene_pass.hpp"
+#include "graphics/frame/passes/picker_pass.hpp"
+#include "graphics/frame/passes/sobel_resources.hpp"
+#include "graphics/frame/passes/outline_pass.hpp"
+#include "graphics/frame/passes/sobel_compute_pass.hpp"
+#include "graphics/frame/passes/edge_overlay_pass.hpp"
 #include "graphics/frame/sobel_async_pass.hpp"
 #include "graphics/frame/sobel_types.hpp"
 #include "graphics/frame/swapchain_targets.hpp"
@@ -46,6 +47,7 @@
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
 #include "graphics/queue_types.hpp"
+#include "graphics/sampler.hpp"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
@@ -55,7 +57,7 @@
 class GraphicsSystem : public IGraphicsSystem
 {
 public:
-    using PushConstants = PickerPushConstants;
+    using PushConstants = ::PickerPushConstants;
 
     GraphicsSystem();
     ~GraphicsSystem() override;
@@ -134,14 +136,16 @@ private:
     VkExtent2D swapchainExtent;
     SwapchainTargets swapchain_targets_;
     FrameDescriptors frame_descriptors_;
-    FrameRecorder frame_recorder_;
     FramePresenter frame_presenter_;
 
-    CubePipeline cube_pipe_;
-    PickerPipeline picker_pipe_;
+    SamplerTable sampler_table_;
+    frame_graph::MainScenePass main_scene_pass_;
+    frame_graph::PickerPass picker_pass_;
     FrameResources frame_resources_;
-    Picker picker_;
-    SobelPipeline  sobel_pipe_;
+    frame_graph::SobelResources sobel_resources_;
+    frame_graph::OutlinePass outline_pass_;
+    frame_graph::SobelComputePass sobel_compute_pass_;
+    frame_graph::EdgeOverlayPass edge_overlay_pass_;
     SobelAsyncPass sobel_async_;
 
     VkCommandPool commandPool = VK_NULL_HANDLE;       // _3D family
@@ -204,8 +208,10 @@ private:
     void create_command_pool();
     void create_sync_objects();
     // when defer_present: leave color as attachment for async Sobel overlay
+    // when capture_screenshot: skip present transition in main; insert copy+present after draws
     void record_command_buffer(VkCommandBuffer buffer, uint32_t imageIndex,
-                               VkPrimitiveTopology topology, bool defer_present);
+                               VkPrimitiveTopology topology, bool defer_present,
+                               bool capture_screenshot = false);
 
     static constexpr int kGpuSlots = 3;
     struct GpuFrameSlot
@@ -241,10 +247,24 @@ private:
 
     void cleanup();
 
-    // Screenshot (Win32 client capture → PNG). Processed on render thread.
+    // Screenshot (GPU readback while swapchain image is still acquired). Render thread only.
     mutable std::mutex screenshot_mutex_;
     std::string        screenshot_pending_path_;
-    bool consume_and_save_screenshot_();
+    // Filled when this frame will capture; PNG written after submit completes.
+    std::string        screenshot_path_this_frame_;
+    bool               screenshot_copy_recorded_ = false;
+    VkBuffer           screenshot_staging_ = VK_NULL_HANDLE;
+    VkDeviceMemory     screenshot_staging_mem_ = VK_NULL_HANDLE;
+    VkDeviceSize       screenshot_staging_size_ = 0;
+    uint32_t           screenshot_extent_w_ = 0;
+    uint32_t           screenshot_extent_h_ = 0;
+
+    bool begin_screenshot_frame_(); // claim pending path for this frame
+    void ensure_screenshot_staging_();
+    void destroy_screenshot_staging_();
+    // COLOR_ATTACHMENT → TRANSFER_SRC → copy → PRESENT (image must still be acquired).
+    void record_screenshot_before_present_(VkCommandBuffer cmd, VkImage swapchain_image);
+    void finish_screenshot_after_submit_();
 };
 
 #endif /* GRAPHICS_SYSTEM_HPP */

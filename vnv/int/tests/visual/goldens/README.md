@@ -4,8 +4,10 @@
 
 | Path | When used |
 |------|-----------|
-| `fake_overview.png` | **Desktop / windowed** capture (historical Windows-style baseline) |
-| `linux_headless/fake_overview.png` | **Headless** path (`--headless`, GPU readback, lavapipe/Mesa CI) |
+| `<case>.png` | **Desktop / windowed** capture (`fake_overview`, `fake_side_cam`, `fake_selection_sobel`) |
+| `linux_headless/<case>.png` | **Headless** path (`--headless`, GPU readback, lavapipe/Mesa CI) |
+
+Commit desktop goldens from Windows (or matching GPU). Linux CI hard-gates on `linux_headless/` when present; missing headless goldens fall back to smoke size gate.
 
 ## Rules
 

@@ -33,7 +33,8 @@
       "sources_under": "vnv/int/tests/visual/",
       "run_by_default": true,
       "kind": "visual_golden",
-      "case": "fake_overview"
+      "case": "fake_overview",
+      "cases": ["fake_overview", "fake_side_cam", "fake_selection_sobel"]
     },
     {
       "id": "bench_frame_profiler",

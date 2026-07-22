@@ -343,8 +343,6 @@ void GraphicsSystem::render_loop()
             auto sub = frame_profiler_.cpu_scope("SubmitPresent");
             render();
         }
-        // Capture after present path paints ImGui (end of frame content).
-        consume_and_save_screenshot_();
 
         // Work wall (before 60 Hz pad) — used for profiler frame_ms / bound class.
         const auto t_work = std::chrono::steady_clock::now();
@@ -391,11 +389,11 @@ void GraphicsSystem::render()
         inFlightFrames[currentFrame].pendingPick = false;
         inFlightFrames[currentFrame].pickKind = PickKind::None;
 
-        const uint32_t picked = picker_.read_object_id(device);
+        const uint32_t picked = picker_pass_.read_object_id(device);
         const auto& pick_map = inFlightFrames[currentFrame].pick_map;
 
         std::string resolved;
-        if (picked != kPickerInvalidId && picked < pick_map.size())
+        if (picked != frame_graph::kPickerInvalidId && picked < pick_map.size())
             resolved = pick_map[picked];
 
         if (kind == PickKind::Click)
@@ -425,14 +423,19 @@ void GraphicsSystem::render()
 
     // App builds colored outline list; graphics draws all in one pass (no role names).
     const bool want_sobel =
-        sobel_pipe_.ready() && frame_resources_.outline_count() > 0;
+        outline_pass_.ready() && sobel_compute_pass_.ready() && edge_overlay_pass_.ready() &&
+        frame_resources_.outline_count() > 0;
+
+    // F12 path: claim pending path; copy is recorded into the acquired swapchain image CB
+    // before present (post-present transfer is illegal and can hang).
+    const bool capture_shot = begin_screenshot_frame_();
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;
     vkResetCommandBuffer(commandBuffer, 0);
     {
         auto rec = frame_profiler_.cpu_scope("RecordMain");
         record_command_buffer(commandBuffer, acq.image_index, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                              /*defer_present=*/want_sobel);
+                              /*defer_present=*/want_sobel, capture_shot);
     }
 
     if (want_sobel)
@@ -458,11 +461,19 @@ void GraphicsSystem::render()
         sctx.swapchain_color_view = swapchain_targets_.color_view(acq.image_index);
         sctx.swapchain_image = swapchainImages[acq.image_index];
         sctx.swapchain = swapchain;
-        sctx.recorder = &frame_recorder_;
+        sctx.main_pass = &main_scene_pass_;
         sctx.frame_sync = &frame_sync_;
         sctx.presenter = &frame_presenter_;
         sctx.profiler = frame_profiler_.enabled() ? &frame_profiler_ : nullptr;
-        sobel_async_.submit(sobel_pipe_, sctx, begin.frame_index, acq.image_index);
+        if (capture_shot)
+        {
+            sctx.before_present = [](void* user, VkCommandBuffer cmd, VkImage image) {
+                static_cast<GraphicsSystem*>(user)->record_screenshot_before_present_(cmd, image);
+            };
+            sctx.before_present_user = this;
+        }
+        sobel_async_.submit(outline_pass_, sobel_compute_pass_, edge_overlay_pass_,
+                            sobel_resources_, sctx, begin.frame_index, acq.image_index);
     }
     else
     {
@@ -476,6 +487,9 @@ void GraphicsSystem::render()
             acq.image_available,
             acq.render_finished);
     }
+
+    if (capture_shot)
+        finish_screenshot_after_submit_();
 
 }   /* render() */
 

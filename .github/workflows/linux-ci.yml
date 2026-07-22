@@ -32,6 +32,9 @@ jobs:
       - name: PCH include audit
         run: python3 scripts/check_pch.py
 
+      - name: App include-boundary audit
+        run: python3 scripts/check_include_boundary.py
+
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja \

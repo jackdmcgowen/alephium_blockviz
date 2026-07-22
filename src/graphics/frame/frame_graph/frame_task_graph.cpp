@@ -1,5 +1,6 @@
 ﻿#include "graphics/pch.h"
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
+#include "graphics/frame/frame_graph/ipass.hpp"
 #include "graphics/gpu_prv_lib.h"
 
 #include <queue>
@@ -87,6 +88,16 @@ uint32_t FrameTaskGraph::add_pass(PassNode node)
     const uint32_t id = static_cast<uint32_t>(passes_.size());
     passes_.push_back(std::move(node));
     return id;
+}
+
+uint32_t FrameTaskGraph::register_pass(IPass& pass, PassRecordFn record)
+{
+    PassNode node{};
+    node.name = pass.name();
+    node.queue = pass.queue();
+    node.record = std::move(record);
+    pass.declare_resources(node.reads, node.writes);
+    return add_pass(std::move(node));
 }
 
 void FrameTaskGraph::add_edge(uint32_t from, uint32_t to, ImageBarrierEdge barrier)

@@ -144,46 +144,56 @@ foreach ($p in $manifest.projects) {
     Write-Host "== VnV [$cat] $($p.id) =="
 
     if ($p.kind -eq "visual_golden") {
-        $case = $p.case
-        if (-not $case) { $case = "fake_overview" }
-        $outDir = Join-Path $RepoRoot "vnv\int\tests\visual\out\$case"
-        $actual = Join-Path $outDir "actual.png"
-        $golden = Join-Path $RepoRoot "vnv\int\tests\visual\goldens\$case.png"
-        $diff = Join-Path $outDir "diff.png"
-        $report = Join-Path $outDir "report.txt"
+        $cases = @()
+        if ($p.cases) {
+            foreach ($c in $p.cases) { $cases += [string]$c }
+        }
+        if ($cases.Count -eq 0) {
+            $one = $p.case
+            if (-not $one) { $one = "fake_overview" }
+            $cases = @($one)
+        }
         $compare = Join-Path $RepoRoot "vnv\int\tests\visual\compare_images.ps1"
+        foreach ($case in $cases) {
+            $outDir = Join-Path $RepoRoot "vnv\int\tests\visual\out\$case"
+            $actual = Join-Path $outDir "actual.png"
+            $golden = Join-Path $RepoRoot "vnv\int\tests\visual\goldens\$case.png"
+            $diff = Join-Path $outDir "diff.png"
+            $report = Join-Path $outDir "report.txt"
 
-        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-        if (Test-Path $actual) { Remove-Item $actual -Force }
+            Write-Host "  case: $case"
+            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+            if (Test-Path $actual) { Remove-Item $actual -Force }
 
-        $code = Run-Exe $exe @("--case", $case, "--out", $actual)
-        if ($code -ne 0) {
-            Write-Host "FAIL: harness exit $code"
-            $failures++
-            continue
-        }
+            $code = Run-Exe $exe @("--case", $case, "--out", $actual)
+            if ($code -ne 0) {
+                Write-Host "FAIL: harness exit $code ($case)"
+                $failures++
+                continue
+            }
 
-        if ($UpdateGoldens) {
-            $gdir = Split-Path -Parent $golden
-            New-Item -ItemType Directory -Force -Path $gdir | Out-Null
-            Copy-Item -Force $actual $golden
-            Write-Host "Updated golden: $golden"
-            continue
-        }
+            if ($UpdateGoldens) {
+                $gdir = Split-Path -Parent $golden
+                New-Item -ItemType Directory -Force -Path $gdir | Out-Null
+                Copy-Item -Force $actual $golden
+                Write-Host "Updated golden: $golden"
+                continue
+            }
 
-        if (-not (Test-Path $golden)) {
-            Write-Host "FAIL: no golden at $golden (use -UpdateGoldens)"
-            $failures++
-            continue
-        }
+            if (-not (Test-Path $golden)) {
+                Write-Host "FAIL: no golden at $golden (use -UpdateGoldens)"
+                $failures++
+                continue
+            }
 
-        & $compare -Expected $golden -Actual $actual -DiffOut $diff -ReportOut $report `
-            -PerPixelTol 8 -MaxBadFraction 0.002
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "FAIL: visual compare"
-            $failures++
-        } else {
-            Write-Host "PASS: visual $case"
+            & $compare -Expected $golden -Actual $actual -DiffOut $diff -ReportOut $report `
+                -PerPixelTol 8 -MaxBadFraction 0.002
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "FAIL: visual compare ($case)"
+                $failures++
+            } else {
+                Write-Host "PASS: visual $case"
+            }
         }
         continue
     }

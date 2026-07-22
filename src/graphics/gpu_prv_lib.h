@@ -91,6 +91,10 @@ void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory);
 VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 void destroy_image_view(VkDevice device, VkImageView imageview);
 
+  //sampler.cpp — also SamplerTable / SamplerFilter in graphics/sampler.hpp
+VkSampler create_sampler(VkDevice device, const VkSamplerCreateInfo& info);
+void destroy_sampler(VkDevice device, VkSampler sampler);
+
 // Layout transition via VkImageMemoryBarrier2 (shared by _3D + CMP paths).
 // Queue families default to IGNORED (no ownership transfer).
 void cmd_image_barrier(

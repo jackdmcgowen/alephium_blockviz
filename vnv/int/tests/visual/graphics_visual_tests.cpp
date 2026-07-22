@@ -1,10 +1,13 @@
-// Graphics visual regression harness (V1).
-// Fixed-size window + Debug FakeChain + fixed camera + screenshot.
+// Graphics visual regression harness.
+// Fixed-size window + Debug FakeChain + fixed camera pose + screenshot.
 // Working directory must be the repo root.
 //
 // Usage:
-//   int_visual --case fake_overview --out vnv/int/tests/visual/out/fake_overview/actual.png
 //   int_visual --list
+//   int_visual --case fake_overview --out vnv/int/tests/visual/out/fake_overview/actual.png
+//   int_visual --case fake_side_cam ...
+//   int_visual --case fake_selection_sobel ...
+//   int_visual --headless --case fake_overview ...
 
 #include "app/pch.h"
 
@@ -23,6 +26,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #ifndef VIS_WDW_W
 #define VIS_WDW_W 1280
@@ -34,6 +38,21 @@
 namespace fs = std::filesystem;
 
 static IEngine* g_engine = nullptr;
+
+static const char* kCases[] = {
+    "fake_overview",
+    "fake_side_cam",
+    "fake_selection_sobel",
+};
+static constexpr int kCaseCount = static_cast<int>(sizeof(kCases) / sizeof(kCases[0]));
+
+static bool is_known_case(const std::string& id)
+{
+    for (int i = 0; i < kCaseCount; ++i)
+        if (id == kCases[i])
+            return true;
+    return false;
+}
 
 static void on_resize(void* /*user*/)
 {
@@ -65,6 +84,50 @@ static bool wait_for_file(const fs::path& path, int timeout_ms)
     return fs::exists(path, ec) && fs::file_size(path, ec) > 64 && !ec;
 }
 
+static void apply_end_camera_(CameraController& camera)
+{
+    camera.set_view_preset(CameraController::ViewPreset::End);
+    // Settle blend + scroll
+    for (int i = 0; i < 45; ++i)
+        camera.tick(1.f / 30.f);
+    camera.set_scroll_z(-48.f);
+    for (int i = 0; i < 15; ++i)
+        camera.tick(1.f / 30.f);
+}
+
+static void apply_side_camera_(CameraController& camera)
+{
+    camera.set_view_preset(CameraController::ViewPreset::Side);
+    for (int i = 0; i < 45; ++i)
+        camera.tick(1.f / 30.f);
+    camera.set_scroll_z(-48.f);
+    for (int i = 0; i < 15; ++i)
+        camera.tick(1.f / 30.f);
+}
+
+// Prefer confirmed tip hash; fall back to any graph node.
+static std::string pick_selection_hash_(BlockScene& scene)
+{
+    for (uint32_t lane = 0; lane < static_cast<uint32_t>(BlockScene::kLaneCount); ++lane)
+    {
+        if (!scene.frontier_valid(lane))
+            continue;
+        const NodeId tip = scene.confirmed_tip_hash(lane);
+        if (!tip.empty())
+            return tip;
+    }
+    const std::vector<NodeId> tips = scene.tip_ids();
+    if (!tips.empty() && !tips.front().empty())
+        return tips.front();
+    const auto nodes = scene.nodes_snapshot_unsorted();
+    for (const auto& n : nodes)
+    {
+        if (!n.id.empty())
+            return n.id;
+    }
+    return {};
+}
+
 static void print_usage()
 {
     std::printf(
@@ -74,7 +137,10 @@ static void print_usage()
         "  --warmup-ms N   Override warmup milliseconds\n"
         "  --width N --height N\n"
         "  --headless      VK_EXT_headless_surface (no DISPLAY/window)\n"
-        "  --list\n");
+        "  --list\n"
+        "Cases:\n");
+    for (int i = 0; i < kCaseCount; ++i)
+        std::printf("  %s\n", kCases[i]);
 }
 
 int main(int argc, char** argv)
@@ -118,16 +184,18 @@ int main(int argc, char** argv)
 
     if (list_only)
     {
-        std::printf("fake_overview\n");
+        for (int i = 0; i < kCaseCount; ++i)
+            std::printf("%s\n", kCases[i]);
         return 0;
     }
 
     if (out_path.empty())
         out_path = "vnv/int/tests/visual/out/" + case_id + "/actual.png";
 
-    if (case_id != "fake_overview")
+    if (!is_known_case(case_id))
     {
-        std::printf("[vis] unsupported case '%s' (V1: fake_overview only)\n", case_id.c_str());
+        std::printf("[vis] unsupported case '%s'\n", case_id.c_str());
+        print_usage();
         return 2;
     }
 
@@ -162,6 +230,7 @@ int main(int argc, char** argv)
     BlockScene scene;
     CameraController camera;
     camera.set_aspect(static_cast<float>(width) / static_cast<float>(height > 0 ? height : 1));
+    // Default End pose (matches historical fake_overview).
     camera.set_scroll_z(-48.f);
     camera.add_look_delta(0.f, 180.f);
     for (int i = 0; i < 30; ++i)
@@ -200,9 +269,33 @@ int main(int argc, char** argv)
     std::printf("[vis] case=%s warmup_ms=%d out=%s\n", case_id.c_str(), warmup_ms, out_path.c_str());
     pump_for_ms(warmup_ms);
 
-    camera.set_scroll_z(-48.f);
-    for (int i = 0; i < 10; ++i)
-        camera.tick(1.f / 30.f);
+    if (case_id == "fake_side_cam")
+        apply_side_camera_(camera);
+    else
+        apply_end_camera_(camera);
+
+    if (case_id == "fake_selection_sobel")
+    {
+        const std::string hash = pick_selection_hash_(scene);
+        if (hash.empty())
+        {
+            std::printf("[vis] FAIL: no block hash for selection (scene empty?)\n");
+            engine->stop();
+            engine->free_systems();
+            destroy_engine(engine);
+            g_engine = nullptr;
+            delete presenter;
+            app_platform_destroy_window(create_info.window);
+            return 1;
+        }
+        std::printf("[vis] selection hash=%.16s…\n", hash.c_str());
+        engine->set_selection(hash);
+        // Allow publish + outline path a few frames.
+        pump_for_ms(800);
+        for (int i = 0; i < 10; ++i)
+            camera.tick(1.f / 30.f);
+    }
+
     pump_for_ms(500);
 
     engine->request_screenshot(out_path.c_str());

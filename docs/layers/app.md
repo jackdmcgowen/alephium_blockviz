@@ -4,26 +4,27 @@ Host process and product presentation for **Alephium BlockFlow** (`alephium_visu
 
 ## Overview
 
-The app owns the Win32 window, `config.json` load, wiring of systems into `IEngine`, ImGui chrome (`BlockflowOverlay`), render-thread camera (`CameraController`), and the production visual model (`ScenePresenter` as `IFrameSource`). It does not open sockets or create Vulkan devices.
+The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platform/*`), `config.json` / `user_prefs.json` load, wiring of systems into `IEngine`, ImGui chrome (`BlockflowOverlay`), render-thread camera (`CameraController`), and the production visual model (`ScenePresenter` as `IFrameSource`). It does not open sockets or create Vulkan devices.
 
 ## Ownership boundary
 
 | Owns | Must not own |
 |------|----------------|
-| `main` / `WndProc`, process lifetime | Vulkan handles, swapchain |
+| `main` + `app/platform/*` event loop, process lifetime | Vulkan handles, swapchain |
 | `config.c` + domain URL list | curl / REST command table |
 | `BlockflowOverlay` (Network + Block panels) | Poll watermark, `is_main` |
 | `ScenePresenter` visual policy | Graphics pipelines / Sobel barriers |
 | `CameraController` timeline UX | Network thread lifecycle |
 | Host identity (`app_identity.hpp`) | Engine version tags |
-| Borderless fullscreen (HWND style + placement) | Exclusive display mode / Vulkan FS exclusive |
+| Borderless fullscreen (Win32 HWND / GLFW F11) | Exclusive display mode / Vulkan FS exclusive |
 
 ## Current surface
 
 | Path | Role |
 |------|------|
-| `src/app/main.cpp` | Window, config boot, system register, message pump; F11/Esc fullscreen |
-| `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (save style + placement) |
+| `src/app/main.cpp` | Window, config boot, system register, platform pump; F11/Esc fullscreen |
+| `src/app/platform/*` | OS host: Win32 or GLFW (see [platform.md](../platform.md)) |
+| `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (Win32 style + placement) |
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
@@ -36,7 +37,7 @@ The app owns the Win32 window, `config.json` load, wiring of systems into `IEngi
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |
 | `src/app/ui_chrome.hpp` | Shared chrome helpers |
 
-**Threading:** Main thread = Win32 + idle sleep. Overlay `draw()` and `ScenePresenter::prepare` run on the **graphics render thread**. Overlay must only read `UiSnapshot` / engine selection APIs, not live `BlockScene` without a published snapshot.
+**Threading:** Main thread = platform message pump + idle sleep. Overlay `draw()` and `ScenePresenter::prepare` run on the **graphics render thread**. Overlay must only read `UiSnapshot` / engine selection APIs, not live `BlockScene` without a published snapshot.
 
 ### Visual model (production)
 

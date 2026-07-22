@@ -2,6 +2,16 @@
 
 OS- and WSI-specific code lives in **dedicated translation units** selected at build time. Shared product TUs must not include `windows.h` / X11 / GLFW headers.
 
+## Support matrix (summary)
+
+| Platform | Host | Product GUI | Headless | VnV mod | Int visual | CI |
+|----------|------|-------------|----------|---------|------------|-----|
+| Windows x64 | Win32 | Yes (MSVC `sln/`) | Yes | `run_vnv.ps1` | Yes | Local dual-track |
+| Linux x64 | GLFW | Yes (CMake) | Yes | `run_vnv.sh` | Yes | GitHub Actions mod |
+| macOS | — | **No** | — | — | — | Unscheduled |
+
+User-facing checklist: [README.md](../README.md). Linux build steps: [linux.md](linux.md).
+
 ## Layout
 
 ```text
@@ -31,8 +41,9 @@ src/network/platform/
 **MSVC PCH:** each `*_win32.cpp` must `#include` the layer pch first (`app/pch.h`, `graphics/pch.h`, or `network/pch.h`) — same rule as other product TUs.
 
 ```text
-# Audit (repo root) — fails if a PCH=Use .cpp misses the leading include
-python3 scripts/check_pch.py
+# Audits (repo root)
+python3 scripts/check_pch.py              # MSVC PCH first-include rule
+python3 scripts/check_include_boundary.py # app must not include Vulkan / gfx_platform.hpp
 ```
 
 ### Checklist: new platform `.cpp`
@@ -41,10 +52,10 @@ python3 scripts/check_pch.py
 2. First line: `#include "<layer>/pch.h"` (MSVC projects)  
 3. Add TU only to the correct OS list (vcxproj: win32 only; CMake: `if(WIN32)` branch)  
 4. No product headers that change often in PCH  
-5. Run `python3 scripts/check_pch.py`
+5. Run `python3 scripts/check_pch.py` and `python3 scripts/check_include_boundary.py`
 
 Linux steps: [linux.md](linux.md).  
-VnV mod on Linux: CMake targets `mod_domain` / `mod_network` + `scripts/run_vnv.sh`.
+VnV (unit / system): [vnv/TESTING.md](../vnv/TESTING.md) · CMake targets `mod_domain` / `mod_network` / `int_visual` + `scripts/run_vnv.sh`.
 
 **Headless:** `EngineCreateInfo.headless` → `VK_EXT_headless_surface` (no OS window). Screenshots use GPU swapchain readback (`TRANSFER_SRC` + `gfx_platform_write_png_rgba`). Shared helpers in `gfx_platform_common.cpp`.
 
@@ -72,6 +83,7 @@ Linux CMake/CI green does **not** prove Windows. After any change under `src/*/p
 | **Windows (required for product)** | `msbuild sln\alephium_visualizer.sln /p:Configuration=Debug /p:Platform=x64` |
 | **Linux** | CMake product + `scripts/run_vnv.sh` (or GitHub Actions) |
 | **PCH hygiene** | `python scripts/check_pch.py` |
+| **App include boundary** | `python scripts/check_include_boundary.py` |
 
 ## Contracts
 

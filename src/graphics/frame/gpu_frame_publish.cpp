@@ -70,7 +70,7 @@ bool GraphicsSystem::apply_published_frame()
     {
         if (o.instance_index >= slot.instances.size())
             continue;
-        if (outline_gpu.size() >= kMaxSobelInstances)
+        if (outline_gpu.size() >= frame_graph::kMaxSobelInstances)
             break;
         const GpuInstance& src = slot.instances[o.instance_index];
         InstanceData d{};

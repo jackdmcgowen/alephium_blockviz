@@ -3,11 +3,13 @@
 #
 # Linux (this script):
 #   python3 scripts/check_pch.py
+#   python3 scripts/check_include_boundary.py
 #   build (optional) + mod VnV
 #   headless int_visual PNG size + optional golden compare
 #
 # Windows (run manually on a VS machine):
 #   python3 scripts/check_pch.py
+#   python3 scripts/check_include_boundary.py
 #   Open sln/alephium_visualizer.sln → Debug|x64 build
 #   .\scripts\run_vnv.ps1
 #   Launch product from repo root; Esc quit clean
@@ -38,6 +40,7 @@ echo "repo: $REPO_ROOT"
 echo ""
 echo "== PCH audit =="
 python3 scripts/check_pch.py
+python3 scripts/check_include_boundary.py
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
@@ -68,7 +71,7 @@ echo ""
 echo "======== Linux smoke PASSED ========"
 echo ""
 echo "Windows checklist (manual):"
-echo "  1. python3 scripts/check_pch.py"
+echo "  1. python3 scripts/check_pch.py && python3 scripts/check_include_boundary.py"
 echo "  2. MSBuild sln/alephium_visualizer.sln Debug|x64 (or VS)"
 echo "  3. .\\scripts\\run_vnv.ps1"
 echo "  4. Run product from repo root; smoke Esc quit"

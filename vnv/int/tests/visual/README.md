@@ -37,13 +37,20 @@ Legacy wrapper: `.\scripts\run_visual_tests.ps1`
 | `compare_images.ps1` | Pixel threshold compare |
 | `graphics_visual_tests.cpp` | Capture harness → `int_visual.exe` |
 
-## Case: `fake_overview`
+## Cases
 
-- 1280×720, Debug FakeChain, fixed camera, no app overlay  
-- Warmup ~4.5s then BitBlt screenshot  
+| Case | What it checks |
+|------|----------------|
+| `fake_overview` | End-cam FakeChain overview (historical baseline) |
+| `fake_side_cam` | Side view preset after settle |
+| `fake_selection_sobel` | Select a confirmed tip (or any node); gold selection path + outlines |
+
+Common setup: 1280×720, Debug FakeChain, no app overlay, warmup ~4.5s, then **GPU swapchain readback**.
+
+List: `int_visual --list`
 
 ## Compare defaults
 
 Per-channel max delta **8**; max bad fraction **0.2%**.
 
-Goldens are GPU/machine-sensitive until GPU readback (later phase).
+Goldens remain GPU/driver-sensitive; prefer headless profile for CI where configured (`goldens/linux_headless/`).

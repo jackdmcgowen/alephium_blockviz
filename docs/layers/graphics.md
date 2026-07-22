@@ -26,17 +26,18 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, pick types, `IUiOverlay` |
 | `gpu_prv_lib.h` | Vulkan free-function helpers (private): pipeline, descriptor, image barriers |
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
-| `frame/` | Sync, resources, recorder, presenter, descriptors, picker, Sobel, swapchain targets, task graph |
+| `sampler.*` | `SamplerTable` by `SamplerFilter` index (shared; not pass-private) |
+| `frame/` | Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes |
+| `frame/frame_graph/` | `IPass`, `FrameTaskGraph` (DAG nodes + image barrier edges) |
+| `frame/passes/` | Concrete `IPass`: `MainScenePass`, `PickerPass`, `OutlinePass`, `SobelComputePass`, `EdgeOverlayPass` + `SobelResources` |
 | `frame/profiling/` | `TimestampQueryPool` + `FrameProfiler` (CPU scopes + GPU timestamps; F3 HUD) |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
-| `pipelines/sobel_pipeline.*` | Outline depth+color + compute + edge×color overlay PSOs |
-| `frame/sobel_async_pass.*` | Single-pass multi-queue Sobel (_3D↔CMP) + fence |
+| `frame/sobel_async_pass.*` | Multi-queue executor (_3D outline → CMP → _3D overlay) + fence; not a PSO owner |
 | `frame/sobel_types.hpp` | Thin request type; outline list is `SobelOutlineInstance` in `gpu_pub_lib.h` |
 | `frame/gpu_frame_publish.cpp` | Triple-buffer `publish_frame` / `apply_published_frame` |
 | `frame/selection_state.cpp` | Selection, hover, multi-tx filter, detail refill pin |
 | `frame/frame_shared_state.*` | Debug drawer / mesh arena / viewProj shared by loop + record |
-| `frame/screenshot.cpp` | Client-area PNG capture (F12 / request_screenshot) |
-| `pipelines/` | Cube + picker pipeline objects |
+| `frame/screenshot.cpp` | F12 / `request_screenshot`: GPU readback **while swapchain image is still acquired** (copy before present); window blit opt-in only |
 | `mesh_arena.*`, `buffer_manager.*` | Mesh / buffer pooling |
 | `debug/debug_drawer.*` | Arrows and debug geometry |
 | `shaders/*.glsl` + `compile_shaders.py` | SPIR-V pre-build |
@@ -52,11 +53,17 @@ render thread (frame_loop.cpp):
   apply published GpuFrameSlot (gpu_frame_publish.cpp)
   IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
   publish_frame / upload
-  record main: cubes → debug mesh (planes after arrows) → ImGui
-  optional pick pass
-  optional async Sobel: outline depth → CMP edges → overlay LOAD on swapchain (last)
-  present
+  MainScenePass: cubes → debug mesh → ImGui
+  optional PickerPass (same graphics CB; policy stays on GS)
+  optional SobelAsyncPass executor:
+    OutlinePass → CMP SobelComputePass → EdgeOverlayPass → present
+  present (non-Sobel path)
 ```
+
+### IPass + task graph
+
+Every render pipeline is an **`IPass`**: private PSO create/destroy helpers, public `create` / `destroy` / `record` / `declare_resources`.  
+`FrameTaskGraph::register_pass(IPass&)` plugs nodes; dependency edges carry image access transitions. Multi-queue submit stays in **`SobelAsyncPass`** (not inside IPass). Shared Sobel images/descriptors/semaphores live on **`SobelResources`** (attached by Outline / Compute / Overlay).
 
 **Order note:** segment barrier planes are debug quads in the main pass. Sobel edge composite runs **after** planes (and ImGui) as a depth-free overlay so selection/TRACE edges read as a highlight on top of translucent planes.
 
@@ -104,7 +111,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 | **Done (P2)** | Pipeline/descriptor/barrier modularization | `PipelineType`, `descriptor.cpp`, `cmd_image_barrier`, MeshArena shared PSOs |
 | **Done (P2)** | Split `GraphicsSystem` orchestration | `frame_loop`, `async_sobel_submit`, `gpu_frame_publish`, `selection_state` |
 | **P2** | Always-on tip Sobel perf budget | Soft median regression from bench; kill-switch escape hatch — **data-driven via profiler** |
-| **P1 (V1 landed)** | Visual regression harness | `vnv/int/tests/visual/` + `run_vnv.ps1 -Int` (BitBlt + golden); V2/V3: determinism + GPU readback |
+| **P1 (V1 landed)** | Visual regression harness | `vnv/int/tests/visual/` + `run_vnv.ps1 -Int` (GPU readback + golden); more cases optional |
 | **P3** | Full PIMPL of `GraphicsSystem` | Only if external includes force it |
 
 ### Frame profiler (quick ref)

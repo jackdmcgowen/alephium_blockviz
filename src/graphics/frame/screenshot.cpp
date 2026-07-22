@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <ctime>
 #include <string>
-#include <vector>
 
 namespace
 {
@@ -49,148 +48,142 @@ void GraphicsSystem::request_screenshot(const char* path_utf8)
         screenshot_pending_path_ = make_default_path();
 }
 
-bool GraphicsSystem::consume_and_save_screenshot_()
+bool GraphicsSystem::begin_screenshot_frame_()
 {
-    std::string path;
+    screenshot_path_this_frame_.clear();
+    screenshot_copy_recorded_ = false;
     {
         std::lock_guard<std::mutex> lock(screenshot_mutex_);
         if (screenshot_pending_path_.empty())
             return false;
-        path = std::move(screenshot_pending_path_);
+        screenshot_path_this_frame_ = std::move(screenshot_pending_path_);
         screenshot_pending_path_.clear();
     }
+    if (width == 0 || height == 0 || device == VK_NULL_HANDLE)
+    {
+        screenshot_path_this_frame_.clear();
+        return false;
+    }
+    try
+    {
+        ensure_screenshot_staging_();
+    }
+    catch (...)
+    {
+        std::printf("[gfx] screenshot: staging alloc failed\n");
+        screenshot_path_this_frame_.clear();
+        return false;
+    }
+    return true;
+}
+
+void GraphicsSystem::ensure_screenshot_staging_()
+{
+    const VkDeviceSize need =
+        static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4u;
+    if (screenshot_staging_ != VK_NULL_HANDLE && screenshot_staging_size_ >= need &&
+        screenshot_extent_w_ == width && screenshot_extent_h_ == height)
+        return;
+
+    destroy_screenshot_staging_();
+    create_buffer(device, &deviceMemProps, need, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  screenshot_staging_, screenshot_staging_mem_);
+    screenshot_staging_size_ = need;
+    screenshot_extent_w_ = width;
+    screenshot_extent_h_ = height;
+}
+
+void GraphicsSystem::destroy_screenshot_staging_()
+{
+    if (device != VK_NULL_HANDLE && screenshot_staging_ != VK_NULL_HANDLE)
+        destroy_buffer(device, screenshot_staging_, screenshot_staging_mem_);
+    screenshot_staging_ = VK_NULL_HANDLE;
+    screenshot_staging_mem_ = VK_NULL_HANDLE;
+    screenshot_staging_size_ = 0;
+    screenshot_extent_w_ = screenshot_extent_h_ = 0;
+}
+
+void GraphicsSystem::record_screenshot_before_present_(VkCommandBuffer cmd, VkImage swapchain_image)
+{
+    if (!cmd || swapchain_image == VK_NULL_HANDLE || screenshot_staging_ == VK_NULL_HANDLE ||
+        screenshot_path_this_frame_.empty())
+        return;
+
+    // Still acquired: last draw left COLOR_ATTACHMENT. Copy then present layout.
+    cmd_image_barrier(cmd, swapchain_image,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+        { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = { screenshot_extent_w_, screenshot_extent_h_, 1 };
+    vkCmdCopyImageToBuffer(cmd, swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           screenshot_staging_, 1, &region);
+
+    cmd_image_barrier(cmd, swapchain_image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_2_TRANSFER_READ_BIT, 0,
+        VK_PIPELINE_STAGE_2_COPY_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+
+    screenshot_copy_recorded_ = true;
+}
+
+void GraphicsSystem::finish_screenshot_after_submit_()
+{
+    if (!screenshot_copy_recorded_ || screenshot_path_this_frame_.empty())
+    {
+        screenshot_path_this_frame_.clear();
+        screenshot_copy_recorded_ = false;
+        return;
+    }
+
+    const std::string path = std::move(screenshot_path_this_frame_);
+    screenshot_path_this_frame_.clear();
+    screenshot_copy_recorded_ = false;
+
+    // Copy ran in the same submitted CB(s) as the frame; wait graphics before map.
+    if (queues_.get(QueueType::_3D) != VK_NULL_HANDLE)
+        vkQueueWaitIdle(queues_.get(QueueType::_3D));
 
     ensure_parent_dirs(path);
 
-    // --- Preferred: GPU readback of last presented swapchain image ---
-    if (device != VK_NULL_HANDLE && last_swapchain_image_valid_ &&
-        last_swapchain_image_index_ < swapchainImages.size() && width > 0 && height > 0)
+    bool ok = false;
+    void* mapped = nullptr;
+    if (screenshot_staging_mem_ != VK_NULL_HANDLE &&
+        vkMapMemory(device, screenshot_staging_mem_, 0, screenshot_staging_size_, 0, &mapped) ==
+            VK_SUCCESS &&
+        mapped)
     {
-        const VkImage src = swapchainImages[last_swapchain_image_index_];
-        const VkDeviceSize row_pitch = static_cast<VkDeviceSize>(width) * 4u;
-        const VkDeviceSize buf_size = row_pitch * height;
-
-        VkBuffer staging = VK_NULL_HANDLE;
-        VkDeviceMemory staging_mem = VK_NULL_HANDLE;
-        try
-        {
-            create_buffer(device, &deviceMemProps, buf_size,
-                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                          staging, staging_mem);
-        }
-        catch (...)
-        {
-            std::printf("[gfx] screenshot: staging buffer alloc failed\n");
-            goto fallback_window;
-        }
-
-        // One-shot CB on graphics pool.
-        VkCommandBufferAllocateInfo ai{};
-        ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        ai.commandPool = commandPool;
-        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandBufferCount = 1;
-        VkCommandBuffer cb = VK_NULL_HANDLE;
-        if (vkAllocateCommandBuffers(device, &ai, &cb) != VK_SUCCESS)
-        {
-            destroy_buffer(device, staging, staging_mem);
-            goto fallback_window;
-        }
-
-        VkCommandBufferBeginInfo bi{};
-        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cb, &bi);
-
-        // PRESENT_SRC → TRANSFER_SRC
-        VkImageMemoryBarrier2 barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.image = src;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-
-        VkDependencyInfo dep{};
-        dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers = &barrier;
-        vkCmdPipelineBarrier2(cb, &dep);
-
-        VkBufferImageCopy region{};
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.layerCount = 1;
-        region.imageExtent = { width, height, 1 };
-        vkCmdCopyImageToBuffer(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, 1, &region);
-
-        // TRANSFER_SRC → PRESENT_SRC
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-        barrier.dstAccessMask = 0;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        vkCmdPipelineBarrier2(cb, &dep);
-
-        vkEndCommandBuffer(cb);
-
-        VkCommandBufferSubmitInfo cbs{};
-        cbs.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-        cbs.commandBuffer = cb;
-        VkSubmitInfo2 submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-        submit.commandBufferInfoCount = 1;
-        submit.pCommandBufferInfos = &cbs;
-
-        const bool ok_submit =
-            vkQueueSubmit2(queues_.get(QueueType::_3D), 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS;
-        if (ok_submit)
-            vkQueueWaitIdle(queues_.get(QueueType::_3D));
-        vkFreeCommandBuffers(device, commandPool, 1, &cb);
-
-        bool ok = false;
-        if (ok_submit)
-        {
-            void* mapped = nullptr;
-            if (vkMapMemory(device, staging_mem, 0, buf_size, 0, &mapped) == VK_SUCCESS && mapped)
-            {
-                ok = gfx_platform_write_png_rgba(
-                    path.c_str(), static_cast<int>(width), static_cast<int>(height),
-                    static_cast<const unsigned char*>(mapped));
-                vkUnmapMemory(device, staging_mem);
-            }
-        }
-        destroy_buffer(device, staging, staging_mem);
-
-        if (ok)
-        {
-            std::printf("[gfx] screenshot (GPU readback) saved: %s (%ux%u)\n", path.c_str(),
-                        width, height);
-            return true;
-        }
-        std::printf("[gfx] screenshot: GPU readback failed\n");
+        ok = gfx_platform_write_png_rgba(
+            path.c_str(), static_cast<int>(screenshot_extent_w_),
+            static_cast<int>(screenshot_extent_h_),
+            static_cast<const unsigned char*>(mapped));
+        vkUnmapMemory(device, screenshot_staging_mem_);
     }
 
-fallback_window:
-    // Window blit is opt-in debug only (GDI+ / stub). Primary path is GPU readback.
+    if (ok)
+    {
+        std::printf("[gfx] screenshot (GPU readback) saved: %s (%ux%u)\n", path.c_str(),
+                    screenshot_extent_w_, screenshot_extent_h_);
+        return;
+    }
+
+    std::printf("[gfx] screenshot: GPU readback failed\n");
     const bool allow_blit = blockviz::env_flag("BLOCKVIZ_SCREENSHOT_WINDOW_BLIT", false);
     if (!allow_blit || gfx_platform_is_headless() || !hwnd)
     {
         std::printf("[gfx] screenshot failed: %s (set BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1 for "
                     "legacy window blit)\n",
                     path.c_str());
-        return false;
+        return;
     }
-    const bool ok = gfx_platform_save_window_png(hwnd, path.c_str());
-    if (ok)
+    if (gfx_platform_save_window_png(hwnd, path.c_str()))
         std::printf("[gfx] screenshot (window blit) saved: %s\n", path.c_str());
     else
         std::printf("[gfx] screenshot failed: %s\n", path.c_str());
-    return ok;
 }

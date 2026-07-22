@@ -41,10 +41,12 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 
 ## Related gates
 
-- **VnV (verification & validation):** see `vnv/README.md`.
-  - After adding/removing a **shared library** or VnV project: edit `vnv/manifest/*.json`, then `.\scripts\sync_solutions.ps1` (updates product + VnV `.sln` files).
-  - Domain/network logic: `.\scripts\run_vnv.ps1` (mod).
-  - Graphics/presentation or before further features: `.\scripts\run_vnv.ps1 -All`.
+- **VnV (verification & validation):** see `vnv/TESTING.md` (taxonomy) and `vnv/README.md` (run/sync).
+  - **Unit** (one `src/` area): `vnv/mod/tests/<area>/` — `.\scripts\run_vnv.ps1` default. **mod ≠ modularization.**
+  - **Integration** (multi-module): `vnv/integration/` (scaffold).
+  - **System · functional** (multi-system): `vnv/int/` — `.\scripts\run_vnv.ps1 -Int` / `-All`.
+  - **System · bench** (perf): `vnv/bench/` — `.\scripts\run_vnv.ps1 -Bench` (opt-in).
+  - After adding/removing a **shared library** or VnV project: edit `vnv/manifest/*.json`, then `.\scripts\sync_solutions.ps1`.
   - Drift check: `.\scripts\sync_solutions.ps1 -CheckOnly`.
 - Vulkan validation: follow `.grok/skills/vulkan-validator/SKILL.md` before committing/pushing graphics changes.
 - Build speed / PCH / IWYU / adding systems: see `docs/build-performance.md`. Use `scripts/bench_build.ps1` before claiming compile-time improvements.
@@ -53,7 +55,7 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 
 - Product `.cpp` files start with `#include "<area>/pch.h"` (`graphics/`, `network/`, `engine/`, `app/`).
 - **Platform TUs count as product TUs:** `src/*/platform/*_win32.cpp` must include that layer’s pch first (MSVC `PrecompiledHeader=Use`). See [docs/platform.md](docs/platform.md).
-- Audit: `python scripts/check_pch.py` (or `python3`) before claiming Windows build green after adding TUs.
+- Audit: `python scripts/check_pch.py` and `python scripts/check_include_boundary.py` before claiming Windows build green after adding TUs.
 - Do not put frequently edited product headers into PCH files.
 - Prefer forward declarations in headers; keep `gpu_pub_lib.h` Vulkan-free.
 - **App never includes Vulkan:** do not `#include` `graphics/platform/gfx_platform.hpp` (or any header that pulls `vulkan/vulkan.h`) from `src/app/**`. The app vcxproj has no Vulkan include path. Forward-declare thin hooks or use `gpu_pub_lib.h` only.

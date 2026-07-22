@@ -126,6 +126,7 @@
     <ClCompile Include="..\src\graphics\instance.cpp" />
     <ClCompile Include="..\src\graphics\pipeline.cpp" />
     <ClCompile Include="..\src\graphics\shader.cpp" />
+    <ClCompile Include="..\src\graphics\sampler.cpp" />
     <ClCompile Include="..\src\graphics\surface.cpp" />
     <ClCompile Include="..\src\graphics\platform\gfx_platform_common.cpp" />
     <ClCompile Include="..\src\graphics\platform\gfx_platform_win32.cpp" />
@@ -135,9 +136,14 @@
     <ClCompile Include="..\src\graphics\frame\frame_sync.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_resources.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_descriptors.cpp" />
-    <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\main_scene_pass.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\picker_pass.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\sobel_resources.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\outline_pass.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\sobel_compute_pass.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\edge_overlay_pass.cpp" />
     <ClCompile Include="..\src\graphics\frame\profiling\timestamp_query_pool.cpp" />
     <ClCompile Include="..\src\graphics\frame\profiling\frame_profiler.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp" />
@@ -147,10 +153,6 @@
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp" />
     <ClCompile Include="..\src\graphics\frame\screenshot.cpp" />
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
-    <ClCompile Include="..\src\graphics\frame\picker.cpp" />
-    <ClCompile Include="..\src\graphics\pipelines\sobel_pipeline.cpp" />
-    <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp" />
-    <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp" />
     <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -169,17 +171,20 @@
     <ClInclude Include="..\src\graphics\frame\frame_sync.hpp" />
     <ClInclude Include="..\src\graphics\frame\frame_resources.hpp" />
     <ClInclude Include="..\src\graphics\frame\frame_descriptors.hpp" />
-    <ClInclude Include="..\src\graphics\frame\frame_recorder.hpp" />
     <ClInclude Include="..\src\graphics\frame\frame_presenter.hpp" />
     <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp" />
+    <ClInclude Include="..\src\graphics\frame\frame_graph\ipass.hpp" />
     <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp" />
-    <ClInclude Include="..\src\graphics\frame\picker.hpp" />
     <ClInclude Include="..\src\graphics\frame\sobel_async_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\sobel_types.hpp" />
-    <ClInclude Include="..\src\graphics\pipelines\sobel_pipeline.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\main_scene_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\picker_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\sobel_resources.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\outline_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\sobel_compute_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\edge_overlay_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\vertex_types.hpp" />
-    <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp" />
-    <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp" />
+    <ClInclude Include="..\src\graphics\sampler.hpp" />
     <ClInclude Include="..\src\engine\engine.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
     <ClInclude Include="..\src\engine\system.hpp" />

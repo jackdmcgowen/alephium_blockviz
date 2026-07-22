@@ -153,59 +153,65 @@ if [[ "$HEADLESS" == "1" || "$HEADLESS" == "true" ]]; then
 fi
 
 if [[ "$RUN_INT" -eq 1 ]]; then
-  case="fake_overview"
-  out_dir="vnv/int/tests/visual/out/${case}"
-  actual="${out_dir}/actual.png"
-  # Multi-platform goldens: see vnv/int/tests/visual/goldens/README.md
-  if [[ "$HEADLESS" == "1" || "$HEADLESS" == "true" ]]; then
-    golden="vnv/int/tests/visual/goldens/linux_headless/${case}.png"
-    compare_profile="headless"
-  else
-    golden="vnv/int/tests/visual/goldens/${case}.png"
-    compare_profile="desktop"
-  fi
-  diff="${out_dir}/diff.png"
-  report="${out_dir}/report.txt"
+  # Keep in sync with int_visual --list / vnv_projects.json cases[]
+  INT_CASES=(fake_overview fake_side_cam fake_selection_sobel)
   path="$(bin_path int_visual)"
-  echo ""
-  echo "== VnV [int] int_visual (${case}) headless=${HEADLESS} golden=${golden} =="
   if [[ -z "$path" ]]; then
+    echo ""
+    echo "== VnV [int] int_visual =="
     echo "FAIL: missing int_visual (build with -DBLOCKVIZ_BUILD_VNV_GPU=ON)"
     failures=$((failures + 1))
   elif [[ "$HEADLESS" != "1" && "$HEADLESS" != "true" && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    echo ""
+    echo "== VnV [int] int_visual =="
     echo "FAIL: no DISPLAY/WAYLAND_DISPLAY — use --headless or set DISPLAY"
     failures=$((failures + 1))
   else
-    mkdir -p "$out_dir"
-    rm -f "$actual"
-    if ! "$path" --case "$case" --out "$actual" "${HEADLESS_ARGS[@]}"; then
-      echo "FAIL: int_visual capture"
-      failures=$((failures + 1))
-    elif [[ "$UPDATE_GOLDENS" -eq 1 ]]; then
-      mkdir -p "$(dirname "$golden")"
-      cp -f "$actual" "$golden"
-      echo "PASS: updated golden $golden"
-    else
-      if [[ ! -f "$golden" ]]; then
-        # No golden yet: smoke gate (dims + min size)
-        if python3 vnv/int/tests/visual/compare_images.py \
-            --actual "$actual" --profile smoke \
-            --report-out "$report"; then
-          echo "PASS: int_visual smoke (no golden at $golden — commit with --update-goldens)"
+    for case in "${INT_CASES[@]}"; do
+      out_dir="vnv/int/tests/visual/out/${case}"
+      actual="${out_dir}/actual.png"
+      # Multi-platform goldens: see vnv/int/tests/visual/goldens/README.md
+      if [[ "$HEADLESS" == "1" || "$HEADLESS" == "true" ]]; then
+        golden="vnv/int/tests/visual/goldens/linux_headless/${case}.png"
+        compare_profile="headless"
+      else
+        golden="vnv/int/tests/visual/goldens/${case}.png"
+        compare_profile="desktop"
+      fi
+      diff="${out_dir}/diff.png"
+      report="${out_dir}/report.txt"
+      echo ""
+      echo "== VnV [int] int_visual (${case}) headless=${HEADLESS} golden=${golden} =="
+      mkdir -p "$out_dir"
+      rm -f "$actual"
+      if ! "$path" --case "$case" --out "$actual" "${HEADLESS_ARGS[@]}"; then
+        echo "FAIL: int_visual capture (${case})"
+        failures=$((failures + 1))
+      elif [[ "$UPDATE_GOLDENS" -eq 1 ]]; then
+        mkdir -p "$(dirname "$golden")"
+        cp -f "$actual" "$golden"
+        echo "PASS: updated golden $golden"
+      else
+        if [[ ! -f "$golden" ]]; then
+          if python3 vnv/int/tests/visual/compare_images.py \
+              --actual "$actual" --profile smoke \
+              --report-out "$report"; then
+            echo "PASS: int_visual smoke (no golden at $golden — commit with --update-goldens)"
+          else
+            echo "FAIL: int_visual smoke (see $report)"
+            failures=$((failures + 1))
+          fi
+        elif python3 vnv/int/tests/visual/compare_images.py \
+            --expected "$golden" --actual "$actual" \
+            --profile "$compare_profile" \
+            --diff-out "$diff" --report-out "$report"; then
+          echo "PASS: int_visual ${case} (${compare_profile})"
         else
-          echo "FAIL: int_visual smoke (see $report)"
+          echo "FAIL: int_visual compare (see $report)"
           failures=$((failures + 1))
         fi
-      elif python3 vnv/int/tests/visual/compare_images.py \
-          --expected "$golden" --actual "$actual" \
-          --profile "$compare_profile" \
-          --diff-out "$diff" --report-out "$report"; then
-        echo "PASS: int_visual ${case} (${compare_profile})"
-      else
-        echo "FAIL: int_visual compare (see $report)"
-        failures=$((failures + 1))
       fi
-    fi
+    done
   fi
 fi
 
