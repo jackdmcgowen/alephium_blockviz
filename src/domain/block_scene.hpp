@@ -216,17 +216,20 @@ public:
         char        status_detail[96] = {};
         int         pending_dep_fills = 0;
         int         timeline_holes = 0;
-        // Network history interval fills currently queued/in-flight (not live tip).
+        // Network history interval fills (not live tip): queued + recently fulfilled for fade.
         static constexpr int kMaxPendingFillSlabs = 16;
         struct PendingFillSlab
         {
             int64_t from_ms = 0;
             int64_t to_ms   = 0;
+            int     fulfilled = 0; // 0 = in API queue / in-flight, 1 = admitted (fade)
         };
         int             pending_fill_slab_count = 0;
         PendingFillSlab pending_fill_slabs[kMaxPendingFillSlabs]{};
     };
     void set_network_hud(const NetworkHud& hud);
+    // Patch only fill-slab fields (call on enqueue/admit so 3D sees queue immediately).
+    void set_pending_fill_slabs(const NetworkHud::PendingFillSlab* slabs, int count);
     NetworkHud network_hud() const;
     // Caller must already hold mutex() (e.g. ScenePresenter::prepare).
     NetworkHud network_hud_locked() const;

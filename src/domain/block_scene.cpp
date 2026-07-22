@@ -688,6 +688,15 @@ void BlockScene::set_network_hud(const NetworkHud& hud)
     network_hud_ = hud;
 }
 
+void BlockScene::set_pending_fill_slabs(const NetworkHud::PendingFillSlab* slabs, int count)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    const int n = std::clamp(count, 0, NetworkHud::kMaxPendingFillSlabs);
+    network_hud_.pending_fill_slab_count = n;
+    for (int i = 0; i < n; ++i)
+        network_hud_.pending_fill_slabs[i] = slabs[i];
+}
+
 BlockScene::NetworkHud BlockScene::network_hud() const
 {
     std::lock_guard<std::mutex> lock(mu_);

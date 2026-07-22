@@ -1845,15 +1845,23 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 const float fa = (in_render > 0.02f) ? in_render : 0.07f;
                 glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
                 col.a *= fa;
+                // Frustum cull barrier planes (mesh only).
+                if (in.frustum)
+                {
+                    const glm::vec3 center(0.f, 0.f, z_edge);
+                    const glm::vec3 half(plane_half, plane_half, 0.5f);
+                    if (!in.frustum->intersects_aabb(center, half))
+                        continue;
+                }
                 debug->add_z_plane_quad(z_edge, plane_half, col);
             }
         }
 
-        // Gray translucent Z-slabs for queued history network fills (not live tip).
-        // Active = published pending; when a key leaves the set, alpha-fade out.
+        // Gray translucent volumes: at API queue start; fade when fulfilled.
+        // HUD carries both in-flight (fulfilled=0) and recently admitted (fulfilled=1).
         {
             const float now = now_sec_();
-            std::unordered_set<int64_t> active;
+            std::unordered_set<int64_t> seen;
             const int nslab = std::clamp(hud.pending_fill_slab_count, 0,
                                          BlockScene::NetworkHud::kMaxPendingFillSlabs);
             for (int i = 0; i < nslab; ++i)
@@ -1861,25 +1869,31 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 const auto& s = hud.pending_fill_slabs[i];
                 if (s.to_ms <= s.from_ms)
                     continue;
-                active.insert(s.from_ms);
+                seen.insert(s.from_ms);
                 auto it = fill_slab_anims_.find(s.from_ms);
                 if (it == fill_slab_anims_.end())
                 {
                     FillSlabAnim a;
                     a.from_ms = s.from_ms;
                     a.to_ms = s.to_ms;
-                    a.fade_start_sec = -1.f;
+                    // First sight: full α. If already fulfilled, start fade immediately
+                    // (still shows full→0 so enqueue+admit same tick remains visible).
+                    a.fade_start_sec = (s.fulfilled != 0) ? now : -1.f;
                     fill_slab_anims_[s.from_ms] = a;
                 }
                 else
                 {
                     it->second.to_ms = s.to_ms;
-                    it->second.fade_start_sec = -1.f; // still queued
+                    if (s.fulfilled == 0)
+                        it->second.fade_start_sec = -1.f; // still in queue
+                    else if (it->second.fade_start_sec < 0.f)
+                        it->second.fade_start_sec = now; // just fulfilled
                 }
             }
+            // Left HUD entirely: treat as fulfilled and fade if not already.
             for (auto it = fill_slab_anims_.begin(); it != fill_slab_anims_.end(); )
             {
-                if (active.count(it->first) == 0 && it->second.fade_start_sec < 0.f)
+                if (seen.count(it->first) == 0 && it->second.fade_start_sec < 0.f)
                     it->second.fade_start_sec = now;
                 if (it->second.fade_start_sec >= 0.f &&
                     (now - it->second.fade_start_sec) >= kFillSlabFadeSec)
@@ -1890,7 +1904,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++it;
             }
 
-            // Slightly inside barrier plane span so volume frames the shard ring.
             const float slab_half = kLayoutBaseRadius * 6.5f;
             const glm::vec4 base_col(0.48f, 0.48f, 0.52f, 0.11f);
             for (const auto& kv : fill_slab_anims_)
@@ -1907,6 +1920,17 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     continue;
                 const float z0 = ts_to_z(a.from_ms, timeline_origin_ms, meters_per_second);
                 const float z1 = ts_to_z(a.to_ms, timeline_origin_ms, meters_per_second);
+                // Frustum cull volume (mesh only; fade still advances above).
+                if (in.frustum)
+                {
+                    const float z_lo = std::min(z0, z1);
+                    const float z_hi = std::max(z0, z1);
+                    const glm::vec3 center(0.f, 0.f, 0.5f * (z_lo + z_hi));
+                    const glm::vec3 half(slab_half, slab_half,
+                                         std::max(0.25f, 0.5f * (z_hi - z_lo)));
+                    if (!in.frustum->intersects_aabb(center, half))
+                        continue;
+                }
                 glm::vec4 col = base_col;
                 col.a = alpha;
                 debug->add_z_slab(z0, z1, slab_half, col);
