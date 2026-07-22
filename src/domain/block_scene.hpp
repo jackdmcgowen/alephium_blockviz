@@ -49,7 +49,13 @@ public:
     // Retention: drop old/excess nodes from graph, detail store, confirmed bag, feed.
     // Keeps per-lane confirmed frontier tips and pending tips. Returns removed count.
     // min_timestamp_ms <= 0 skips time filter; max_nodes == 0 skips count cap.
-    size_t prune(int64_t min_timestamp_ms, size_t max_nodes);
+    // soft_evict: corridor/RAM leave (disk may re-admit) — tags hashes so presenter
+    // skips red death VFX (take_soft_evicted).
+    size_t prune(int64_t min_timestamp_ms, size_t max_nodes, bool soft_evict = false);
+
+    // Presenter: drain soft-eviction tags (quiet leave; not chain death).
+    // Call only while already holding mutex() (prepare path).
+    std::unordered_set<NodeId> take_soft_evicted_locked();
 
     // Sequential frontier: H_c+1 default; chain_walk allows validated multi-step jump.
     // Bag membership always records proven main for solid drawing.
@@ -227,6 +233,8 @@ private:
     AlphDetailStore detail_store_;
     std::deque<RecentFeedItem> feed_;
     int total_blocks_ = 0;
+    // Soft corridor eviction (adapter); drained by ScenePresenter for quiet arrow/cube leave.
+    std::unordered_set<NodeId> soft_evicted_pending_;
     std::unordered_set<NodeId> confirmed_;
     std::unordered_set<NodeId> uncle_set_;
     std::atomic<float> camera_scroll_z_{ 0.f };

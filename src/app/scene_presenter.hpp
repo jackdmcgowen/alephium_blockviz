@@ -118,6 +118,7 @@ private:
                                 const std::unordered_map<std::string, glm::vec3>& positions,
                                 const std::unordered_map<std::string, glm::vec3>& block_colors,
                                 const std::unordered_set<std::string>& live_nodes,
+                                const std::unordered_set<std::string>& soft_evicted,
                                 const std::unordered_set<std::string>& drawn_set,
                                 const std::unordered_set<std::string>& green_display,
                                 const std::unordered_set<std::string>& cyan_owners,
@@ -135,6 +136,7 @@ private:
 
     void update_death_and_walk_(const std::unordered_set<std::string>& live_nodes,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
+                                const std::unordered_set<std::string>& soft_evicted,
                                 float now);
 
     float ephemeral_grow_u_(const std::string& key, float stagger_delay,

@@ -219,6 +219,9 @@ private:
     // On successful interval admit: advance fill cursor for owning window(s).
     void on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms);
     void on_interval_chunk_failed_(int64_t from_ms);
+    // Throttle/backoff after 429/5xx (or repeated fails). Pauses interval pumps.
+    void note_http_interval_outcome_(bool ok, long http_code);
+    bool interval_pump_allowed_() const;
 
     // Apply fetch results with separate interval vs hash/is_main budgets.
     void drain_fetch_results_(int interval_budget, int other_budget);
@@ -410,6 +413,12 @@ private:
     int stats_fetch_admitted_ = 0;
     int stats_trace_missing_ = 0;
     int seed_lane_rr_ = 0;
+    // Endpoint throttle: pause interval enqueues until wall ms.
+    int64_t http_backoff_until_ms_ = 0;
+    int     http_backoff_streak_ = 0;
+    long    last_interval_http_code_ = 0;
+    int     stats_http_429_ = 0;
+    int     stats_http_5xx_ = 0;
 
     static constexpr size_t kMaxSeedQueue = 512;
     static constexpr int kTipRefreshEveryNPolls = 3;
@@ -425,6 +434,8 @@ private:
     static constexpr int64_t kTimelineChunkMs = 120'000;
     // drain_verify: at most one chunk every this many ms.
     static constexpr int64_t kChunkPumpIntervalMs = 400;
+    // Soft cap when camera lookback index jumps (avoid enqueue storm).
+    static constexpr int kMaxChunksOnCamStep = 2;
     static constexpr int kMaxChunksPerPoll = 4;
     static constexpr int kMaxChunksPerDrain = 2;
     // Load ring: disk-first body (15 G). Render ring is app-side (7 centered).

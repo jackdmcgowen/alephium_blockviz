@@ -61,7 +61,9 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
+**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted history GETs (default **~120s** spans; disk keys stay 60s). Steady live refresh re-requests only a **short tip edge**. `drain_verify` rate-limits pumps (~400ms). Camera lookback jumps use a **small enqueue budget** to avoid storming the host. **429/5xx** → exponential interval backoff (pause pumps).
+
+**Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
 **Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. Live tip seeds / BFS still wait for Steady + live window 0 fully chunk-filled. **View/fetch ring always follows `cam_k`** (not frozen to `{0,1,2}` during tip pipeline) so paging into history past k2 still enqueues interval chunks.
 

@@ -3289,9 +3289,47 @@ void AlephiumAdapter::on_interval_chunk_failed_(int64_t from_ms)
     }
 }
 
+void AlephiumAdapter::note_http_interval_outcome_(bool ok, long http_code)
+{
+    last_interval_http_code_ = http_code;
+    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    if (ok)
+    {
+        http_backoff_streak_ = 0;
+        http_backoff_until_ms_ = 0;
+        return;
+    }
+    const bool throttle =
+        http_code == 429 || http_code == 503 || http_code == 502 || http_code == 500;
+    if (http_code == 429)
+        ++stats_http_429_;
+    if (http_code >= 500 && http_code < 600)
+        ++stats_http_5xx_;
+    if (!throttle && http_code != 0)
+        return; // e.g. 404 — no global pause
+    // Exponential backoff: 1s, 2s, 4s, … cap 32s.
+    if (http_backoff_streak_ < 5)
+        ++http_backoff_streak_;
+    const int64_t delay_ms = (1ll << http_backoff_streak_) * 1000;
+    http_backoff_until_ms_ = now + std::min<int64_t>(delay_ms, 32000);
+    std::printf("[adapter] interval HTTP backoff code=%ld streak=%d pause_ms=%lld\n",
+                http_code, http_backoff_streak_,
+                static_cast<long long>(http_backoff_until_ms_ - now));
+}
+
+bool AlephiumAdapter::interval_pump_allowed_() const
+{
+    if (http_backoff_until_ms_ <= 0)
+        return true;
+    const int64_t now = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    return now >= http_backoff_until_ms_;
+}
+
 int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
 {
     if (max_chunks <= 0)
+        return 0;
+    if (!interval_pump_allowed_())
         return 0;
     resolve_genesis_ms_();
     update_segment_ring_();
@@ -3695,6 +3733,7 @@ void AlephiumAdapter::drain_fetch_results_(int interval_budget, int other_budget
         if (!r.ok)
         {
             // HTTP fail: pool does not mark completed — retry allowed.
+            note_http_interval_outcome_(false, r.http_code);
             on_interval_chunk_failed_(r.from_ms);
             return;
         }
@@ -3702,6 +3741,7 @@ void AlephiumAdapter::drain_fetch_results_(int interval_budget, int other_budget
         {
             // OK but empty body still marks completed in pool — forget so retry works.
             fetch_pool_->io().forget_completed_interval(r.from_ms);
+            note_http_interval_outcome_(false, r.http_code != 0 ? r.http_code : 204);
             on_interval_chunk_failed_(r.from_ms);
             return;
         }
@@ -3715,6 +3755,7 @@ void AlephiumAdapter::drain_fetch_results_(int interval_budget, int other_budget
         int seen = 0, added = 0;
         admit_blocks_with_events_(obj, &seen, &added);
         cJSON_Delete(obj);
+        note_http_interval_outcome_(true, r.http_code);
         // Load-once: successful policy apply (including 0 blocks in span).
         history_slots_fetched_.insert(r.from_ms);
         // Variable / overlapping patches: mark fully covered grid keys too.
@@ -4122,7 +4163,9 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
             const int64_t min_keep_ts = genesis_ms_ + static_cast<int64_t>(G_keep_min) * w;
             if (min_keep_ts > genesis_ms_)
             {
-                const size_t removed = scene_.prune(min_keep_ts, /*max_nodes=*/0);
+                // soft_evict: no red death VFX (disk may re-admit on camera return).
+                const size_t removed =
+                    scene_.prune(min_keep_ts, /*max_nodes=*/0, /*soft_evict=*/true);
                 if (removed > 0)
                 {
                     stats_removed_ += static_cast<int>(removed);
@@ -4287,8 +4330,9 @@ void AlephiumAdapter::drain_verify(int max_jobs, const std::atomic<bool>& runnin
                 budget = std::max(kAheadChunksPerDrain, kMaxChunksPerPoll * 2);
             else if (!live_tip_pipeline_ready_())
                 budget = std::max(kPreTipChunksPerDrain, kAheadChunksPerDrain);
+            // Camera jump: small budget to avoid interval enqueue storm / throttle.
             if (cam_stepped)
-                budget = std::max(budget, kMaxChunksPerPoll * 2);
+                budget = std::min(budget, kMaxChunksOnCamStep);
             pump_timeline_chunks_(budget);
             if (history_mode || cam_stepped || live_catchup_active_)
                 drain_fetch_results_(kIntervalAdmitsPerDrain, kMaxFetchAdmitsPerDrain);

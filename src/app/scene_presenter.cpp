@@ -250,13 +250,15 @@ std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_ha
 // - Primary confirmed: solid dual-RGBA gradient listing→dep (white head if missing).
 // - Unconfirmed tip: full length immediately; color cyan→main dual over cyan_to_main_sec.
 // - Secondary (prior tip): solid→translucent main (alpha floor > 0).
-// - No length grow/restart for tip keys; leave-active → Fading; listing dead → Dying.
+// - No length grow/restart for tip keys; leave-active → Fading;
+//   listing hard-removed → Dying; soft corridor eviction → quiet erase.
 // - Barrier planes: never for open live k=0.
 void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
     const std::unordered_map<std::string, glm::vec3>& block_colors,
     const std::unordered_set<std::string>& live_nodes,
+    const std::unordered_set<std::string>& soft_evicted,
     const std::unordered_set<std::string>& drawn_set,
     const std::unordered_set<std::string>& green_display,
     const std::unordered_set<std::string>& cyan_owners,
@@ -547,6 +549,12 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         const bool listing_live = live_nodes.count(listing) != 0;
         if (!listing_live)
         {
+            // Soft corridor/RAM eviction (disk may re-admit): quiet erase — not chain death.
+            if (soft_evicted.count(listing) != 0)
+            {
+                it = tip_dep_anims_.erase(it);
+                continue;
+            }
             if (anim.has_pos)
             {
                 anim.phase = ArrowPhase::Dying;
@@ -716,11 +724,15 @@ void ScenePresenter::draw_bfs_traces_(
 void ScenePresenter::update_death_and_walk_(
     const std::unordered_set<std::string>& live_nodes,
     const std::unordered_map<std::string, glm::vec3>& positions,
+    const std::unordered_set<std::string>& soft_evicted,
     float now)
 {
     for (const std::string& h : prev_live_nodes_)
     {
         if (live_nodes.count(h) != 0)
+            continue;
+        // Soft eviction: no red cube death (will re-admit from disk).
+        if (soft_evicted.count(h) != 0)
             continue;
         bool already = false;
         for (const DyingBlock& d : dying_blocks_)
@@ -853,7 +865,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const BlockScene::NetworkHud hud = scene_.network_hud_locked();
 
     const float now = now_sec_();
-    update_death_and_walk_(live_nodes, block_positions, now);
+    const std::unordered_set<std::string> soft_evicted = scene_.take_soft_evicted_locked();
+    update_death_and_walk_(live_nodes, block_positions, soft_evicted, now);
 
     // ------------------------------------------------------------------
     // Classify once (BlockFlow visual model)
@@ -1521,9 +1534,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             block_colors[p.hash] = p.color;
 
-        tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, drawn,
-                               green_display, cyan_owners, unconfirmed_tips, frontier_domain,
-                               tip_len, tip_rad, shaft_r, clearance);
+        tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, soft_evicted,
+                               drawn, green_display, cyan_owners, unconfirmed_tips,
+                               frontier_domain, tip_len, tip_rad, shaft_r, clearance);
         draw_bfs_traces_(*debug, block_positions, drawn);
 
         uint32_t arrow_count = 0;
