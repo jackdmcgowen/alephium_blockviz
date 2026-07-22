@@ -1845,11 +1845,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 const float fa = (in_render > 0.02f) ? in_render : 0.07f;
                 glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
                 col.a *= fa;
-                // Frustum cull barrier planes (mesh only).
+                // Frustum cull barrier planes (mesh only; pad reduces edge strobe).
                 if (in.frustum)
                 {
                     const glm::vec3 center(0.f, 0.f, z_edge);
-                    const glm::vec3 half(plane_half, plane_half, 0.5f);
+                    const glm::vec3 half(plane_half * 1.15f, plane_half * 1.15f, 1.f);
                     if (!in.frustum->intersects_aabb(center, half))
                         continue;
                 }
@@ -1858,7 +1858,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
 
         // Gray translucent volumes: at API queue start; fade when fulfilled.
-        // HUD carries both in-flight (fulfilled=0) and recently admitted (fulfilled=1).
+        // Sticky fade: once fading, never snap back to full α (avoids blink from HUD races).
         {
             const float now = now_sec_();
             std::unordered_set<int64_t> seen;
@@ -1876,21 +1876,19 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     FillSlabAnim a;
                     a.from_ms = s.from_ms;
                     a.to_ms = s.to_ms;
-                    // First sight: full α. If already fulfilled, start fade immediately
-                    // (still shows full→0 so enqueue+admit same tick remains visible).
+                    // First sight at full α. If already fulfilled, start fade immediately.
                     a.fade_start_sec = (s.fulfilled != 0) ? now : -1.f;
                     fill_slab_anims_[s.from_ms] = a;
                 }
                 else
                 {
                     it->second.to_ms = s.to_ms;
-                    if (s.fulfilled == 0)
-                        it->second.fade_start_sec = -1.f; // still in queue
-                    else if (it->second.fade_start_sec < 0.f)
-                        it->second.fade_start_sec = now; // just fulfilled
+                    // Only start fade when first told fulfilled; never un-fade while alive.
+                    if (s.fulfilled != 0 && it->second.fade_start_sec < 0.f)
+                        it->second.fade_start_sec = now;
                 }
             }
-            // Left HUD entirely: treat as fulfilled and fade if not already.
+            // Left HUD entirely: begin fade if still solid.
             for (auto it = fill_slab_anims_.begin(); it != fill_slab_anims_.end(); )
             {
                 if (seen.count(it->first) == 0 && it->second.fade_start_sec < 0.f)
@@ -1914,20 +1912,23 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 {
                     const float t =
                         std::clamp((now - a.fade_start_sec) / kFillSlabFadeSec, 0.f, 1.f);
-                    alpha *= (1.f - t);
+                    // Smoothstep for less pop at end of fade.
+                    const float u = t * t * (3.f - 2.f * t);
+                    alpha *= (1.f - u);
                 }
-                if (alpha < 0.01f)
+                if (alpha < 0.008f)
                     continue;
                 const float z0 = ts_to_z(a.from_ms, timeline_origin_ms, meters_per_second);
                 const float z1 = ts_to_z(a.to_ms, timeline_origin_ms, meters_per_second);
-                // Frustum cull volume (mesh only; fade still advances above).
+                // Frustum cull with pad so edge of screen does not strobe.
                 if (in.frustum)
                 {
                     const float z_lo = std::min(z0, z1);
                     const float z_hi = std::max(z0, z1);
                     const glm::vec3 center(0.f, 0.f, 0.5f * (z_lo + z_hi));
-                    const glm::vec3 half(slab_half, slab_half,
-                                         std::max(0.25f, 0.5f * (z_hi - z_lo)));
+                    const float pad = 1.15f;
+                    const glm::vec3 half(slab_half * pad, slab_half * pad,
+                                         std::max(0.5f, 0.5f * (z_hi - z_lo) * pad));
                     if (!in.frustum->intersects_aabb(center, half))
                         continue;
                 }

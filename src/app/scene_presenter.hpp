@@ -176,7 +176,7 @@ private:
         float   fade_start_sec = -1.f; // <0 = active queued; ≥0 = fading out
     };
     std::unordered_map<int64_t, FillSlabAnim> fill_slab_anims_; // key = from_ms
-    static constexpr float kFillSlabFadeSec = 0.40f;
+    static constexpr float kFillSlabFadeSec = 0.45f;
 
     // Rebuild layout only when graph generation / timeline origin change.
     struct LayoutCache

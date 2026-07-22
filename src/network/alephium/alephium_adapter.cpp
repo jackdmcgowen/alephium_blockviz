@@ -3310,8 +3310,10 @@ void AlephiumAdapter::fill_pending_slabs_into_hud_(BlockScene::NetworkHud& hud) 
 {
     hud.pending_fill_slab_count = 0;
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    constexpr int64_t kKeepFulfilledMs = 600; // fade + margin
-    // Prefer active (not fulfilled) first, then recent fulfilled.
+    constexpr int64_t kKeepFulfilledMs = 800; // cover fade (0.4s) + poller lag
+    // Deterministic order (newest from_ms first) so cap does not thrash keys frame-to-frame.
+    std::vector<const NetworkFillViz*> ordered;
+    ordered.reserve(network_fill_viz_.size());
     for (const auto& kv : network_fill_viz_)
     {
         const NetworkFillViz& v = kv.second;
@@ -3319,39 +3321,30 @@ void AlephiumAdapter::fill_pending_slabs_into_hud_(BlockScene::NetworkHud& hud) 
             continue;
         if (v.fulfilled_ms > 0 && (now_ms - v.fulfilled_ms) > kKeepFulfilledMs)
             continue;
-        if (hud.pending_fill_slab_count >= BlockScene::NetworkHud::kMaxPendingFillSlabs)
-            break;
-        auto& s = hud.pending_fill_slabs[hud.pending_fill_slab_count++];
-        s.from_ms = v.from_ms;
-        s.to_ms = v.to_ms;
-        s.fulfilled = (v.fulfilled_ms > 0) ? 1 : 0;
+        ordered.push_back(&v);
     }
-    // Window pending without map entry (defensive).
-    const int64_t c = chunk_ms_();
-    const int64_t live_open = live_open_subseg_from_(now_ms);
-    for (const auto& w : lookback_windows_)
+    std::sort(ordered.begin(), ordered.end(),
+              [](const NetworkFillViz* a, const NetworkFillViz* b) {
+                  return a->from_ms > b->from_ms;
+              });
+    for (const NetworkFillViz* vp : ordered)
     {
-        if (w.pending_from_ms <= 0 || c <= 0)
-            continue;
-        if (network_fill_viz_.count(w.pending_from_ms) != 0)
-            continue;
-        const int64_t to = std::min(w.to_ms, w.pending_from_ms + c);
-        if (!history_subseg_allowed_(w.pending_from_ms, to, live_open))
-            continue;
         if (hud.pending_fill_slab_count >= BlockScene::NetworkHud::kMaxPendingFillSlabs)
             break;
         auto& s = hud.pending_fill_slabs[hud.pending_fill_slab_count++];
-        s.from_ms = w.pending_from_ms;
-        s.to_ms = to;
-        s.fulfilled = 0;
+        s.from_ms = vp->from_ms;
+        s.to_ms = vp->to_ms;
+        s.fulfilled = (vp->fulfilled_ms > 0) ? 1 : 0;
     }
+    // Do not re-inject window.pending_from_ms here — it races with fulfilled viz and
+    // caused volumes to snap back to full α mid-fade (blink).
 }
 
 void AlephiumAdapter::publish_fill_slabs_to_scene_()
 {
-    // Prune old fulfilled entries.
+    // Prune old fulfilled entries (after fade window).
     const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
-    constexpr int64_t kKeepFulfilledMs = 600;
+    constexpr int64_t kKeepFulfilledMs = 800;
     for (auto it = network_fill_viz_.begin(); it != network_fill_viz_.end(); )
     {
         if (it->second.fulfilled_ms > 0 &&
