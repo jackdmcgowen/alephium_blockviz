@@ -129,6 +129,10 @@ private:
     bool try_fill_window_from_disk_(int lookback_k);
     // Lazy-admit: schedule ring may be wider; body RAM only if |k - cam_k| ≤ admit half (k=0 always).
     bool lookback_k_in_admit_ring_(int lookback_k) const;
+    // Visible corridor for network fill (= admit/render ring). Same predicate as admit.
+    bool lookback_k_visible_for_network_(int lookback_k) const {
+        return lookback_k_in_admit_ring_(lookback_k);
+    }
     // open_live_edge: leave topmost 64s subseg unfetched so network force-refreshes tip.
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
                                           int64_t to_ms, bool open_live_edge = false);

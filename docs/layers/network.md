@@ -63,7 +63,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = open genesis-aligned 64s subsegment only. History GETs must stay **strictly older** than that open tip (`to ≤ live_open_from`). Each pump cycle: **live first**, then interleave ≥1 history subseg when budget allows (no priority-queue starvation). Camera-centered fill window = one G of subsegments. **429/5xx** → exponential backoff.
+**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = full open genesis cell `[floor(now), next_boundary)`. History GETs stay **strictly older** (`to ≤ live_open_from`). Each pump: **live first**, then fill **all incomplete subsegs in the visible admit/render ring (7 G)** ASAP (disk first, then network)—not a camera-local ±half-G time bubble. **429/5xx** → exponential backoff.
 
 **Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
