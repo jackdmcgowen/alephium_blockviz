@@ -212,6 +212,10 @@ public:
         int         disk_cache_boot_blocks = 0;
         char        disk_cache_path[200] = {};
         char        disk_cache_last_event[160] = {};
+        // Secondary status line (gaps / deps / confirm) — primary stays Stable when live usable.
+        char        status_detail[96] = {};
+        int         pending_dep_fills = 0;
+        int         timeline_holes = 0;
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;

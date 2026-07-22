@@ -209,8 +209,10 @@ private:
     void finish_live_catchup_();
     // Steady + live window fully chunk-filled (gate deep history ≥2).
     bool live_tip_pipeline_ready_() const;
-    // Dual-segment initial: windows 0 and 1 both polled.
+    // Dual-segment initial: windows 0 and 1 both polled (history hygiene; not bootstrap gate).
     bool dual_initial_complete_() const;
+    // Live window tip-ready: enough to leave Bootstrap (does not require win1 complete).
+    bool live_window_tip_ready_() const;
     // Triple-buffer ring of absolute lookback indices (≤ kSegmentRingSize).
     void update_segment_ring_();
     bool is_active_segment_(int index) const;
@@ -235,6 +237,7 @@ private:
     bool enqueue_missing_dep_(const std::string& dep_hash);
     // On confirm: live → hash-fill deps; historical → time-slot poll (no hash).
     int  enqueue_confirm_deps_(const std::string& parent_hash);
+    // Live parents still awaiting dep hash-fills (not interval/history jobs).
     bool confirm_fills_pending_() const;
     void recheck_confirm_fill_parents_();
 
@@ -428,10 +431,9 @@ private:
     static constexpr int kIntervalAdmitsPerDrain = 24;
     static constexpr int kHistoryIntervalAdmitsPerPoll = 32;
     static constexpr int kMaxBfsNodesPerThreadSlice = 64;
-    // Sub-interval for blocks-with-events GETs (~10 chunks per 10 min segment).
-    // History interval GET span. Live tip still force-refreshes a short edge (60s disk keys).
-    // 120s → ~5 GETs per 10-min G (vs 10×60s); reduces endpoint pressure while keeping fill usable.
-    static constexpr int64_t kTimelineChunkMs = 120'000;
+    // History interval GET span = disk subsegment grid (60s). ~10 GETs per 10-min G.
+    // Live tip still force-refreshes a short ~8s edge (ALPH_LIVE_POLL_EDGE_MS) once body exists.
+    static constexpr int64_t kTimelineChunkMs = 60'000;
     // drain_verify: at most one chunk every this many ms.
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     // Soft cap when camera lookback index jumps (avoid enqueue storm).

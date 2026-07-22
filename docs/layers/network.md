@@ -37,15 +37,17 @@ Network owns curl lifecycle, the poller thread, REST helpers (`commands.c`), and
 ### Adapter phases
 
 ```text
-BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady
+BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady  (UI: "Stable")
 ```
 
 | Phase | Behavior (summary) |
 |-------|---------------------|
-| **BootstrapPoll** | First lookback window poll |
+| **BootstrapPoll** | Live-first: exit when **live window tip-ready** (win1 best-effort; history gaps do not block) |
 | **IdentifyTips** | Establish tips / main-chain identity; poll may be gated |
-| **BfsTrace** | Parallel BFS confirm (`N=2G−1` workers): phase A seeds diagonal tips `[g→g]` only; phase B seeds remaining tips only if not already visited. Cross-shard deps. Pool-only expand; live holes hash-fill, history time-slots. Restart when segment fully loads. |
-| **Steady** | Interval polls; BFS maintenance + camera-unlock restart |
+| **BfsTrace** | Parallel BFS confirm (`N=2G−1` **logical workers**, not OS threads): phase A diagonal tips; phase B remaining. Enters Steady without waiting for all dep fills (fills continue async). |
+| **Steady** | Interval polls; BFS maintenance. HUD primary label **Stable**. History gaps / missing deps are a **secondary** status line, not Bootstrapping. |
+
+**Status HUD:** primary = live product readiness (**Stable** / History / Catching up / …). Secondary = `status_detail` (e.g. filling deps, history incomplete near camera). Incomplete older chunks never demote Stable back to Bootstrapping.
 
 Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + forward novelty** for live main, free-main dep fill, live vs historical fetch rules.
 
@@ -61,11 +63,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** history GETs use ~**120s** spans (disk keys stay 60s). Network body fill is a **camera-centered window of one G’s worth of subsegments** (may straddle two G-segs)—not the full 15-G schedule ring. **No new interval enqueues** while inflight intervals are at cap; next free slot re-aims from **current** camera. Live tip uses a **short edge** refresh. **429/5xx** → exponential backoff.
+**Chunked timeline:** history GETs use **60s** spans (same grid as disk keys). Network body fill is a **camera-centered window of one G’s worth of subsegments** (may straddle two G-segs)—not the full 15-G schedule ring. **No new interval enqueues** while inflight intervals are at cap; next free slot re-aims from **current** camera. Live tip uses a **short ~8s edge** refresh once the live G has body. **429/5xx** → exponential backoff.
 
 **Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
-**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. Live tip seeds / BFS still wait for Steady + live window 0 fully chunk-filled. **View/fetch ring always follows `cam_k`** (not frozen to `{0,1,2}` during tip pipeline) so paging into history past k2 still enqueues interval chunks.
+**Dual-segment + tip priority:** Bootstrap pumps windows 0 and 1, but **gates IdentifyTips on live window tip-ready** (not perfect dual history). Win1 continues in background. Live tip seeds / deep history still prefer Steady + live window 0 filled. **View/fetch ring always follows `cam_k`**.
 
 **Terminology:** **G** = number of **groups** (`ALPH_NUM_GROUPS`, 4); shards = G×G lanes; each block has **2G−1** deps. Timeline **lookback k** is tip-relative (`k=0` live tip window, higher = older). Do not confuse k with groups. Window **ms bounds** are genesis-aligned (`G_live − k`); minimap Z uses those bounds so bars match cubes/planes.
 

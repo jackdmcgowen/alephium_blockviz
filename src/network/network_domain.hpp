@@ -102,7 +102,7 @@ inline constexpr const char* network_status_label(NetworkStatus s)
     case NetworkStatus::Bootstrapping: return "Bootstrapping";
     case NetworkStatus::IdentifyTips:  return "Identify tips";
     case NetworkStatus::ConfirmWalk:   return "Confirm walk";
-    case NetworkStatus::Steady:        return "Steady";
+    case NetworkStatus::Steady:        return "Stable"; // UI: live tip usable (gaps are secondary)
     case NetworkStatus::Switching:     return "Switching…";
     case NetworkStatus::Error:         return "Error";
     case NetworkStatus::History:       return "History";

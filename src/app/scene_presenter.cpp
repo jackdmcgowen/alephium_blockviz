@@ -1949,10 +1949,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.net_domain = hud.domain;
         out.ui.net_status = hud.status;
         std::snprintf(out.ui.net_base_url, sizeof(out.ui.net_base_url), "%s", hud.base_url);
+        std::snprintf(out.ui.net_status_detail, sizeof(out.ui.net_status_detail), "%s",
+                      hud.status_detail);
         out.ui.lookback_windows_done = hud.lookback_windows_done;
         out.ui.lookback_windows_need = hud.lookback_windows_need;
         out.ui.lanes_with_frontier = hud.lanes_with_frontier;
         out.ui.open_confirm_walks = hud.open_confirm_walks;
+        out.ui.pending_dep_fills = hud.pending_dep_fills;
+        out.ui.timeline_holes = hud.timeline_holes;
         for (int i = 0; i < 16; ++i)
             out.ui.tip_height_by_lane[i] = hud.tip_height_by_lane[i];
         out.ui.stats_api_is_main = hud.stats_api_is_main;

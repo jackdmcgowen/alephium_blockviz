@@ -155,18 +155,33 @@ void AlephiumAdapter::full_reset()
 
 void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switching)
 {
+    // Primary status = live product readiness (not history gap completeness).
+    // Steady phase → UI label "Stable". BfsTrace may show Stable once tips exist.
     int status = 1; // Connecting
     switch (phase_)
     {
     case Phase::BootstrapPoll: status = 2; break; // Bootstrapping
     case Phase::IdentifyTips:  status = 3; break;
-    case Phase::BfsTrace:      status = 4; break; // Confirm walk
-    case Phase::Steady:        status = 5; break;
+    case Phase::BfsTrace:
+    {
+        // Prefer Stable (live usable) over Confirm walk once any diagonal tip is up.
+        bool any_diag = false;
+        for (int g = 0; g < ALPH_NUM_GROUPS && !any_diag; ++g)
+        {
+            const uint32_t lane = static_cast<uint32_t>(g * ALPH_NUM_GROUPS + g);
+            if (!scene_.confirmed_tip_hash(lane).empty())
+                any_diag = true;
+        }
+        status = any_diag ? 5 : 4; // Stable : Confirm walk
+        break;
+    }
+    case Phase::Steady: status = 5; break; // Stable
     }
 
     const int cam = camera_lookback_index_();
     // Sliding window off live tip → History; return-to-live hole fill → Catching up.
-    if (!switching && phase_ == Phase::Steady)
+    // Only overlay when past cold bootstrap (phase Steady or live-usable BfsTrace).
+    if (!switching && (phase_ == Phase::Steady || status == 5))
     {
         if (cam >= 1)
             status = 8; // NetworkStatus::History
@@ -180,6 +195,63 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
     hud.switching = switching ? 1 : 0;
     if (base_url)
         std::snprintf(hud.base_url, sizeof(hud.base_url), "%.159s", base_url);
+
+    hud.pending_dep_fills = static_cast<int>(pending_fill_parents_.size());
+    hud.timeline_holes = static_cast<int>(timeline_holes_.size());
+    // Secondary line: gaps / deps — primary stays Stable when live is usable.
+    {
+        char detail[96]{};
+        if (phase_ == Phase::BootstrapPoll)
+        {
+            const int d0 = lookback_windows_.empty() ? 0 : lookback_windows_[0].chunks_done;
+            const int t0 = lookback_windows_.empty() ? 0 : lookback_windows_[0].chunks_total;
+            std::snprintf(detail, sizeof(detail), "Loading live segment (%d/%d chunks)", d0,
+                          std::max(1, t0));
+        }
+        else if (live_catchup_active_)
+        {
+            std::snprintf(detail, sizeof(detail), "Filling missed sub-segments after History");
+        }
+        else if (cam >= 1)
+        {
+            std::snprintf(detail, sizeof(detail), "Live tip halted until camera returns to tip");
+        }
+        else if (!pending_fill_parents_.empty())
+        {
+            std::snprintf(detail, sizeof(detail), "Filling missing deps (%zu)",
+                          pending_fill_parents_.size());
+        }
+        else if (phase_ == Phase::BfsTrace || trace_offset() > 0)
+        {
+            std::snprintf(detail, sizeof(detail), "Confirming main chain…");
+        }
+        else if (!timeline_holes_.empty())
+        {
+            std::snprintf(detail, sizeof(detail), "Patching dep holes (%zu)",
+                          timeline_holes_.size());
+        }
+        else if (phase_ == Phase::Steady || phase_ == Phase::IdentifyTips)
+        {
+            // Near-camera incomplete history (not demote primary).
+            bool hist_incomplete = false;
+            for (int ri = 0; ri < active_ring_n_ && !hist_incomplete; ++ri)
+            {
+                const int wi = active_ring_[ri];
+                if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
+                    continue;
+                const auto& w = lookback_windows_[static_cast<size_t>(wi)];
+                if (w.chunks_total > 0 && w.chunks_done < w.chunks_total)
+                    hist_incomplete = true;
+            }
+            if (hist_incomplete)
+                std::snprintf(detail, sizeof(detail), "History incomplete near camera");
+            else if (phase_ == Phase::Steady)
+                std::snprintf(detail, sizeof(detail), "Live tip");
+            else
+                std::snprintf(detail, sizeof(detail), "Anchoring tips");
+        }
+        std::snprintf(hud.status_detail, sizeof(hud.status_detail), "%.95s", detail);
+    }
 
     int done = 0;
     for (const auto& w : lookback_windows_)
@@ -1654,8 +1726,9 @@ bool AlephiumAdapter::pump_priority_holes_(int max_chunks)
                 continue;
             for (int64_t key : SegmentDiskCache::chunk_keys_for_window(s.from_ms, s.to_ms))
             {
-                const int64_t c = chunk_ms_();
-                const int64_t chunk_to = std::min(s.to_ms, key + c);
+                // Disk grid keys are always 60s; do not use network chunk_ms_ here.
+                const int64_t disk_c = SegmentDiskCache::kChunkMs;
+                const int64_t chunk_to = std::min(s.to_ms, key + disk_c);
                 if (chunk_to <= h.from_ms || key >= h.to_ms)
                     continue;
                 if (history_slots_fetched_.count(key) == 0)
@@ -1713,7 +1786,7 @@ bool AlephiumAdapter::ready_for_poll() const
     // Gate further window polls until per-chain DFS finishes.
     if (phase_ == Phase::IdentifyTips || phase_ == Phase::BfsTrace)
         return false;
-    // Steady: no new discovery while confirmed blocks await dep fills (no gaps).
+    // Steady: block only while live parents await dep fills (not history intervals).
     if (phase_ == Phase::Steady && confirm_fills_pending_())
         return false;
     return phase_ == Phase::Steady;
@@ -2098,12 +2171,9 @@ int AlephiumAdapter::enqueue_confirm_deps_(const std::string& parent_hash)
 
 bool AlephiumAdapter::confirm_fills_pending_() const
 {
-    if (!pending_fill_parents_.empty())
-        return true;
-    if (fetch_pool_ &&
-        (fetch_pool_->pending_jobs() > 0 || fetch_pool_->in_flight() > 0))
-        return true;
-    return false;
+    // Only live parents awaiting dep hash-fills. Interval/history jobs must not
+    // freeze Steady polls or hold the UI out of Stable.
+    return !pending_fill_parents_.empty();
 }
 
 void AlephiumAdapter::recheck_confirm_fill_parents_()
@@ -2578,15 +2648,15 @@ void AlephiumAdapter::advance_bfs_traces_()
 
     if (phase_ == Phase::BfsTrace)
     {
-        if (all_bfs_done_() && !confirm_fills_pending_() &&
-            bfs_seed_phase_ == BfsSeedPhase::PhaseB)
+        // Enter Steady/Stable without waiting for dep fills to clear — fills and
+        // paused workers continue under Steady (status stays Stable with subtitle).
+        if (all_bfs_done_() && bfs_seed_phase_ == BfsSeedPhase::PhaseB)
         {
-            std::printf("[adapter] BFS confirm complete -> Steady (fills clear)\n");
+            std::printf("[adapter] BFS confirm complete -> Steady (Stable; fills async)\n");
             set_phase_(Phase::Steady);
             maybe_persist_verified_segments_();
         }
-        else if (all_bfs_done_() && !confirm_fills_pending_() &&
-                 bfs_seed_phase_ == BfsSeedPhase::PhaseA)
+        else if (all_bfs_done_() && bfs_seed_phase_ == BfsSeedPhase::PhaseA)
         {
             // No phase B seeds; still enter Steady after A.
             seed_bfs_phase_b_();
@@ -2596,6 +2666,13 @@ void AlephiumAdapter::advance_bfs_traces_()
                 set_phase_(Phase::Steady);
                 maybe_persist_verified_segments_();
             }
+        }
+        else if (bfs_threads_settled_() && bfs_seed_phase_ == BfsSeedPhase::PhaseB)
+        {
+            // All active workers done or paused on holes — live product is usable.
+            std::printf("[adapter] BFS settled (paused fills ok) -> Steady\n");
+            set_phase_(Phase::Steady);
+            maybe_persist_verified_segments_();
         }
         return;
     }
@@ -3204,6 +3281,29 @@ bool AlephiumAdapter::dual_initial_complete_() const
     return true;
 }
 
+bool AlephiumAdapter::live_window_tip_ready_() const
+{
+    // Bootstrap exit: live window usable for tips — do not wait on win1 / perfect history.
+    if (lookback_windows_.empty())
+        return false;
+    if (bootstrap_admit_pending_())
+        return false;
+    // Disk-painted live G must force-refresh open edge once before tips.
+    if (disk_cache_bootstrap_blocks_ > 0 && !live_edge_refreshed_)
+        return false;
+    const LookbackWindowSlot& w0 = lookback_windows_[0];
+    if (w0.to_ms <= w0.from_ms)
+        return false;
+    // Enough live body: fully polled, or at least one chunk done, or live edge refresh.
+    if (w0.polled)
+        return true;
+    if (w0.chunks_done > 0)
+        return true;
+    if (live_edge_refreshed_)
+        return true;
+    return false;
+}
+
 int AlephiumAdapter::effective_lookback_index_() const
 {
     // Base camera lookback; bump early when eye is past mid of current segment
@@ -3374,7 +3474,7 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     int fetched = 0;
 
     // Network fill window = one G of subsegments centered on camera time (may cross G).
-    // subsegments_per_G = window_ms / chunk_ms (e.g. 600/120 = 5).
+    // subsegments_per_G = window_ms / chunk_ms (e.g. 600/60 = 10).
     const int64_t w = window_ms_();
     const int64_t c = chunk_ms_();
     if (w <= 0 || c <= 0)
@@ -4523,20 +4623,21 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
     const bool live_cam = (cam_k == 0);
     const bool returned_to_live = (prev_k > 0 && live_cam);
 
-    // Bootstrap: high-budget fill of windows 0 then 1 (dual-segment) before tips.
-    // Stay in Bootstrap until both complete so history ≥2 never races tip build.
+    // Bootstrap: prioritize live window tip-readiness; win1 is best-effort (not blocking).
+    // History gaps must not keep status on Bootstrapping once live tip can run.
     if (phase_ == Phase::BootstrapPoll)
     {
-        std::printf("\n[adapter] Bootstrap: dual-segment fill (win 0 then 1, chunked)\n");
+        std::printf("\n[adapter] Bootstrap: live-first fill (win0 gate; win1 best-effort)\n");
         ensure_lookback_window_(0, /*allow_live_poll=*/true);
         ensure_lookback_window_(1, /*allow_live_poll=*/false);
         pump_timeline_chunks_(kBootstrapChunksPerPoll);
-        // Apply finished interval GETs so chunk progress / dual-complete can advance.
+        // Apply finished interval GETs so chunk progress can advance.
         drain_fetch_results_(64);
 
-        if (dual_initial_complete_())
+        if (live_window_tip_ready_())
         {
-            std::printf("[adapter] Bootstrap dual complete (seg0+seg1); IdentifyTips next\n");
+            std::printf("[adapter] Bootstrap live tip-ready (win0); IdentifyTips next "
+                        "(win1 continues in background)\n");
             bootstrap_poll_done_ = true;
             set_phase_(Phase::IdentifyTips);
         }
@@ -4546,7 +4647,8 @@ void AlephiumAdapter::poll_once(int64_t& last_poll_ts)
             const int t0 = lookback_windows_.empty() ? 0 : lookback_windows_[0].chunks_total;
             const int d1 = lookback_windows_.size() < 2 ? 0 : lookback_windows_[1].chunks_done;
             const int t1 = lookback_windows_.size() < 2 ? 0 : lookback_windows_[1].chunks_total;
-            adapter_vlog("[adapter] Bootstrap progress win0=%d/%d win1=%d/%d\n", d0, t0, d1, t1);
+            adapter_vlog("[adapter] Bootstrap progress win0=%d/%d win1=%d/%d tip_ready=0\n", d0,
+                         t0, d1, t1);
         }
         last_poll_ts = now;
         maybe_refill_selection_detail();
