@@ -52,6 +52,7 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | **Orange** | Missing-dep incompletes (not green/unconfirmed red) |
 | **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
 | **Red (fade)** | Removal death α → 0 (same family as unconfirmed) |
+| **Gray Z-slab** | Queued **history** network interval fill; α-fades when admitted (never live tip) |
 
 Presentation only — confirmation marks come from **network** into `BlockScene` (anchor tips + forward novelty: all-deps-Main ⇒ Main).
 

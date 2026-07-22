@@ -111,6 +111,7 @@ void AlephiumAdapter::reset_stats()
     last_live_subseg_from_ = 0;
     last_user_fill_hash_.clear();
     last_user_fill_from_ms_ = 0;
+    network_queued_fills_.clear();
     disk_cache_bootstrapped_ = false;
     disk_cache_bootstrap_blocks_ = 0;
     disk_segment_admitted_.clear();
@@ -291,6 +292,37 @@ void AlephiumAdapter::publish_hud(int domain, const char* base_url, bool switchi
                       cs.root.c_str());
         std::snprintf(hud.disk_cache_last_event, sizeof(hud.disk_cache_last_event), "%.159s",
                       disk_cache_last_event_);
+    }
+
+    // Queued history network fills → 3D gray slabs (exclude live open tip).
+    {
+        hud.pending_fill_slab_count = 0;
+        const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const int64_t live_open = live_open_subseg_from_(now_ms);
+        const int64_t c = chunk_ms_();
+        auto push_slab = [&](int64_t from, int64_t to) {
+            if (hud.pending_fill_slab_count >= BlockScene::NetworkHud::kMaxPendingFillSlabs)
+                return;
+            if (to <= from)
+                return;
+            if (!history_subseg_allowed_(from, to, live_open))
+                return;
+            auto& s = hud.pending_fill_slabs[hud.pending_fill_slab_count++];
+            s.from_ms = from;
+            s.to_ms = to;
+        };
+        for (const auto& kv : network_queued_fills_)
+            push_slab(kv.first, kv.second);
+        // Also surface window pending if map missed a path.
+        for (const auto& w : lookback_windows_)
+        {
+            if (w.pending_from_ms <= 0 || c <= 0)
+                continue;
+            const int64_t to = std::min(w.to_ms, w.pending_from_ms + c);
+            if (network_queued_fills_.count(w.pending_from_ms) != 0)
+                continue;
+            push_slab(w.pending_from_ms, to);
+        }
     }
 
     // Timeline segments: only the active triple-buffer ring (scrolling minimap).
@@ -1403,7 +1435,14 @@ int AlephiumAdapter::poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force)
     if (fetch_pool_)
     {
         if (fetch_pool_->io().enqueue_interval(from_ts, to_ts, force))
+        {
+            // Track history queue for 3D slabs (exclude live open tip cell).
+            const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+            const int64_t live_open = live_open_subseg_from_(now_ms);
+            if (history_subseg_allowed_(from_ts, to_ts, live_open))
+                network_queued_fills_[from_ts] = to_ts;
             return 1; // enqueued; admit on drain_fetch_results_
+        }
         return 0;     // inflight / cap / queue full — retry later
     }
 
@@ -3350,6 +3389,7 @@ bool AlephiumAdapter::is_active_segment_(int index) const
 void AlephiumAdapter::on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms)
 {
     (void)to_ms;
+    network_queued_fills_.erase(from_ms);
     for (int wi = 0; wi < static_cast<int>(lookback_windows_.size()); ++wi)
     {
         LookbackWindowSlot& slot = lookback_windows_[static_cast<size_t>(wi)];
@@ -3368,6 +3408,7 @@ void AlephiumAdapter::on_interval_chunk_admitted_(int64_t from_ms, int64_t to_ms
 
 void AlephiumAdapter::on_interval_chunk_failed_(int64_t from_ms)
 {
+    network_queued_fills_.erase(from_ms);
     for (int wi = 0; wi < static_cast<int>(lookback_windows_.size()); ++wi)
     {
         LookbackWindowSlot& slot = lookback_windows_[static_cast<size_t>(wi)];

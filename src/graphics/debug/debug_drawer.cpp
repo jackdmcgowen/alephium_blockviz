@@ -67,6 +67,28 @@ void DebugDrawer::add_z_plane_quad(float z, float half_extent, const glm::vec4& 
     add_line(v[3].position, v[0].position, edge);
 }
 
+void DebugDrawer::add_z_slab(float z0, float z1, float half_xy, const glm::vec4& color)
+{
+    if (std::abs(z1 - z0) < 1e-4f)
+        return;
+    const float s = half_xy > 1e-4f ? half_xy : 1.f;
+    const float za = z0 < z1 ? z0 : z1;
+    const float zb = z0 < z1 ? z1 : z0;
+    // End caps (double-sided quads).
+    add_z_plane_quad(za, s, color);
+    add_z_plane_quad(zb, s, color);
+    // Corner edges along Z (wire box silhouette).
+    const glm::vec4 edge(color.r, color.g, color.b, std::min(1.f, color.a * 2.2f));
+    const glm::vec3 c00(-s, -s, za), c01(-s, -s, zb);
+    const glm::vec3 c10( s, -s, za), c11( s, -s, zb);
+    const glm::vec3 c20( s,  s, za), c21( s,  s, zb);
+    const glm::vec3 c30(-s,  s, za), c31(-s,  s, zb);
+    add_line(c00, c01, edge);
+    add_line(c10, c11, edge);
+    add_line(c20, c21, edge);
+    add_line(c30, c31, edge);
+}
+
 void DebugDrawer::append_tri(uint32_t i0, uint32_t i1, uint32_t i2)
 {
     indices_.push_back(i0);

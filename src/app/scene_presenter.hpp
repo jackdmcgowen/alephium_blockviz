@@ -168,6 +168,16 @@ private:
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
 
+    // Network history fill slabs: gray while queued; fade α after fulfilled.
+    struct FillSlabAnim
+    {
+        int64_t from_ms = 0;
+        int64_t to_ms   = 0;
+        float   fade_start_sec = -1.f; // <0 = active queued; ≥0 = fading out
+    };
+    std::unordered_map<int64_t, FillSlabAnim> fill_slab_anims_; // key = from_ms
+    static constexpr float kFillSlabFadeSec = 0.40f;
+
     // Rebuild layout only when graph generation / timeline origin change.
     struct LayoutCache
     {

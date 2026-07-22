@@ -414,6 +414,9 @@ private:
     // Dedupe user-driven 64s miss fill (selection / UI request).
     std::string last_user_fill_hash_;
     int64_t     last_user_fill_from_ms_ = 0;
+    // History network intervals enqueued but not yet admitted (for 3D fill slabs).
+    // key = from_ms, value = to_ms. Never includes live open tip cell.
+    std::unordered_map<int64_t, int64_t> network_queued_fills_;
     // Deferred non-interval results when interval budget is preferred.
     std::deque<HttpIoPool::Result> deferred_fetch_results_;
 

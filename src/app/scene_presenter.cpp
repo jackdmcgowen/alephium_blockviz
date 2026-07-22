@@ -1848,6 +1848,69 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 debug->add_z_plane_quad(z_edge, plane_half, col);
             }
         }
+
+        // Gray translucent Z-slabs for queued history network fills (not live tip).
+        // Active = published pending; when a key leaves the set, alpha-fade out.
+        {
+            const float now = now_sec_();
+            std::unordered_set<int64_t> active;
+            const int nslab = std::clamp(hud.pending_fill_slab_count, 0,
+                                         BlockScene::NetworkHud::kMaxPendingFillSlabs);
+            for (int i = 0; i < nslab; ++i)
+            {
+                const auto& s = hud.pending_fill_slabs[i];
+                if (s.to_ms <= s.from_ms)
+                    continue;
+                active.insert(s.from_ms);
+                auto it = fill_slab_anims_.find(s.from_ms);
+                if (it == fill_slab_anims_.end())
+                {
+                    FillSlabAnim a;
+                    a.from_ms = s.from_ms;
+                    a.to_ms = s.to_ms;
+                    a.fade_start_sec = -1.f;
+                    fill_slab_anims_[s.from_ms] = a;
+                }
+                else
+                {
+                    it->second.to_ms = s.to_ms;
+                    it->second.fade_start_sec = -1.f; // still queued
+                }
+            }
+            for (auto it = fill_slab_anims_.begin(); it != fill_slab_anims_.end(); )
+            {
+                if (active.count(it->first) == 0 && it->second.fade_start_sec < 0.f)
+                    it->second.fade_start_sec = now;
+                if (it->second.fade_start_sec >= 0.f &&
+                    (now - it->second.fade_start_sec) >= kFillSlabFadeSec)
+                {
+                    it = fill_slab_anims_.erase(it);
+                    continue;
+                }
+                ++it;
+            }
+
+            const float slab_half = kLayoutBaseRadius * 7.5f;
+            const glm::vec4 base_col(0.48f, 0.48f, 0.52f, 0.14f);
+            for (const auto& kv : fill_slab_anims_)
+            {
+                const FillSlabAnim& a = kv.second;
+                float alpha = base_col.a;
+                if (a.fade_start_sec >= 0.f)
+                {
+                    const float t =
+                        std::clamp((now - a.fade_start_sec) / kFillSlabFadeSec, 0.f, 1.f);
+                    alpha *= (1.f - t);
+                }
+                if (alpha < 0.01f)
+                    continue;
+                const float z0 = ts_to_z(a.from_ms, timeline_origin_ms, meters_per_second);
+                const float z1 = ts_to_z(a.to_ms, timeline_origin_ms, meters_per_second);
+                glm::vec4 col = base_col;
+                col.a = alpha;
+                debug->add_z_slab(z0, z1, slab_half, col);
+            }
+        }
     }
 
     out.ui.total_blocks = scene_.total_blocks();

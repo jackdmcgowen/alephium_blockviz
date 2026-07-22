@@ -216,6 +216,15 @@ public:
         char        status_detail[96] = {};
         int         pending_dep_fills = 0;
         int         timeline_holes = 0;
+        // Network history interval fills currently queued/in-flight (not live tip).
+        static constexpr int kMaxPendingFillSlabs = 16;
+        struct PendingFillSlab
+        {
+            int64_t from_ms = 0;
+            int64_t to_ms   = 0;
+        };
+        int             pending_fill_slab_count = 0;
+        PendingFillSlab pending_fill_slabs[kMaxPendingFillSlabs]{};
     };
     void set_network_hud(const NetworkHud& hud);
     NetworkHud network_hud() const;
