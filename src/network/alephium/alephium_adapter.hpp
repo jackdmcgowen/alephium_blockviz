@@ -244,6 +244,8 @@ private:
     // Live parents still awaiting dep hash-fills (not interval/history jobs).
     bool confirm_fills_pending_() const;
     void recheck_confirm_fill_parents_();
+    // User selected a block with missing deps → one 64s interval (not per-hash spam).
+    void request_user_missing_fill_(const std::string& block_hash);
 
     // Historical / bulk discovery: GET /blocks-with-events?fromTs&toTs.
     int  poll_time_slot_(int64_t from_ts, int64_t to_ts, bool force = false);
@@ -405,6 +407,9 @@ private:
     bool live_edge_refreshed_ = false;
     // Last completed/requested live open subseg from_ms (genesis-aligned grid).
     int64_t last_live_subseg_from_ = 0;
+    // Dedupe user-driven 64s miss fill (selection / UI request).
+    std::string last_user_fill_hash_;
+    int64_t     last_user_fill_from_ms_ = 0;
     // Deferred non-interval results when interval budget is preferred.
     std::deque<HttpIoPool::Result> deferred_fetch_results_;
 
