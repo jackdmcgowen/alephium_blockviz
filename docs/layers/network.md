@@ -63,7 +63,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** history GETs use **60s** spans (same grid as disk keys). Network body fill is a **camera-centered window of one G’s worth of subsegments** (may straddle two G-segs)—not the full 15-G schedule ring. **No new interval enqueues** while inflight intervals are at cap; next free slot re-aims from **current** camera. Live tip uses a **short ~8s edge** refresh once the live G has body. **429/5xx** → exponential backoff.
+**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = open genesis-aligned 64s subsegment only. History GETs must stay **strictly older** than that open tip (`to ≤ live_open_from`). Each pump cycle: **live first**, then interleave ≥1 history subseg when budget allows (no priority-queue starvation). Camera-centered fill window = one G of subsegments. **429/5xx** → exponential backoff.
 
 **Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
@@ -77,13 +77,13 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 |------|------|----------|
 | **Load** | **15** G-windows, camera-centered | Disk-first (`try_fill` / bootstrap); network body only for holes. Chunked disk admit on boot (no bulk hitch). |
 | **Render** | **7** (app) | Draw corridor only; see app rule book |
-| **Live poll** | **~8s** tip edge | `force_newest` uses last block period when live G has body; full 60s chunks for cold fill |
+| **Live poll** | **64s** open tip subseg | Genesis-aligned open slot; history never overlaps it |
 
 Fetch priority: live 8s edge → load-ring disk → load-ring network. History dep-hole ranges are **history-only** (not live tip path). Minimap labels genesis segment numbers (`#G_seg`).
 
 **History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
 
-**Load-once 60s chunks:** successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip `force_newest` on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.
+**Load-once 64s chunks:** successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip `force_newest` on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.
 
 **Return-to-live catch-up:** when camera returns to k=0 after History, fill missing ring sub-segments history-style (high budget, most-incomplete window first) with **Status = Catching up**, then tip refresh/seeds.
 

@@ -12,7 +12,7 @@
 // Live chain (base lookback window): per-hash fetches allowed to fill confirmed deps.
 // Historical (below base floor / camera unlock): chunked time-slot interval polls only —
 // no hash fetches from confirm walk. Free main for in-pool deps of confirmed blocks.
-// Timeline GETs are ~60s chunks (newest-first, budgeted); Steady live refreshes tip chunk only.
+// Timeline GETs are 64s subsegments (newest-first, budgeted); Steady live refreshes open tip subseg.
 // Presentation (solid/green/cyan/orange/gold) lives in ScenePresenter — not here.
 #include "network/alephium/block_fetch_pool.hpp"
 #include "network/alephium/main_chain_cache.hpp"
@@ -129,7 +129,7 @@ private:
     bool try_fill_window_from_disk_(int lookback_k);
     // Lazy-admit: schedule ring may be wider; body RAM only if |k - cam_k| ≤ admit half (k=0 always).
     bool lookback_k_in_admit_ring_(int lookback_k) const;
-    // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
+    // open_live_edge: leave topmost 64s subseg unfetched so network force-refreshes tip.
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
                                           int64_t to_ms, bool open_live_edge = false);
     // Seed history_slots_fetched_ from disk presence (subset or all grid keys).
@@ -202,7 +202,7 @@ private:
     void recompute_window_chunk_stats_(int window_index);
     // Force live newest chunk(s) + tip reseed after returning from history.
     void resync_live_chain_();
-    // Enter/advance/exit history→live catch-up (fill missing 60s chunks first).
+    // Enter/advance/exit history→live catch-up (fill missing 64s chunks first).
     void begin_live_catchup_();
     void pump_live_catchup_();
     bool live_catchup_ring_complete_() const;
@@ -213,6 +213,10 @@ private:
     bool dual_initial_complete_() const;
     // Live window tip-ready: enough to leave Bootstrap (does not require win1 complete).
     bool live_window_tip_ready_() const;
+    // Genesis-aligned open live tip subsegment [from, from+chunk). History must stay strictly older.
+    int64_t live_open_subseg_from_(int64_t now_ms) const;
+    bool history_subseg_allowed_(int64_t chunk_from, int64_t chunk_to,
+                                 int64_t live_open_from) const;
     // Triple-buffer ring of absolute lookback indices (≤ kSegmentRingSize).
     void update_segment_ring_();
     bool is_active_segment_(int index) const;
@@ -397,8 +401,10 @@ private:
     char disk_cache_last_event_[160] = {};
     // Returned to live: fill missing sub-segments before tip seeds.
     bool live_catchup_active_ = false;
-    // Topmost live 60s subsegment has been force-refreshed at least once this session.
+    // Open live tip 64s subsegment has been force-refreshed at least once this session.
     bool live_edge_refreshed_ = false;
+    // Last completed/requested live open subseg from_ms (genesis-aligned grid).
+    int64_t last_live_subseg_from_ = 0;
     // Deferred non-interval results when interval budget is preferred.
     std::deque<HttpIoPool::Result> deferred_fetch_results_;
 
@@ -431,9 +437,9 @@ private:
     static constexpr int kIntervalAdmitsPerDrain = 24;
     static constexpr int kHistoryIntervalAdmitsPerPoll = 32;
     static constexpr int kMaxBfsNodesPerThreadSlice = 64;
-    // History interval GET span = disk subsegment grid (60s). ~10 GETs per 10-min G.
-    // Live tip still force-refreshes a short ~8s edge (ALPH_LIVE_POLL_EDGE_MS) once body exists.
-    static constexpr int64_t kTimelineChunkMs = 60'000;
+    // History + live share disk subsegment grid (64s). Exactly 10 GETs per 640s G.
+    // Live tip force-refreshes the open genesis-aligned 64s subsegment only.
+    static constexpr int64_t kTimelineChunkMs = ALPH_SUBSEGMENT_MS;
     // drain_verify: at most one chunk every this many ms.
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     // Soft cap when camera lookback index jumps (avoid enqueue storm).

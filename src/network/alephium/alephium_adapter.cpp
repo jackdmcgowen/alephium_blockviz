@@ -108,6 +108,7 @@ void AlephiumAdapter::reset_stats()
     deferred_fetch_results_.clear();
     live_catchup_active_ = false;
     live_edge_refreshed_ = false;
+    last_live_subseg_from_ = 0;
     disk_cache_bootstrapped_ = false;
     disk_cache_bootstrap_blocks_ = 0;
     disk_segment_admitted_.clear();
@@ -3160,12 +3161,17 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
 
     if (force_newest)
     {
-        // Live poll surface: last ~8s when the live G already has body; else 60s.
-        chunk_to = slot.to_ms;
-        int64_t edge = c;
-        if (window_index == 0 && slot.chunks_done > 0)
-            edge = std::min(c, static_cast<int64_t>(ALPH_LIVE_POLL_EDGE_MS));
-        chunk_from = std::max(slot.from_ms, chunk_to - edge);
+        // Live open tip subsegment on the shared 64s genesis grid (non-overlapping).
+        const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const int64_t open_from = live_open_subseg_from_(now_ms);
+        chunk_from = std::max(slot.from_ms, open_from);
+        chunk_to = std::min(slot.to_ms, open_from + c);
+        if (chunk_to <= chunk_from)
+        {
+            chunk_to = slot.to_ms;
+            chunk_from = std::max(slot.from_ms, chunk_to - c);
+        }
+        last_live_subseg_from_ = chunk_from;
     }
     else
     {
@@ -3179,6 +3185,16 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
         }
         chunk_to = fill_to;
         chunk_from = std::max(slot.from_ms, chunk_to - c);
+        // History never overlaps the open live tip subsegment.
+        const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+        const int64_t live_open = live_open_subseg_from_(now_ms);
+        if (chunk_to > live_open)
+        {
+            chunk_to = live_open;
+            chunk_from = std::max(slot.from_ms, chunk_to - c);
+        }
+        if (!history_subseg_allowed_(chunk_from, chunk_to, live_open))
+            return false;
     }
 
     if (chunk_to <= chunk_from)
@@ -3302,6 +3318,27 @@ bool AlephiumAdapter::live_window_tip_ready_() const
     if (live_edge_refreshed_)
         return true;
     return false;
+}
+
+int64_t AlephiumAdapter::live_open_subseg_from_(int64_t now_ms) const
+{
+    const int64_t c = chunk_ms_();
+    if (c <= 0)
+        return now_ms;
+    int64_t gen = genesis_ms_;
+    if (gen <= 0)
+        gen = ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
+    if (now_ms < gen)
+        return gen;
+    return gen + ((now_ms - gen) / c) * c;
+}
+
+bool AlephiumAdapter::history_subseg_allowed_(int64_t chunk_from, int64_t chunk_to,
+                                             int64_t live_open_from) const
+{
+    (void)chunk_from;
+    // History must not overlap the open live tip subsegment: to <= live_open_from.
+    return chunk_to > chunk_from && chunk_to <= live_open_from;
 }
 
 int AlephiumAdapter::effective_lookback_index_() const
@@ -3474,12 +3511,12 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     int fetched = 0;
 
     // Network fill window = one G of subsegments centered on camera time (may cross G).
-    // subsegments_per_G = window_ms / chunk_ms (e.g. 600/60 = 10).
+    // subsegments_per_G = window_ms / chunk_ms (640/64 = 10 exact).
     const int64_t w = window_ms_();
     const int64_t c = chunk_ms_();
     if (w <= 0 || c <= 0)
         return 0;
-    const int subsegs = static_cast<int>((w + c - 1) / c); // same count as one segment
+    const int subsegs = static_cast<int>(w / c); // exact 10 when 640/64
     const int64_t half_win = (static_cast<int64_t>(subsegs) * c) / 2;
 
     // Camera time from scroll Z (layout: z ≈ -(now - origin)/1000 when attached).
@@ -3495,15 +3532,18 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     if (cam_ts < genesis_ms_ && genesis_ms_ > 0)
         cam_ts = genesis_ms_;
 
+    const int64_t live_open_from = live_open_subseg_from_(now_ms);
+    // History must not request the open tip subseg or anything newer.
     int64_t net_lo = cam_ts - half_win;
-    int64_t net_hi = cam_ts + half_win;
+    int64_t net_hi = std::min(cam_ts + half_win, live_open_from);
     if (genesis_ms_ > 0 && net_lo < genesis_ms_)
         net_lo = genesis_ms_;
-    if (net_hi < net_lo + c)
-        net_hi = net_lo + c;
+    if (net_hi < net_lo)
+        net_hi = net_lo;
 
     auto chunk_in_network_window = [&](int64_t chunk_from, int64_t chunk_to) -> bool {
-        // Overlap [chunk_from, chunk_to) with [net_lo, net_hi).
+        if (!history_subseg_allowed_(chunk_from, chunk_to, live_open_from))
+            return false;
         return chunk_from < net_hi && chunk_to > net_lo;
     };
 
@@ -3516,7 +3556,7 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
             return false;
         if (!force_newest)
         {
-            // Only windows that overlap the camera network time window.
+            // Only windows that overlap the camera network time window (history-only).
             if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
                 return false;
             const auto& slot = lookback_windows_[static_cast<size_t>(wi)];
@@ -3534,26 +3574,44 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     auto fill_win = [&](int wi) {
         if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
             return;
-        while (fetched < max_chunks && try_win(wi, false))
-        {
-        }
+        // At most one history subseg per fill call when interleaving (live-first cycle).
+        (void)try_win(wi, false);
     };
 
-    // Live tip short edge (if camera on live).
-    if (live_cam && !lookback_windows_.empty() && lookback_windows_[0].want_newest_refresh)
-        try_win(0, /*force_newest=*/true);
+    // --- Live first (never skip for history) ---
+    bool live_enqueued = false;
+    if (live_cam && !lookback_windows_.empty())
+    {
+        // Need live when edge refresh wanted, open subseg changed, or never refreshed.
+        const bool need_live =
+            lookback_windows_[0].want_newest_refresh || !live_edge_refreshed_ ||
+            last_live_subseg_from_ != live_open_from;
+        if (need_live)
+            live_enqueued = try_win(0, /*force_newest=*/true);
+    }
 
-    // Dep-critical / eye holes only if they overlap camera network window.
-    while (fetched < max_chunks && pump_priority_holes_(1))
-        ++fetched;
+    // Time budget: if next live boundary is very soon and live just needed work, skip hist.
+    const int64_t ms_to_next_live = (live_open_from + c) - now_ms;
+    constexpr int64_t kHistoryMarginMs = 2500; // leave headroom for live RTT
+    const bool history_budget_ok =
+        !live_enqueued || ms_to_next_live > kHistoryMarginMs;
 
-    // Prefer windows nearest camera lookback index (may straddle two G).
-    fill_win(cam_k);
-    if (cam_k > 0)
-        fill_win(cam_k - 1);
-    fill_win(cam_k + 1);
+    // --- History interleave: ≥1 subseg when live idle/budget allows ---
+    if (history_budget_ok && fetched < max_chunks)
+    {
+        // Prefer one history hole near camera (not open tip).
+        if (fetched < max_chunks)
+            fill_win(cam_k);
+        if (fetched < max_chunks && cam_k > 0)
+            fill_win(cam_k - 1);
+        if (fetched < max_chunks)
+            fill_win(cam_k + 1);
+        // Dep-critical holes only if strictly older than live open.
+        while (fetched < max_chunks && pump_priority_holes_(1))
+            ++fetched;
+    }
+
     // Do NOT bulk-fill the full 15-G schedule ring over the network.
-
     (void)pump_single_block_fetches_(kMaxSingleBlockPerDrain);
 
     if (fetched > 0)

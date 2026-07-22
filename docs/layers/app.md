@@ -28,7 +28,7 @@ The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platf
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
-| Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`); **Z-proportional** bins (match cubes/planes); **click** bin → teleport to segment start; Live / key **3** → tip; load bars when HUD known |
+| Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`, **640s** G); **Z-proportional** bins (match cubes/planes); optional **64s** ticks on hover/camera cell; **click** bin → teleport; Live / key **3** → tip. **Must update whenever timeline constants change** (see `Agents.md`) |
 | Camera view presets | **End** (1) / **Side** (2) / **V** toggle with pose memory. **3** = live tip. **L/R** = Z. Short **RMB** = deselect only (no reattach); RMB drag = pan |
 | Selection + dep walk | **Full BFS block-dep fan** from selected root (caps ~4k nodes / 8k edges+arrows). Gold arrows; **fast** level-wave grow (≤~0.25s stagger + 0.08s grow). 1-hop ghosts for missing direct deps only. **R** / Replay deps. Sharded **group** walk deferred (other view). |
 | Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |

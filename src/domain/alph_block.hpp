@@ -12,21 +12,26 @@
 
 #define ALPH_TARGET_POLL_SECONDS ( 16 )
 #define ALPH_TARGET_BLOCK_SECONDS ( 8 )
-// Initial poll / camera Z lookback (seconds).
-#define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * 60 )
+// Atomic timeline subsegment (HTTP interval + disk chunk key), seconds.
+#define ALPH_SUBSEGMENT_SECONDS ( 64 )
+// Genesis-aligned G-segment length: exactly 10 subsegments (640s).
+#define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * ALPH_SUBSEGMENT_SECONDS )
+#define ALPH_SUBSEGMENT_MS \
+    ( static_cast<int64_t>(ALPH_SUBSEGMENT_SECONDS) * 1000 )
 
 // Three-ring segment management (genesis-aligned G windows of LOOKBACK seconds):
 //   Schedule/load ring : which G windows may be prefetched (network/disk schedule)
 //   Admit ring         : which G bodies may enter BlockScene RAM (lazy disk admit)
 //   Render ring        : draw / planes corridor (≤ admit)
-//   Live               : poll surface = last TARGET_BLOCK seconds (not a separate G length)
+//   Live               : open tip subsegment on the same 64s grid (not a separate length)
 #define ALPH_LOAD_RING_SEGMENTS   ( 15 )
 #define ALPH_RENDER_RING_HALF     ( 3 )
 #define ALPH_RENDER_RING_SEGMENTS ( (2 * ALPH_RENDER_RING_HALF) + 1 ) /* 7 */
 // Disk/network body admit: |lookback_k - cam_k| ≤ half (or live edge). Schedule may be wider.
 #define ALPH_DISK_ADMIT_RING_HALF ( ALPH_RENDER_RING_HALF ) /* 3 → 7-wide admit */
 #define ALPH_DISK_ADMIT_RING_SEGMENTS ( (2 * ALPH_DISK_ADMIT_RING_HALF) + 1 )
-#define ALPH_LIVE_POLL_EDGE_MS    ( static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 )
+// Live HTTP unit = full open subsegment (same as ALPH_SUBSEGMENT_MS).
+#define ALPH_LIVE_POLL_EDGE_MS    ( ALPH_SUBSEGMENT_MS )
 
 // Fallback genesis / chain-start if height-0 block fetch fails.
 // Docs: genesis block ts themed 2009-01-03; mainnet launch 2021-11-08.

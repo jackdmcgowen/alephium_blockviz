@@ -600,7 +600,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         }
     }
 
-    // Camera-bin for 60s sub-ticks (optional).
+    // Camera-bin for subsegment ticks (64s grid; keep in sync with ALPH_SUBSEGMENT_SECONDS).
     int cam_bin = -1;
     for (int i = 0; i < nslot; ++i)
     {
@@ -664,11 +664,11 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
                         ImVec2(x1 - 0.5f, track_y + track_h - 2.f),
                         IM_COL32(220, 230, 255, 110), 2.f, 0, 1.f);
 
-        // 60s subsegment ticks on camera or hovered cell only.
+        // Subsegment ticks on camera or hovered cell only (ALPH_SUBSEGMENT_SECONDS).
         if ((i == cam_bin || i == hover_bin) && cell_w > 28.f)
         {
             const float span_z = std::max(1.f, slots[i].z_old - slots[i].z_new);
-            const float sub_z = 60.f * mps; // 60s in layout Z
+            const float sub_z = static_cast<float>(ALPH_SUBSEGMENT_SECONDS) * mps;
             if (sub_z > 0.f && span_z > sub_z * 1.5f)
             {
                 for (float z = slots[i].z_new + sub_z; z < slots[i].z_old - 0.5f * sub_z;

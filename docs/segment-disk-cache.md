@@ -5,9 +5,9 @@
 
 ### Unit of work
 
-| Key | `G_seg` genesis index → 60s chunk files |
+| Key | `G_seg` genesis index → **64s** chunk files (schema v4) |
 |-----|----------------------------------------|
-| Save | Bucket blocks by 60s → `segments/G_<id>/c_<from>.json.gz` + `meta.json` |
+| Save | Bucket blocks by **64s** → `segments/G_<id>/c_<from>.json.gz` + `meta.json` |
 | Load | Stream present `c_*` files (partial G OK); seed only those grid keys; live open tip never disk-complete |
 | Network | `try_fill_window_from_disk_(k)` before interval GET; live tip always `force_newest` |
 
@@ -17,7 +17,7 @@
    `%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\`  
 2. **Network panel → Disk cache**: path, last event, on-disk counts.  
 3. **`cache.log`** in that folder: save/load/fill/flush lines.  
-4. Warm save after ~16+ blocks in a G (Steady); complete when all 60s chunks present.  
+4. Warm save after ~16+ blocks in a G (Steady); complete when all **64s** chunks present (10 per 640s G).  
 5. **Close app / switch domain** → `flush` writes remaining windows.  
 6. Restart: boot event + `loaded G=… from cache (skip net)` for complete G.
 
@@ -27,7 +27,7 @@
 |------|----------|
 | Segment becomes **fully verifiable** via adapter **BFS walk** | Persist segment + block payloads to disk (per domain) |
 | **Startup** or **domain reload** | **Lazy-admit:** schedule load ring (15 G) but **decompress/admit only admit-ring** near live (`ALPH_DISK_ADMIT_RING_*`, default 7). Far G stay on disk until camera approaches. Then network for live/holes/uncached |
-| Live tip (`k=0` open window) | Prefer network; **never** treat open live G as interval-complete from disk. Bootstrap may **paint** live-G blocks (bag-only confirmed), but must force-refresh the **topmost 60s subsegment** before IdentifyTips. Sequential frontiers are cleared after disk boot so `H_c` resolves from live data. |
+| Live tip (`k=0` open window) | Prefer network; **never** treat open live G as interval-complete from disk. Bootstrap may **paint** live-G blocks (bag-only confirmed), but must force-refresh the **open 64s tip subsegment** before IdentifyTips. Sequential frontiers are cleared after disk boot so `H_c` resolves from live data. |
 
 This is a **bootstrap** layer, not a full archive and not a substitute for main-chain API trust without optional re-verify.
 
@@ -48,7 +48,7 @@ This is a **bootstrap** layer, not a full archive and not a substitute for main-
   cache.log                     # save/load/fill/flush events
   segments/G_<id>/
     meta.json                   # from_ms, to_ms, complete, block_count, chunk_count
-    c_<chunk_from_ms>.json.gz   # one entry per 60s subsegment: { blocks: [ … ] }
+    c_<chunk_from_ms>.json.gz   # one entry per 64s subsegment: { blocks: [ … ] }
 ```
 
 **Removed (v1):** per-block `blocks/<hh>/<hash>.json.gz` (wiped on domain open).  
@@ -107,7 +107,7 @@ Then:
      - **Live G (`G == G_live`)**: paint only; leave chunk load-once empty; `want_newest_refresh`
      - Restore confirmation as **bag-only** (no sequential `H_c`); clear frontiers after boot
 5. Then start normal poll:
-     - Force topmost live 60s subsegment from network (even pre-Steady)
+     - Force open live 64s tip subsegment from network (even pre-Steady)
      - Live tip / k=0 always network for open edge
      - Ring holes only if not satisfied by cache
      - Older uncached segments on demand (user pages minimap)

@@ -886,7 +886,7 @@ bool SegmentDiskCache::save_segment(int g_seg, int64_t from_ms, int64_t to_ms,
         return false;
     }
 
-    // Bucket blocks into 60s chunk files (multi-entry hierarchy under G_dir).
+    // Bucket blocks into 64s chunk files (multi-entry hierarchy under G_dir).
     std::unordered_map<int64_t, std::vector<const CachedBlock*>> by_chunk;
     int written = 0;
     for (const CachedBlock& cb : blocks)
