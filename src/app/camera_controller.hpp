@@ -2,7 +2,8 @@
 
 // Render-thread camera: Z-track scroll + LMB look + RMB pan + selection look-aim.
 // Z is wall-clock seconds on the block timeline (matches layout meters_per_second=1).
-// Attached: auto-follows live tip at 1 s/s. User Z input detaches; short RMB recouples.
+// Attached: auto-follows live tip at 1 s/s. User Z input detaches; key 3 / Live reattaches.
+// Short RMB: deselect + home_view_keep_z (look/pan home, keep Z) — does not reattach Live.
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
 
@@ -174,10 +175,14 @@ public:
         look_engaged_ = false;
         free_look_ = true;
 
-        // Inverted-Y camera (up = -Y): drag right → look right; drag up → look up.
-        yaw_target_   -= dx_px * kLookSens;
-        pitch_target_ -= dy_px * kLookSens;
-        pitch_target_  = std::clamp(pitch_target_, kPitchMin, kPitchMax);
+        // Drag right → look right. Pitch: End (polar head-on) uses screen-natural
+        // drag-up → look-up (+dy); Side keeps inverted-Y world (up = −Y) mapping.
+        yaw_target_ -= dx_px * kLookSens;
+        if (view_preset_ == ViewPreset::End)
+            pitch_target_ += dy_px * kLookSens;
+        else
+            pitch_target_ -= dy_px * kLookSens;
+        pitch_target_ = std::clamp(pitch_target_, kPitchMin, kPitchMax);
 
         if (yaw_target_ >  glm::pi<float>())
             yaw_target_ -= glm::two_pi<float>();
@@ -218,6 +223,18 @@ public:
         release_look_aim();
         apply_view_preset_targets_(view_preset_);
         reattach_timeline();
+    }
+
+    // Short RMB: re-center look + pan XY for current preset; keep scroll Z; no Live reattach.
+    // Tween via existing look/pan springs (targets only).
+    void home_view_keep_z()
+    {
+        release_look_aim();
+        free_look_ = false;
+        // Cancel in-progress view-preset blend so home targets win immediately.
+        blending_ = false;
+        apply_view_preset_targets_(view_preset_);
+        // Do not touch scroll_z_* or timeline_attached_.
     }
 
     void reattach_timeline()

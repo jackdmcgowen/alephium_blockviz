@@ -84,6 +84,7 @@ void SobelComputePass::record(const PassRecordParams& p)
     if (!ready() || !p.base.cmd)
         throw std::runtime_error("SobelComputePass::record: not ready");
 
+    PassProfileScope profile(*this, p);
     const VkCommandBuffer cmd = p.base.cmd;
     const uint32_t w = res_->width();
     const uint32_t h = res_->height();

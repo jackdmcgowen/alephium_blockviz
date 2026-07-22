@@ -181,7 +181,7 @@ void BlockflowOverlay::draw()
         lmb_drag_dist_px_ = 0.f;
     }
 
-    // Right-hold drag: pan. Short RMB click: deselect + clear dep fan only (stay on Z).
+    // Right-hold drag: pan. Short RMB: deselect (if any) + home look/pan keep Z (always).
     if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         rmb_down_over_scene_ = true;
@@ -201,7 +201,10 @@ void BlockflowOverlay::draw()
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         if (rmb_down_over_scene_ && !rmb_dragged_)
-            engine_.clear_selection(); // no reattach — use key 3 / Live for tip
+        {
+            engine_.clear_selection(); // no Live reattach — key 3 / Live for tip
+            camera_.home_view_keep_z(); // tween look +Z / pan XY→0; keep scroll Z
+        }
         rmb_down_over_scene_ = false;
         rmb_dragged_ = false;
         rmb_drag_dist_px_ = 0.f;
@@ -1224,7 +1227,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled(
-            "Camera: wheel/arrows Z (detaches) · LMB look · short LMB pick · RMB pan · short RMB deselect · 3 Live tip");
+            "Camera: wheel/arrows Z · LMB look · short LMB pick · RMB pan · short RMB deselect+recenter (keep Z) · 3 Live");
         ImGui::TextDisabled(
             "Solid=main+deps Â· green=frontier tip + blockDeps Â· cyan=unconfirmed children of frontier Â· orange=missing deps Â· gold=select");
         {

@@ -127,6 +127,8 @@ private:
     bool bootstrap_admit_pending_() const;
     void maybe_persist_verified_segments_(bool force = false);
     bool try_fill_window_from_disk_(int lookback_k);
+    // Lazy-admit: schedule ring may be wider; body RAM only if |k - cam_k| ≤ admit half (k=0 always).
+    bool lookback_k_in_admit_ring_(int lookback_k) const;
     // open_live_edge: leave topmost 60s chunk unfetched so network force-refreshes tip.
     void mark_window_complete_from_cache_(int lookback_k, int g_seg, int64_t from_ms,
                                           int64_t to_ms, bool open_live_edge = false);
@@ -418,7 +420,9 @@ private:
     static constexpr int kHistoryIntervalAdmitsPerPoll = 32;
     static constexpr int kMaxBfsNodesPerThreadSlice = 64;
     // Sub-interval for blocks-with-events GETs (~10 chunks per 10 min segment).
-    static constexpr int64_t kTimelineChunkMs = 60'000;
+    // History interval GET span. Live tip still force-refreshes a short edge (60s disk keys).
+    // 120s → ~5 GETs per 10-min G (vs 10×60s); reduces endpoint pressure while keeping fill usable.
+    static constexpr int64_t kTimelineChunkMs = 120'000;
     // drain_verify: at most one chunk every this many ms.
     static constexpr int64_t kChunkPumpIntervalMs = 400;
     static constexpr int kMaxChunksPerPoll = 4;

@@ -134,6 +134,7 @@ void EdgeOverlayPass::record(const PassRecordParams& p)
     if (!ready() || !p.base.cmd)
         throw std::runtime_error("EdgeOverlayPass::record: not ready");
 
+    PassProfileScope profile(*this, p);
     const VkCommandBuffer cmd = p.base.cmd;
     const uint32_t w = p.width ? p.width : res_->width();
     const uint32_t h = p.height ? p.height : res_->height();

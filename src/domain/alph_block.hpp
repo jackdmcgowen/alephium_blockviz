@@ -16,12 +16,16 @@
 #define ALPH_LOOKBACK_WINDOW_SECONDS ( 10 * 60 )
 
 // Three-ring segment management (genesis-aligned G windows of LOOKBACK seconds):
-//   Load  : disk-first body around camera / live
-//   Live  : poll surface = last TARGET_BLOCK seconds (not a separate G length)
-//   Render: centered corridor for draw / planes
+//   Schedule/load ring : which G windows may be prefetched (network/disk schedule)
+//   Admit ring         : which G bodies may enter BlockScene RAM (lazy disk admit)
+//   Render ring        : draw / planes corridor (≤ admit)
+//   Live               : poll surface = last TARGET_BLOCK seconds (not a separate G length)
 #define ALPH_LOAD_RING_SEGMENTS   ( 15 )
 #define ALPH_RENDER_RING_HALF     ( 3 )
 #define ALPH_RENDER_RING_SEGMENTS ( (2 * ALPH_RENDER_RING_HALF) + 1 ) /* 7 */
+// Disk/network body admit: |lookback_k - cam_k| ≤ half (or live edge). Schedule may be wider.
+#define ALPH_DISK_ADMIT_RING_HALF ( ALPH_RENDER_RING_HALF ) /* 3 → 7-wide admit */
+#define ALPH_DISK_ADMIT_RING_SEGMENTS ( (2 * ALPH_DISK_ADMIT_RING_HALF) + 1 )
 #define ALPH_LIVE_POLL_EDGE_MS    ( static_cast<int64_t>(ALPH_TARGET_BLOCK_SECONDS) * 1000 )
 
 // Fallback genesis / chain-start if height-0 block fetch fails.

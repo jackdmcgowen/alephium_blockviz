@@ -26,7 +26,7 @@
 | When | Behavior |
 |------|----------|
 | Segment becomes **fully verifiable** via adapter **BFS walk** | Persist segment + block payloads to disk (per domain) |
-| **Startup** or **domain reload** | Load verified cached segments first (graph + detail + interval dedupe), then network for live/holes/uncached |
+| **Startup** or **domain reload** | **Lazy-admit:** schedule load ring (15 G) but **decompress/admit only admit-ring** near live (`ALPH_DISK_ADMIT_RING_*`, default 7). Far G stay on disk until camera approaches. Then network for live/holes/uncached |
 | Live tip (`k=0` open window) | Prefer network; **never** treat open live G as interval-complete from disk. Bootstrap may **paint** live-G blocks (bag-only confirmed), but must force-refresh the **topmost 60s subsegment** before IdentifyTips. Sequential frontiers are cleared after disk boot so `H_c` resolves from live data. |
 
 This is a **bootstrap** layer, not a full archive and not a substitute for main-chain API trust without optional re-verify.

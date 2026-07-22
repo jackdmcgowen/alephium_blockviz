@@ -195,6 +195,7 @@ void MainScenePass::record(const PassRecordParams& p)
     if (!p.base.cmd || cube_pipeline_ == VK_NULL_HANDLE)
         throw std::runtime_error("MainScenePass::record: not ready");
 
+    PassProfileScope profile(*this, p);
     const VkCommandBuffer cmd = p.base.cmd;
     const bool msaa = p.samples > VK_SAMPLE_COUNT_1_BIT && p.resolve_color_view != VK_NULL_HANDLE;
 
@@ -255,12 +256,7 @@ void MainScenePass::record(const PassRecordParams& p)
     }
 
     {
-        FrameProfiler::GpuScope main_gpu(
-            p.profiler, cmd, "MainColorDepth",
-            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
-                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
-
+        // Outer PassProfileScope (*this) = MainColorDepth CPU+GPU.
         vkCmdBeginRendering(cmd, &renderInfo);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_pipeline_);
         vkCmdSetPrimitiveTopology(cmd, p.topology);

@@ -747,6 +747,19 @@ void AlephiumAdapter::mark_window_present_chunks_from_cache_(
     disk_segment_admitted_.insert(g_seg);
 }
 
+bool AlephiumAdapter::lookback_k_in_admit_ring_(int lookback_k) const
+{
+    if (lookback_k < 0)
+        return false;
+    // Live window always admissible.
+    if (lookback_k == 0)
+        return true;
+    const int cam_k = camera_lookback_index_();
+    const int d = lookback_k - cam_k;
+    const int ad = d < 0 ? -d : d;
+    return ad <= ALPH_DISK_ADMIT_RING_HALF;
+}
+
 bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
 {
     if (!disk_cache_.enabled() || lookback_k < 0)
@@ -757,6 +770,7 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
 
     const int G_live = live_global_segment_id_();
     const bool is_open_live = (lookback_k == 0) || (G_live >= 0 && G == G_live);
+    const bool allow_body = lookback_k_in_admit_ring_(lookback_k);
 
     int64_t from_ms = 0, to_ms = 0;
     bounds_for_global_(G, from_ms, to_ms);
@@ -765,6 +779,11 @@ bool AlephiumAdapter::try_fill_window_from_disk_(int lookback_k)
         mark_window_present_chunks_from_cache_(lookback_k, G, from_ms, to_ms, is_open_live,
                                                present, all_keys);
     };
+
+    // Outside admit radius: do not touch scene or disk_segment_admitted_ (would block
+    // later body load). Schedule ring may still network-fill; body admits when camera enters.
+    if (!allow_body)
+        return false;
 
     // Already admitted this session — refresh presence from disk file list.
     if (disk_segment_admitted_.count(G) != 0)
@@ -867,8 +886,11 @@ void AlephiumAdapter::bootstrap_disk_cache_()
         g_live = static_cast<int>((now_ms - genesis) / w);
 
     std::vector<SegmentDiskCache::CachedBlock> all;
+    // Lazy-admit: only decompress/admit G near live (admit ring). Full load ring (15)
+    // still schedules fetch later; bodies enter RAM when camera approaches.
+    const int admit_max = ALPH_DISK_ADMIT_RING_SEGMENTS;
     const auto lr =
-        disk_cache_.load_recent(g_live, SegmentDiskCache::kStartupLoadMax, all);
+        disk_cache_.load_recent(g_live, admit_max, all);
     if (lr.genesis_ms > 0)
     {
         genesis_ms_ = lr.genesis_ms;
@@ -1573,7 +1595,9 @@ void AlephiumAdapter::mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms)
 {
     if (to_ms <= from_ms)
         return;
-    // Project free-form admit onto every fully covered 60s grid key in lookback windows.
+    // Project free-form admit onto every fully covered disk grid key (always 60s files).
+    // Fetch span may be longer (kTimelineChunkMs); coverage is still per disk key.
+    const int64_t disk_c = SegmentDiskCache::kChunkMs;
     for (size_t wi = 0; wi < lookback_windows_.size(); ++wi)
     {
         const LookbackWindowSlot& s = lookback_windows_[wi];
@@ -1581,8 +1605,7 @@ void AlephiumAdapter::mark_grid_keys_covered_(int64_t from_ms, int64_t to_ms)
             continue;
         for (int64_t key : SegmentDiskCache::chunk_keys_for_window(s.from_ms, s.to_ms))
         {
-            const int64_t c = chunk_ms_();
-            const int64_t chunk_to = std::min(s.to_ms, key + c);
+            const int64_t chunk_to = std::min(s.to_ms, key + disk_c);
             // Fully covered by [from_ms, to_ms).
             if (key >= from_ms && chunk_to <= to_ms)
                 history_slots_fetched_.insert(key);
@@ -4059,8 +4082,8 @@ void AlephiumAdapter::maybe_memory_pressure_prune_()
     static constexpr size_t kHardMemBytes = 2ull * 1024 * 1024 * 1024;
     static constexpr size_t kSoftMaxNodes = 80000;  // earlier soft eviction with disk
     static constexpr size_t kHardMaxNodes = 250000;
-    // Keep live + ring + 1 hysteresis lookback in RAM (k = 0..cam+3).
-    static constexpr int kRamKeepLookbacks = ALPH_LOAD_RING_SEGMENTS;
+    // Keep live + admit ring in RAM (disk re-admits when camera re-enters).
+    static constexpr int kRamKeepLookbacks = ALPH_DISK_ADMIT_RING_SEGMENTS;
 
     size_t private_bytes = 0;
     (void)net_platform_process_private_bytes(&private_bytes);
