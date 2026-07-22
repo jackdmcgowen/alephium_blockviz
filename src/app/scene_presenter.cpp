@@ -264,10 +264,11 @@ void ScenePresenter::tip_dep_tick_and_draw_(
     const std::unordered_set<std::string>& cyan_owners,
     const std::unordered_set<std::string>& unconfirmed_tips,
     const std::unordered_set<std::string>& frontier_domain,
-    float tip_len, float tip_rad, float shaft_r, float clearance)
+    float tip_len, float tip_rad, float shaft_r, float clearance,
+    const Frustum* frustum,
+    const glm::vec3* camera_eye)
 {
     const float now = now_sec_();
-    constexpr uint32_t kDepRadial = 8;
     const glm::vec4 kMissingWhite(1.f, 1.f, 1.f, kTipSolidAlpha);
     const glm::vec4 kUnc = kUnconfirmedArrowColor();
 
@@ -644,9 +645,29 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             (anim.phase == ArrowPhase::Fading || anim.phase == ArrowPhase::Dying))
             continue;
 
-        // Linear gradient base→head along arrow (listing color → dep color).
+        // Frustum cull: skip mesh if segment AABB is outside the view (anim still ages).
+        if (frustum)
+        {
+            const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+            const glm::vec3 half = 0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+            if (!frustum->intersects_aabb(mid, half))
+                continue;
+        }
+
+        // Distance LOD: fewer radial segments when far from camera.
+        uint32_t radial = 4;
+        if (camera_eye)
+        {
+            const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+            const float dist = glm::length(mid - *camera_eye);
+            if (dist < 40.f)
+                radial = 6;
+            else if (dist > 120.f)
+                radial = 3;
+        }
+
         debug.add_arrow(from_inset, to_inset, shaft, tipc, tip_len * anim.tip_scale,
-                        tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, kDepRadial, grow_u);
+                        tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, radial, grow_u);
         ++drawn;
     }
 
@@ -1493,40 +1514,68 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const float tip_rad = std::max(0.06f, meters_per_second * 0.03f * 8.f);
         const float shaft_r = tip_rad * 0.4f;
         const float clearance = std::max(0.55f, meters_per_second * 0.12f * 8.f);
-        constexpr uint32_t kDepRadial = 8;
+        constexpr uint32_t kDepRadialNear = 6;
+        constexpr uint32_t kDepRadialFar  = 3;
         constexpr uint32_t kMaxHoverArrows = 1024;
+        // Unconfirmed tip-dep listings only H_c+1 .. H_c+3 (payload tip surface).
+        constexpr int kUnconfirmedDepth = 3;
 
-        // Per-lane unconfirmed max-height tip (main dual-color path, cyan→main).
+        // Per-lane unconfirmed near tip (cyan→main). Not deep history behind H_c.
         std::unordered_set<std::string> unconfirmed_tips;
         {
-            int best_h[BlockScene::kLaneCount];
-            std::string best_id[BlockScene::kLaneCount];
-            for (int i = 0; i < BlockScene::kLaneCount; ++i)
-            {
-                best_h[i] = -1;
-                best_id[i].clear();
-            }
             for (const PlacedBlock& p : layout.placements)
             {
                 if (p.hash.empty() || drawn.count(p.hash) == 0)
                     continue;
-                if (p.lane >= BlockScene::kLaneCount)
+                if (p.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
                     continue;
                 if (scene_.is_confirmed_locked(p.hash) || p.is_uncle ||
                     scene_.is_uncle_locked(p.hash))
                     continue;
                 if (green_display.count(p.hash))
                     continue;
+                const int hc = hc_by_lane[p.lane];
                 const int h = p.height;
-                if (h > best_h[p.lane])
-                {
-                    best_h[p.lane] = h;
-                    best_id[p.lane] = p.hash;
-                }
+                if (h < 0 || hc < 0)
+                    continue; // no H_c → fallback pass below
+                // Only heights strictly above confirmed tip, within 3 deep.
+                if (h <= hc || h > hc + kUnconfirmedDepth)
+                    continue;
+                unconfirmed_tips.insert(p.hash);
             }
-            for (int i = 0; i < BlockScene::kLaneCount; ++i)
-                if (!best_id[i].empty())
-                    unconfirmed_tips.insert(best_id[i]);
+            // Fallback when no H_c: one max-height unconfirmed per lane.
+            if (unconfirmed_tips.empty())
+            {
+                int best_h[BlockScene::kLaneCount];
+                std::string best_id[BlockScene::kLaneCount];
+                for (int i = 0; i < BlockScene::kLaneCount; ++i)
+                {
+                    best_h[i] = -1;
+                    best_id[i].clear();
+                }
+                for (const PlacedBlock& p : layout.placements)
+                {
+                    if (p.hash.empty() || drawn.count(p.hash) == 0)
+                        continue;
+                    if (p.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+                        continue;
+                    if (scene_.is_confirmed_locked(p.hash) || p.is_uncle ||
+                        scene_.is_uncle_locked(p.hash))
+                        continue;
+                    if (green_display.count(p.hash))
+                        continue;
+                    if (hc_by_lane[p.lane] >= 0)
+                        continue; // already handled above
+                    if (p.height > best_h[p.lane])
+                    {
+                        best_h[p.lane] = p.height;
+                        best_id[p.lane] = p.hash;
+                    }
+                }
+                for (int i = 0; i < BlockScene::kLaneCount; ++i)
+                    if (!best_id[i].empty())
+                        unconfirmed_tips.insert(best_id[i]);
+            }
         }
 
         std::unordered_map<std::string, glm::vec3> block_colors;
@@ -1536,7 +1585,9 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
 
         tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, soft_evicted,
                                drawn, green_display, cyan_owners, unconfirmed_tips,
-                               frontier_domain, tip_len, tip_rad, shaft_r, clearance);
+                               frontier_domain, tip_len, tip_rad, shaft_r, clearance,
+                               in.frustum,
+                               in.has_camera_eye ? &in.camera_eye : nullptr);
         draw_bfs_traces_(*debug, block_positions, drawn);
 
         uint32_t arrow_count = 0;
@@ -1563,9 +1614,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                                  eph_seen);
             if (grow <= 0.f)
                 return;
+            if (in.frustum)
+            {
+                const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+                const glm::vec3 half = 0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+                if (!in.frustum->intersects_aabb(mid, half))
+                    return;
+            }
             debug->add_arrow(from_inset, to_inset, color,
                              tip_len * tip_scale, tip_rad * tip_scale,
-                             shaft_r * tip_scale, kDepRadial, grow);
+                             shaft_r * tip_scale, 4u, grow);
             ++arrow_count;
         };
 
@@ -1639,10 +1697,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 ++within_level;
                 if (grow <= 0.f)
                     continue;
+                if (in.frustum)
+                {
+                    const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+                    const glm::vec3 half =
+                        0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+                    if (!in.frustum->intersects_aabb(mid, half))
+                        continue;
+                }
 
                 const float tip_scale = focus ? 1.28f : (e.depth == 0 ? 1.15f : 1.05f);
                 debug->add_arrow(from_inset, to_inset, arrow_col, tip_len * tip_scale,
-                                 tip_rad * tip_scale, shaft_r * tip_scale, kDepRadial,
+                                 tip_rad * tip_scale, shaft_r * tip_scale, 4u,
                                  grow);
                 ++sel_arrow_count;
             }

@@ -3107,6 +3107,30 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
     if (chunk_to <= chunk_from)
         return false;
 
+    // Camera-local network: skip HTTP for chunks far from the eye (force tip refresh exempt).
+    if (!force_newest && genesis_ms_ > 0)
+    {
+        const int64_t w = window_ms_();
+        const int64_t cspan = chunk_ms_();
+        if (w > 0 && cspan > 0)
+        {
+            const int subsegs = static_cast<int>((w + cspan - 1) / cspan);
+            const int64_t half_win = (static_cast<int64_t>(subsegs) * cspan) / 2;
+            int64_t origin = scene_.timeline_origin_ms();
+            const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+            if (origin <= 0)
+                origin = now_ms - w;
+            const float z = scene_.camera_scroll_z();
+            const float live_z = -static_cast<float>(now_ms - origin) * 0.001f;
+            const float older_sec = z - live_z;
+            int64_t cam_ts = now_ms - static_cast<int64_t>(std::max(0.f, older_sec) * 1000.f);
+            int64_t net_lo = cam_ts - half_win;
+            int64_t net_hi = cam_ts + half_win;
+            if (chunk_from >= net_hi || chunk_to <= net_lo)
+                return false;
+        }
+    }
+
     const bool force = force_newest;
     // Already admitted: advance cursor (no HTTP).
     if (!force && history_slots_fetched_.count(chunk_from) != 0)
@@ -3115,6 +3139,12 @@ bool AlephiumAdapter::fetch_window_chunk_(int window_index, bool force_newest)
         recompute_window_chunk_stats_(window_index);
         return false;
     }
+
+    // Backpressure at enqueue site.
+    if (fetch_pool_ &&
+        fetch_pool_->io().inflight_intervals() >=
+            static_cast<size_t>(HttpIoPool::kDefaultMaxInflightIntervals))
+        return false;
 
     const int added = poll_time_slot_(chunk_from, chunk_to, force);
     if (added <= 0)
@@ -3331,22 +3361,66 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
         return 0;
     if (!interval_pump_allowed_())
         return 0;
+    // Backpressure: no new interval enqueues until some inflight complete.
+    if (fetch_pool_ &&
+        fetch_pool_->io().inflight_intervals() >=
+            static_cast<size_t>(HttpIoPool::kDefaultMaxInflightIntervals))
+        return 0;
+
     resolve_genesis_ms_();
     update_segment_ring_();
     const int cam_k = camera_lookback_index_();
-    // Hysteresis only for fill priority / optional +1 beyond ring — not ring membership.
-    const int k_pref = effective_lookback_index_();
     const bool live_cam = (cam_k == 0);
-    const bool tip_ready = live_tip_pipeline_ready_();
     int fetched = 0;
+
+    // Network fill window = one G of subsegments centered on camera time (may cross G).
+    // subsegments_per_G = window_ms / chunk_ms (e.g. 600/120 = 5).
+    const int64_t w = window_ms_();
+    const int64_t c = chunk_ms_();
+    if (w <= 0 || c <= 0)
+        return 0;
+    const int subsegs = static_cast<int>((w + c - 1) / c); // same count as one segment
+    const int64_t half_win = (static_cast<int64_t>(subsegs) * c) / 2;
+
+    // Camera time from scroll Z (layout: z ≈ -(now - origin)/1000 when attached).
+    int64_t origin = scene_.timeline_origin_ms();
+    const int64_t now_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
+    if (origin <= 0)
+        origin = now_ms - w;
+    const float z = scene_.camera_scroll_z();
+    // older_delta_sec = z - live_z; live_z = -(now-origin)*0.001
+    const float live_z = -static_cast<float>(now_ms - origin) * 0.001f;
+    const float older_sec = z - live_z;
+    int64_t cam_ts = now_ms - static_cast<int64_t>(std::max(0.f, older_sec) * 1000.f);
+    if (cam_ts < genesis_ms_ && genesis_ms_ > 0)
+        cam_ts = genesis_ms_;
+
+    int64_t net_lo = cam_ts - half_win;
+    int64_t net_hi = cam_ts + half_win;
+    if (genesis_ms_ > 0 && net_lo < genesis_ms_)
+        net_lo = genesis_ms_;
+    if (net_hi < net_lo + c)
+        net_hi = net_lo + c;
+
+    auto chunk_in_network_window = [&](int64_t chunk_from, int64_t chunk_to) -> bool {
+        // Overlap [chunk_from, chunk_to) with [net_lo, net_hi).
+        return chunk_from < net_hi && chunk_to > net_lo;
+    };
 
     auto try_win = [&](int wi, bool force_newest) -> bool {
         if (fetched >= max_chunks)
             return false;
-        // Allow force or active ring; also allow cam_k+3 when hysteresis wants early fill.
-        if (!force_newest && !is_active_segment_(wi))
+        if (fetch_pool_ &&
+            fetch_pool_->io().inflight_intervals() >=
+                static_cast<size_t>(HttpIoPool::kDefaultMaxInflightIntervals))
+            return false;
+        if (!force_newest)
         {
-            if (!(k_pref > cam_k && wi == cam_k + kSegmentRingSize && wi <= max_lookback_index_()))
+            // Only windows that overlap the camera network time window.
+            if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
+                return false;
+            const auto& slot = lookback_windows_[static_cast<size_t>(wi)];
+            if (!chunk_in_network_window(slot.from_ms, slot.to_ms))
                 return false;
         }
         if (fetch_window_chunk_(wi, force_newest))
@@ -3358,50 +3432,28 @@ int AlephiumAdapter::pump_timeline_chunks_(int max_chunks)
     };
 
     auto fill_win = [&](int wi) {
-        if (wi < 0)
+        if (wi < 0 || wi >= static_cast<int>(lookback_windows_.size()))
             return;
-        if (wi >= static_cast<int>(lookback_windows_.size()))
-            return;
-        const bool in_ring = is_active_segment_(wi);
-        const bool prefetch_beyond =
-            k_pref > cam_k && wi == cam_k + kSegmentRingSize && wi <= max_lookback_index_();
-        if (!in_ring && !prefetch_beyond)
-            return;
-        // Multiple enqueues per pump for ahead windows (pending blocks per-window).
         while (fetched < max_chunks && try_win(wi, false))
         {
         }
     };
 
-    // Tip-backward load only (lookback k from live tip — never genesis-forward).
-    // Force topmost live 60s even before Steady (disk bootstrap sets want_newest_refresh).
-    (void)tip_ready;
+    // Live tip short edge (if camera on live).
     if (live_cam && !lookback_windows_.empty() && lookback_windows_[0].want_newest_refresh)
         try_win(0, /*force_newest=*/true);
 
-    // Dep-critical / priority holes before bulk newest-first grid fill.
+    // Dep-critical / eye holes only if they overlap camera network window.
     while (fetched < max_chunks && pump_priority_holes_(1))
         ++fetched;
 
-    if (live_cam)
-    {
-        fill_win(0);
-        fill_win(1);
-        fill_win(2);
-    }
-    else
-    {
-        fill_win(cam_k);
-        fill_win(cam_k + 1);
-        fill_win(cam_k + 2);
-    }
-    // Optional early fill of one older beyond ring when deep in current segment.
-    if (k_pref > cam_k)
-        fill_win(cam_k + kSegmentRingSize);
-    for (int i = 0; i < active_ring_n_ && fetched < max_chunks; ++i)
-        fill_win(active_ring_[i]);
+    // Prefer windows nearest camera lookback index (may straddle two G).
+    fill_win(cam_k);
+    if (cam_k > 0)
+        fill_win(cam_k - 1);
+    fill_win(cam_k + 1);
+    // Do NOT bulk-fill the full 15-G schedule ring over the network.
 
-    // Single-hash residuals only after ranges + bulk for this pump slice.
     (void)pump_single_block_fetches_(kMaxSingleBlockPerDrain);
 
     if (fetched > 0)

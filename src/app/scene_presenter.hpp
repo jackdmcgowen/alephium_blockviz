@@ -124,7 +124,9 @@ private:
                                 const std::unordered_set<std::string>& cyan_owners,
                                 const std::unordered_set<std::string>& unconfirmed_tips,
                                 const std::unordered_set<std::string>& frontier_domain,
-                                float tip_len, float tip_rad, float shaft_r, float clearance);
+                                float tip_len, float tip_rad, float shaft_r, float clearance,
+                                const Frustum* frustum,
+                                const glm::vec3* camera_eye);
 
     // Per-lane previous primary tip hash (for secondary translucent fade).
     std::string prev_primary_tip_[BlockScene::kLaneCount]{};

@@ -61,7 +61,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted history GETs (default **~120s** spans; disk keys stay 60s). Steady live refresh re-requests only a **short tip edge**. `drain_verify` rate-limits pumps (~400ms). Camera lookback jumps use a **small enqueue budget** to avoid storming the host. **429/5xx** → exponential interval backoff (pause pumps).
+**Chunked timeline:** history GETs use ~**120s** spans (disk keys stay 60s). Network body fill is a **camera-centered window of one G’s worth of subsegments** (may straddle two G-segs)—not the full 15-G schedule ring. **No new interval enqueues** while inflight intervals are at cap; next free slot re-aims from **current** camera. Live tip uses a **short edge** refresh. **429/5xx** → exponential backoff.
 
 **Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
