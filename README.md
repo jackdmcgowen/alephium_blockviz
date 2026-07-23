@@ -4,8 +4,8 @@ Cross-platform **Vulkan + ImGui** visualizer for **Alephium BlockFlow** — sixt
 
 | | |
 |--|--|
-| **Host** | Alephium BlockFlow **1.4.0** (`src/app/app_identity.hpp`) |
-| **Engine** | BlockvizEngine **1.4.0** (`src/engine/engine_identity.hpp`) |
+| **Host** | Alephium BlockFlow **1.4.1** (`src/app/app_identity.hpp`) |
+| **Engine** | BlockvizEngine **1.4.1** (`src/engine/engine_identity.hpp`) |
 | **Windows** | `sln/alephium_visualizer.sln` (MSVC) |
 | **Linux** | CMake + GLFW — [docs/linux.md](docs/linux.md) |
 | **VnV** | `vnv/` · [TESTING.md](vnv/TESTING.md) · `sln/blockviz_vnv.sln` · `.\scripts\run_vnv.ps1` / `./scripts/run_vnv.sh` |
