@@ -57,6 +57,9 @@ public:
     // half_extent is half-width in both X and Y (total span 2*half_extent).
     void add_z_plane_quad(float z, float half_extent, const glm::vec4& color);
 
+    // Translucent AABB volume between z0 and z1 (subsegment network fill): 6 faces + edges.
+    void add_z_slab(float z0, float z1, float half_xy, const glm::vec4& color);
+
     const DebugVertex* vertices() const { return verts_.empty() ? nullptr : verts_.data(); }
     uint32_t vertex_count() const { return static_cast<uint32_t>(verts_.size()); }
     const uint32_t* indices() const { return indices_.empty() ? nullptr : indices_.data(); }

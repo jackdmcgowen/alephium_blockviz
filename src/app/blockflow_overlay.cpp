@@ -52,16 +52,31 @@ void BlockflowOverlay::set_initial_domain(NetworkDomain d)
     domain_ = d;
 }
 
+void BlockflowOverlay::push_scene_view_filters_()
+{
+    SceneViewFilters f{};
+    f.multi_tx_only = filter_multi_tx_;
+    f.min_alph = filter_min_alph_;
+    f.unconfirmed_only = filter_unconfirmed_only_;
+    engine_.set_scene_view_filters(f);
+}
+
 void BlockflowOverlay::set_filter_multi_tx(bool enabled)
 {
     filter_multi_tx_ = enabled;
-    engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+    push_scene_view_filters_();
 }
 
 void BlockflowOverlay::set_filter_min_alph(double min_alph)
 {
     filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
-    engine_.set_scene_filter_min_alph(filter_min_alph_);
+    push_scene_view_filters_();
+}
+
+void BlockflowOverlay::set_filter_unconfirmed_only(bool enabled)
+{
+    filter_unconfirmed_only_ = enabled;
+    push_scene_view_filters_();
 }
 
 void BlockflowOverlay::save_prefs() const
@@ -70,6 +85,7 @@ void BlockflowOverlay::save_prefs() const
     p.domain = domain_;
     p.filter_multi_tx = filter_multi_tx_;
     p.filter_min_alph = filter_min_alph_;
+    p.filter_unconfirmed_only = filter_unconfirmed_only_;
     if (!save_user_prefs(p))
         std::printf("[app] warning: failed to save %s\n", kUserPrefsPath);
 }
@@ -181,7 +197,7 @@ void BlockflowOverlay::draw()
         lmb_drag_dist_px_ = 0.f;
     }
 
-    // Right-hold drag: pan. Short RMB click: deselect + clear dep fan only (stay on Z).
+    // Right-hold drag: pan. Short RMB: deselect (if any) + home look/pan keep Z (always).
     if (over_scene && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         rmb_down_over_scene_ = true;
@@ -201,7 +217,10 @@ void BlockflowOverlay::draw()
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         if (rmb_down_over_scene_ && !rmb_dragged_)
-            engine_.clear_selection(); // no reattach — use key 3 / Live for tip
+        {
+            engine_.clear_selection(); // no Live reattach — key 3 / Live for tip
+            camera_.home_view_keep_z(); // tween look +Z / pan XY→0; keep scroll Z
+        }
         rmb_down_over_scene_ = false;
         rmb_dragged_ = false;
         rmb_drag_dist_px_ = 0.f;
@@ -335,7 +354,7 @@ void BlockflowOverlay::draw_block_billboard_(const UiSnapshot& ui, float ui_w, f
 void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, float ui_h)
 {
     const float rail_w = ui_chrome::rail_width(ui_w);
-    const float bar_h = 76.f;
+    const float bar_h = 84.f;
     const float pad = 10.f;
     const float bar_w = std::max(120.f, ui_w - 2.f * rail_w - 2.f * pad);
     const float bar_x = rail_w + pad;
@@ -343,7 +362,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
 
     ImGui::SetNextWindowPos(ImVec2(bar_x, bar_y), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(bar_w, bar_h), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.82f);
+    ImGui::SetNextWindowBgAlpha(0.88f);
     ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
@@ -361,7 +380,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
                                      static_cast<int64_t>(ALPH_LOOKBACK_WINDOW_SECONDS) * 1000;
     const float mps = ui.meters_per_second > 1e-6f ? ui.meters_per_second : 1.f;
 
-    // High-level overview: many genesis-aligned segments (not only cam_k ring of 3).
+    // High-level overview: genesis-aligned G_seg bins, Z-proportional (match cubes/planes).
     // Click a bin → teleport to that segment's start (from_ms / older edge).
     struct Slot
     {
@@ -374,6 +393,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
         int     block_count = 0;
         int     expected = 0;
         bool    full = false;
+        bool    known = false; // HUD / snapshot has load data
         bool    valid = false;
         bool    is_live = false;
     };
@@ -451,6 +471,7 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
             sl.block_count = hud_blocks_k[k];
             sl.expected = hud_exp_k[k];
             sl.full = hud_full_k[k] != 0;
+            sl.known = true;
         }
         else
         {
@@ -462,13 +483,15 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
                 sl.block_count = s.block_count;
                 sl.expected = s.expected_blocks;
                 sl.full = s.confirmed_full != 0;
+                sl.known = true;
             }
             else
             {
-                sl.load = 0.06f;
+                sl.load = 0.f;
                 sl.block_count = 0;
                 sl.expected = 0;
                 sl.full = false;
+                sl.known = false;
             }
         }
         sl.valid = true;
@@ -494,7 +517,8 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
     }
     const float z_span = std::max(1.f, z_hi - z_lo);
 
-    auto z_to_x = [&](float z) -> float {
+    // Older (high Z) → left (t=0); newer (low Z) → right (t=1). Same for bars + caret.
+    auto z_to_t = [&](float z) -> float {
         return (z_hi - z) / z_span;
     };
 
@@ -528,89 +552,220 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 wp = ImGui::GetCursorScreenPos();
-    const float track_h = 32.f;
-    const float track_y = wp.y + 24.f;
+    const float label_band = 14.f;
+    const float track_h = 40.f;
+    const float track_y = wp.y + 22.f + label_band;
     const float track_w = ImGui::GetContentRegionAvail().x;
+    constexpr float kRounding = 6.f;
 
+    // Inset track well.
     dl->AddRectFilled(ImVec2(wp.x, track_y), ImVec2(wp.x + track_w, track_y + track_h),
-                      IM_COL32(16, 16, 20, 230), 4.f);
-    dl->AddLine(ImVec2(wp.x, track_y + track_h - 1.f),
-                ImVec2(wp.x + track_w, track_y + track_h - 1.f), IM_COL32(60, 60, 70, 200),
-                1.f);
+                      IM_COL32(12, 14, 18, 240), kRounding);
+    dl->AddRect(ImVec2(wp.x, track_y), ImVec2(wp.x + track_w, track_y + track_h),
+                IM_COL32(48, 54, 66, 220), kRounding, 0, 1.f);
+    dl->AddLine(ImVec2(wp.x + 4.f, track_y + 1.f), ImVec2(wp.x + track_w - 4.f, track_y + 1.f),
+                IM_COL32(255, 255, 255, 18), 1.f);
 
-    const ImU32 kHistCol[3] = {
-        IM_COL32(70, 110, 180, 255),
-        IM_COL32(40, 180, 190, 255),
-        IM_COL32(255, 140, 60, 255),
-    };
+    // Precompute screen X for each slot (Z-proportional).
+    float slot_x0[kMaxOverviewBins]{};
+    float slot_x1[kMaxOverviewBins]{};
+    for (int i = 0; i < nslot; ++i)
+    {
+        // z_old (older) → left; z_new (newer) → right.
+        float t0 = std::clamp(z_to_t(slots[i].z_old), 0.f, 1.f);
+        float t1 = std::clamp(z_to_t(slots[i].z_new), 0.f, 1.f);
+        if (t1 < t0)
+            std::swap(t0, t1);
+        slot_x0[i] = wp.x + t0 * track_w;
+        slot_x1[i] = wp.x + t1 * track_w;
+        if (slot_x1[i] - slot_x0[i] < 2.f)
+            slot_x1[i] = slot_x0[i] + 2.f;
+    }
 
-    // Equal-width overview bins (left = older).
-    const float bin_w = track_w / static_cast<float>(std::max(1, nslot));
+    // Hover bin from mouse X (before draw so we can highlight).
+    int hover_bin = -1;
+    {
+        const float mx = ImGui::GetIO().MousePos.x;
+        const float my = ImGui::GetIO().MousePos.y;
+        if (my >= track_y - 2.f && my <= track_y + track_h + 8.f && mx >= wp.x &&
+            mx <= wp.x + track_w)
+        {
+            for (int i = 0; i < nslot; ++i)
+            {
+                if (mx >= slot_x0[i] && mx <= slot_x1[i])
+                {
+                    hover_bin = i;
+                    break;
+                }
+            }
+            // Edge gaps: nearest by center.
+            if (hover_bin < 0 && nslot > 0)
+            {
+                float best = 1e9f;
+                for (int i = 0; i < nslot; ++i)
+                {
+                    const float mid = 0.5f * (slot_x0[i] + slot_x1[i]);
+                    const float d = std::abs(mx - mid);
+                    if (d < best)
+                    {
+                        best = d;
+                        hover_bin = i;
+                    }
+                }
+            }
+        }
+    }
+
+    // Camera-bin for subsegment ticks (64s grid; keep in sync with ALPH_SUBSEGMENT_SECONDS).
+    int cam_bin = -1;
+    for (int i = 0; i < nslot; ++i)
+    {
+        if (caret_z >= slots[i].z_new - 0.25f && caret_z <= slots[i].z_old + 0.25f)
+        {
+            cam_bin = i;
+            break;
+        }
+    }
+
     for (int i = 0; i < nslot; ++i)
     {
         if (!slots[i].valid)
             continue;
-        const float x0 = wp.x + static_cast<float>(i) * bin_w;
-        const float x1 = wp.x + static_cast<float>(i + 1) * bin_w;
+        const float x0 = slot_x0[i];
+        const float x1 = slot_x1[i];
+        const float cell_w = x1 - x0;
 
-        float hist = slots[i].load;
-        if (slots[i].expected > 0 && slots[i].block_count > 0)
+        // Segment separators (subtle).
+        if (i > 0)
+            dl->AddLine(ImVec2(x0, track_y + 3.f), ImVec2(x0, track_y + track_h - 3.f),
+                        IM_COL32(70, 78, 96, 90), 1.f);
+
+        // Hover highlight behind fill.
+        if (i == hover_bin)
+            dl->AddRectFilled(ImVec2(x0, track_y + 1.f),
+                              ImVec2(x1, track_y + track_h - 1.f),
+                              IM_COL32(255, 255, 255, 22), 2.f);
+
+        if (slots[i].known)
         {
-            const float dens = static_cast<float>(slots[i].block_count) /
-                               static_cast<float>(slots[i].expected);
-            hist = std::max(hist, dens);
+            float hist = slots[i].load;
+            if (slots[i].expected > 0 && slots[i].block_count > 0)
+            {
+                const float dens = static_cast<float>(slots[i].block_count) /
+                                   static_cast<float>(slots[i].expected);
+                hist = std::max(hist, dens);
+            }
+            hist = std::clamp(hist, 0.f, 1.f);
+            if (hist > 0.02f)
+            {
+                const float h = track_h * std::max(0.08f, hist);
+                const float y0 = track_y + track_h - h;
+                // Monochrome load: slate → teal; live = tip green.
+                const int a = slots[i].is_live
+                                  ? static_cast<int>(140 + 100.f * hist)
+                                  : static_cast<int>(100 + 120.f * hist);
+                ImU32 col = slots[i].is_live
+                                ? IM_COL32(50, 200, 120, a)
+                                : IM_COL32(70, 130, 150, a);
+                dl->AddRectFilled(ImVec2(x0 + 0.5f, y0), ImVec2(x1 - 0.5f, track_y + track_h - 1.f),
+                                  col, 2.f);
+                // Soft top edge on fill.
+                dl->AddLine(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, y0),
+                            IM_COL32(200, 230, 240, 40), 1.f);
+            }
         }
-        hist = std::clamp(hist, 0.05f, 1.f);
-        const float h = track_h * hist;
-        const float y0 = track_y + track_h - h;
-        const int base_a = hist < 0.12f ? 90 : (slots[i].is_live ? 230 : 200);
-        ImU32 col = (kHistCol[i % 3] & 0x00FFFFFFu) | (static_cast<ImU32>(base_a) << 24);
-        if (slots[i].is_live)
-            col = IM_COL32(50, 200, 120, base_a);
-        dl->AddRectFilled(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f), col,
-                          2.f);
-        dl->AddLine(ImVec2(x0, track_y - 2.f), ImVec2(x0, track_y + track_h + 2.f),
-                    IM_COL32(180, 220, 255, 100), 1.f);
-        if (slots[i].full)
-            dl->AddRect(ImVec2(x0 + 1.f, y0), ImVec2(x1 - 1.f, track_y + track_h - 1.f),
-                        IM_COL32(255, 255, 255, 150), 2.f, 0, 1.1f);
 
+        if (slots[i].full)
+            dl->AddRect(ImVec2(x0 + 0.5f, track_y + 2.f),
+                        ImVec2(x1 - 0.5f, track_y + track_h - 2.f),
+                        IM_COL32(220, 230, 255, 110), 2.f, 0, 1.f);
+
+        // Subsegment ticks on camera or hovered cell only (ALPH_SUBSEGMENT_SECONDS).
+        if ((i == cam_bin || i == hover_bin) && cell_w > 28.f)
+        {
+            const float span_z = std::max(1.f, slots[i].z_old - slots[i].z_new);
+            const float sub_z = static_cast<float>(ALPH_SUBSEGMENT_SECONDS) * mps;
+            if (sub_z > 0.f && span_z > sub_z * 1.5f)
+            {
+                for (float z = slots[i].z_new + sub_z; z < slots[i].z_old - 0.5f * sub_z;
+                     z += sub_z)
+                {
+                    const float tx = wp.x + std::clamp(z_to_t(z), 0.f, 1.f) * track_w;
+                    if (tx > x0 + 2.f && tx < x1 - 2.f)
+                        dl->AddLine(ImVec2(tx, track_y + track_h - 8.f),
+                                    ImVec2(tx, track_y + track_h - 2.f),
+                                    IM_COL32(180, 200, 220, 70), 1.f);
+                }
+            }
+        }
+
+        // Labels above track (not over fill).
         char lab[28];
         if (slots[i].is_live)
             std::snprintf(lab, sizeof(lab), "Live #%d", slots[i].segment_id);
         else
             std::snprintf(lab, sizeof(lab), "#%d", slots[i].segment_id);
         const ImVec2 ts = ImGui::CalcTextSize(lab);
-        if (ts.x < (x1 - x0) - 4.f)
-            dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts.x, track_y + 2.f),
-                        IM_COL32(255, 255, 255, 230), lab);
-        else if ((x1 - x0) > 14.f && (i == 0 || i == nslot - 1 || (i % 4) == 0))
+        const float label_y = track_y - label_band + 1.f;
+        if (ts.x < cell_w - 4.f)
         {
-            // Sparse labels when bins are narrow.
+            dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts.x, label_y),
+                        slots[i].is_live ? IM_COL32(120, 230, 170, 240)
+                                         : IM_COL32(200, 210, 220, 210),
+                        lab);
+        }
+        else if (cell_w > 12.f &&
+                 (i == 0 || i == nslot - 1 || slots[i].is_live || (i % 4) == 0))
+        {
             std::snprintf(lab, sizeof(lab), "%d", slots[i].segment_id);
             const ImVec2 ts2 = ImGui::CalcTextSize(lab);
-            if (ts2.x < (x1 - x0) - 2.f)
-                dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts2.x, track_y + 2.f),
-                            IM_COL32(255, 255, 255, 200), lab);
+            if (ts2.x < cell_w - 2.f)
+                dl->AddText(ImVec2(0.5f * (x0 + x1) - 0.5f * ts2.x, label_y),
+                            IM_COL32(180, 190, 200, 180), lab);
         }
     }
 
-    // Caret at camera Z when it falls inside overview range.
-    const float cam_t = std::clamp(z_to_x(caret_z), 0.f, 1.f);
+    // Caret at camera Z (same Z→X map as cells).
+    const float cam_t = std::clamp(z_to_t(caret_z), 0.f, 1.f);
     const float cx = wp.x + cam_t * track_w;
-    dl->AddLine(ImVec2(cx, track_y - 3.f), ImVec2(cx, track_y + track_h + 3.f),
-                IM_COL32(255, 220, 80, 255), 2.f);
-    dl->AddTriangleFilled(ImVec2(cx, track_y - 3.f), ImVec2(cx - 5.f, track_y - 11.f),
-                          ImVec2(cx + 5.f, track_y - 11.f), IM_COL32(255, 220, 80, 255));
+    // Soft glow line
+    dl->AddLine(ImVec2(cx, track_y - 1.f), ImVec2(cx, track_y + track_h + 1.f),
+                IM_COL32(255, 210, 80, 70), 5.f);
+    dl->AddLine(ImVec2(cx, track_y - 2.f), ImVec2(cx, track_y + track_h + 2.f),
+                IM_COL32(255, 220, 90, 240), 1.5f);
+    // Diamond head above track
+    const float dy = track_y - 2.f;
+    dl->AddTriangleFilled(ImVec2(cx, dy), ImVec2(cx - 5.5f, dy - 8.f),
+                          ImVec2(cx + 5.5f, dy - 8.f), IM_COL32(255, 220, 90, 255));
+    // Small pill at mid-track
+    dl->AddRectFilled(ImVec2(cx - 3.f, track_y + track_h * 0.5f - 5.f),
+                      ImVec2(cx + 3.f, track_y + track_h * 0.5f + 5.f),
+                      IM_COL32(255, 220, 90, 220), 3.f);
 
-    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 6.f));
+    ImGui::SetCursorScreenPos(ImVec2(wp.x, track_y - 2.f));
+    ImGui::InvisibleButton("##minimap_track", ImVec2(track_w, track_h + 8.f));
     const bool track_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
 
     if (track_hot && nslot > 0)
     {
         const float mx = ImGui::GetIO().MousePos.x;
         const float t = (mx - wp.x) / std::max(1.f, track_w);
-        int bin = static_cast<int>(std::floor(t * static_cast<float>(nslot)));
+        int bin = hover_bin;
+        if (bin < 0)
+        {
+            // Fallback: nearest center.
+            float best = 1e9f;
+            for (int i = 0; i < nslot; ++i)
+            {
+                const float mid = 0.5f * (slot_x0[i] + slot_x1[i]);
+                const float d = std::abs(mx - mid);
+                if (d < best)
+                {
+                    best = d;
+                    bin = i;
+                }
+            }
+        }
         bin = std::clamp(bin, 0, nslot - 1);
 
         // Click (not drag): teleport to segment start.
@@ -639,11 +794,17 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
 
         if (ImGui::IsItemHovered() && slots[bin].valid)
         {
-            ImGui::SetTooltip(
-                "Segment #%d  (lookback k=%d)  load=%.0f%%  blocks=%d\n"
-                "Click: jump to segment start | Live bin / key 3: tip",
-                slots[bin].segment_id, slots[bin].lookback_k, slots[bin].load * 100.f,
-                slots[bin].block_count);
+            if (slots[bin].known)
+                ImGui::SetTooltip(
+                    "Segment #%d  (lookback k=%d)  load=%.0f%%  blocks=%d\n"
+                    "Click: jump to segment start | Live bin / key 3: tip",
+                    slots[bin].segment_id, slots[bin].lookback_k, slots[bin].load * 100.f,
+                    slots[bin].block_count);
+            else
+                ImGui::SetTooltip(
+                    "Segment #%d  (lookback k=%d)  load unknown\n"
+                    "Click: jump to segment start | Live bin / key 3: tip",
+                    slots[bin].segment_id, slots[bin].lookback_k);
         }
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -690,11 +851,11 @@ void BlockflowOverlay::draw_timeline_minimap_(const UiSnapshot& ui, float ui_w, 
     ImGui::SameLine();
     if (nslot > 0)
     {
-        ImGui::TextDisabled("#%d..#%d | click segment", slots[0].segment_id,
+        ImGui::TextDisabled("#%d–#%d · click to jump", slots[0].segment_id,
                             slots[nslot - 1].segment_id);
     }
     else
-        ImGui::TextDisabled("slide 3-bin | History");
+        ImGui::TextDisabled("timeline overview");
 
     ImGui::End();
 }
@@ -770,7 +931,10 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     ImGui::Text("Status");
     ImGui::SameLine();
     ImGui::TextColored(status_col, "%s", network_status_label(st));
-    if (st == NetworkStatus::History)
+    // Secondary line: gaps / deps / history (primary stays Stable when live is usable).
+    if (ui.net_status_detail[0] != '\0')
+        ImGui::TextDisabled("%s", ui.net_status_detail);
+    else if (st == NetworkStatus::History)
         ImGui::TextDisabled("Live tip halted until camera returns to tip window");
     else if (st == NetworkStatus::CatchingUp)
         ImGui::TextDisabled("Filling missed sub-segments after History");
@@ -810,7 +974,7 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     if (ui.disk_cache_last_event[0] != '\0')
         ImGui::TextWrapped("last: %s", ui.disk_cache_last_event);
     else
-        ImGui::TextDisabled("last: (waiting for Steady / stop flush)");
+        ImGui::TextDisabled("last: (waiting for Stable / stop flush)");
     if (ui.cache_pressure_level >= 2)
         ImGui::TextColored(ImVec4(1.f, 0.45f, 0.2f, 1.f),
                            "Timeline RAM HARD — oldest blocks may drop");
@@ -818,30 +982,34 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
         ImGui::TextColored(ImVec4(1.f, 0.85f, 0.3f, 1.f),
                            "Timeline RAM large — history kept until hard cap");
 
-    // Sliding triple-buffer ring (older→newer); load % per active window.
-    if (ui.segment_count > 0 && ImGui::CollapsingHeader("Segments", ImGuiTreeNodeFlags_DefaultOpen))
+    // Sliding ring summary — full per-window detail on hover (tooltip).
+    if (ui.segment_count > 0)
     {
         const int nshow =
             std::min(ui.segment_count, UiSnapshot::kMaxTimeSegments);
-        for (int i = 0; i < nshow; ++i)
+        ImGui::TextDisabled("Segments (%d) · hover for detail", nshow);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
-            const auto& s = ui.segments[i];
-            const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
-            const float span_s = static_cast<float>(span_ms) * 0.001f;
-            const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
-            const bool is_live = (s.index == 0);
-            const char* tag =
-                is_live ? "Live" : (s.confirmed_full ? "full" : "loading");
-            ImGui::PushID(i);
-            if (is_live)
-                ImGui::Text("Live k%d  %.0fs", s.index, span_s);
-            else
-                ImGui::Text("k%d  %.0fs", s.index, span_s);
-            ImGui::ProgressBar(ratio, ImVec2(-1.f, 0.f),
-                               s.confirmed_full ? "100%" : nullptr);
-            ImGui::TextDisabled("  %d blks · %d%% · %s", s.block_count,
-                                static_cast<int>(ratio * 100.f + 0.5f), tag);
-            ImGui::PopID();
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted("Lookback windows (older -> newer in ring)");
+            ImGui::Separator();
+            for (int i = 0; i < nshow; ++i)
+            {
+                const auto& s = ui.segments[i];
+                const int64_t span_ms = std::max<int64_t>(1, s.to_ms - s.from_ms);
+                const float span_s = static_cast<float>(span_ms) * 0.001f;
+                const float ratio = std::clamp(s.load_ratio, 0.f, 1.f);
+                const bool is_live = (s.index == 0);
+                const char* tag =
+                    is_live ? "Live" : (s.confirmed_full ? "full" : "loading");
+                if (is_live)
+                    ImGui::Text("k%d Live  %.0fs  %d%%  %d blks  %s", s.index, span_s,
+                                static_cast<int>(ratio * 100.f + 0.5f), s.block_count, tag);
+                else
+                    ImGui::Text("k%d       %.0fs  %d%%  %d blks  %s", s.index, span_s,
+                                static_cast<int>(ratio * 100.f + 0.5f), s.block_count, tag);
+            }
+            ImGui::EndTooltip();
         }
     }
 
@@ -893,11 +1061,20 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     {
         if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
         {
-            engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+            push_scene_view_filters_();
             save_prefs();
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+        if (ImGui::Checkbox("Unconfirmed only", &filter_unconfirmed_only_))
+        {
+            push_scene_view_filters_();
+            save_prefs();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Show only unconfirmed blocks (hides main-chain confirmed).\n"
+                "Selection / hover still draw.");
         {
             float min_alph_f = static_cast<float>(filter_min_alph_);
             if (ImGui::DragFloat("Min ALPH out", &min_alph_f, 0.1f, 0.f, 1.0e9f, "%.3f",
@@ -1099,7 +1276,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         if (scene_ && ImGui::SmallButton("Replay deps"))
             scene_->request_walk_replay();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Re-run multi-hop dep trace (R)");
+            ImGui::SetTooltip("Re-grow first-order (direct) deps (R)");
 
         // --- Dependencies: hover recolors 3D arrow; click selects + looks (no explorer) ---
         if (!inspector.deps.empty() &&
@@ -1224,17 +1401,17 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
             "Select a block from the feed below or click a cube in the scene.");
         ImGui::Spacing();
         ImGui::TextDisabled(
-            "Camera: wheel/arrows Z (detaches) · LMB look · short LMB pick · RMB pan · short RMB deselect · 3 Live tip");
+            "Camera: wheel/arrows Z · LMB look · short LMB pick · RMB pan · short RMB deselect+recenter (keep Z) · 3 Live");
         ImGui::TextDisabled(
             "Solid=main+deps Â· green=frontier tip + blockDeps Â· cyan=unconfirmed children of frontier Â· orange=missing deps Â· gold=select");
         {
-            // Adapter phases: Bootstrap/IdentifyTips/BfsTrace/Steady.
+            // Adapter phases: Bootstrap/IdentifyTips/BfsTrace/Steady (UI Stable).
             const char* pname = "Bootstrap";
             if (ui.trace_phase == 1) pname = "Identify tips";
             else if (ui.trace_phase == 2) pname = "BFS confirm";
-            else if (ui.trace_phase == 3) pname = "Steady";
+            else if (ui.trace_phase == 3) pname = "Stable";
             ImGui::TextDisabled(
-                "Confirm phase: %s | open BFS threads=%d | rays from [g->g] then gaps",
+                "Confirm phase: %s | open BFS workers=%d | rays from [g->g] then gaps",
                 pname, ui.trace_offset);
         }
         ImGui::TextDisabled("Tx list: click a row to expand gas, inputs, outputs.");

@@ -1,12 +1,12 @@
 #pragma once
 
 // Segment-indexed disk cache: unit of storage is genesis segment G_seg.
-// Schema v3: hierarchical multi-entry under G_<id>/ — one gzip file per 60s chunk.
+// Schema v4: hierarchical multi-entry under G_<id>/ — one gzip file per 64s chunk.
 // Complete historical segments replace network interval fills.
 // Design: docs/segment-disk-cache.md
 //
 // Layout under <platform cache root>/<domain>/ (see network/platform/net_platform.hpp):
-//   manifest.json              # schema 3 index (RAM-cached after open)
+//   manifest.json              # schema 4 index (RAM-cached after open)
 //   cache.log
 //   segments/G_<id>/meta.json  # bounds + complete + block_count
 //   segments/G_<id>/c_<from>.json.gz  # chunk entry: { blocks: [...] }
@@ -21,10 +21,10 @@
 class SegmentDiskCache
 {
 public:
-    static constexpr int      kSchemaVersion  = 3; // G_dir + multi-chunk entries
+    static constexpr int      kSchemaVersion  = 4; // 64s chunks (v3 was 60s)
     static constexpr int      kMaxSegments    = 48;
     static constexpr int      kStartupLoadMax = ALPH_LOAD_RING_SEGMENTS; // 15
-    static constexpr int64_t  kChunkMs        = 60 * 1000;
+    static constexpr int64_t  kChunkMs        = ALPH_SUBSEGMENT_MS; // 64s
     static constexpr uint64_t kMaxDiskBytes   = 512ull * 1024 * 1024;
 
     struct CachedBlock

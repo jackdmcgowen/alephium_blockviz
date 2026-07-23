@@ -73,6 +73,7 @@ destroy_engine()
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P0** | Keep facade surface documented against `engine.hpp` | Update when signatures change |
+| **Done** | Pack scene filters into `SceneViewFilters` | One setter on IGraphicsSystem / IEngine |
 | **P1** | Include hygiene | Forward-declare; avoid pulling `engine.hpp` into pure graphics private TUs unnecessarily |
 | **P1** | Document accepted domain leakage on facade | `AlphBlock` / `BlockScene*` — when to slim |
 | **P2** | Optional headless / `render_frame` test seam | Only if automated GPU or integration tests need it |

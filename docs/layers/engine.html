@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Engine layer</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a class="current" href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>Engine layer</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="engine.md"><code>engine.md</code></a>.</p>
+<p>Product shell library <strong>blockviz_engine</strong> (<code>src/engine/</code>). Vulkan-free facade between the host app and registered systems.</p>
+<h2>Overview</h2>
+<p><code>BlockVizEngine</code> (<code>IEngine</code>) owns an <code>ISystem</code> registry, forwards product APIs to <code>IGraphicsSystem</code>, and exposes convenience hooks for network domain switch. Frame contracts (<code>IFrameSource</code>, <code>FrameSourceInput</code> / <code>FrameSourceOutput</code>) live here so graphics and app share one header surface without pulling Vulkan.</p>
+<h2>Ownership boundary</h2>
+<table>
+<tr><th>Owns</th><th>Must not own</th></tr>
+<tr><td><code>IEngine</code> / <code>BlockVizEngine</code> lifecycle</td><td><code>Vk*</code> types</td></tr>
+<tr><td><code>ISystem</code> registry + init/free/start/stop order</td><td>HTTP parse, cJSON</td></tr>
+<tr><td>Frame-source types (<code>frame_types.hpp</code>)</td><td>ImGui chrome widgets</td></tr>
+<tr><td>Public factory declarations for graphics + network</td><td>Pipeline / barrier details</td></tr>
+<tr><td>Engine identity (<code>engine_identity.hpp</code>)</td><td>App window / <code>WndProc</code></td></tr>
+</table>
+<h2>Current surface</h2>
+<table>
+<tr><th>Path</th><th>Role</th></tr>
+<tr><td><code>src/engine/engine.hpp</code></td><td><code>IEngine</code>, <code>IGraphicsSystem</code>, <code>INetworkSystem</code>, <code>NetworkSystemConfig</code>, factories</td></tr>
+<tr><td><code>src/engine/engine.cpp</code></td><td><code>BlockVizEngine</code> implementation</td></tr>
+<tr><td><code>src/engine/frame_types.hpp</code></td><td><code>IFrameSource</code>, <code>FrameSourceInput</code> / <code>Output</code>, highlight hash lists</td></tr>
+<tr><td><code>src/engine/system.hpp</code></td><td><code>ISystem</code> — <code>name</code> / <code>init</code> / <code>free</code> / <code>start</code> / <code>stop</code></td></tr>
+<tr><td><code>src/engine/engine_identity.hpp</code></td><td>Engine name + semver (tags + logging)</td></tr>
+</table>
+<p><strong>Preferred includes:</strong> leaf TUs should prefer <code>engine/frame_types.hpp</code> or <code>engine/system.hpp</code> over the full <code>engine.hpp</code> when possible.</p>
+<h3>Lifecycle (host)</h3>
+<pre><code>create_engine()
+  create_graphics_system → configure → add_system
+  create_network_system  → configure → add_system
+init_systems()
+set_scene / set_camera / set_frame_source / set_ui_overlay
+start()
+  … run …
+stop()
+free_systems()
+destroy_engine()</code></pre>
+<h3>Facade notes (v1)</h3>
+<ul>
+<li><code>publish_frame</code> carries <code>pick_map</code> plus highlight lists (<code>confirmed_tip_hashes</code>, <code>cyan_frontier_hashes</code>, <code>incomplete_hashes</code>) so GPU Sobel stays coherent with the published instance buffer.</li>
+<li>Domain types still appear on the facade (<code>BlockScene*</code>, <code>AlphBlock</code> for selection copy). Accepted for v1 so inspector refill works; optional future slim would move detail entirely behind opaque IDs.</li>
+<li>Render thread is owned by <strong>graphics</strong>, not by a client-driven <code>render_frame</code> loop.</li>
+</ul>
+<h2>Goals</h2>
+<ol>
+<li>Stable, Vulkan-free product API for the host.</li>
+<li>Uniform system lifecycle: configure → init → start / stop → free.</li>
+<li>Coherent frame publish (instances + pick map + highlights paired).</li>
+<li>Single host entry to product backend (<code>IEngine</code> only from <code>main</code> / overlay).</li>
+<li><code>engine-v*</code> tags match <code>engine_identity.hpp</code> on every <code>main</code> release (<code>AGENTS.md</code>).</li>
+</ol>
+<h2>Non-goals</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>ImGui chrome content</td><td><strong>App</strong> <code>IUiOverlay</code></td></tr>
+<tr><td>GPU barriers / swapchain</td><td><strong>Graphics</strong></td></tr>
+<tr><td>Chain JSON / REST</td><td><strong>Network</strong></td></tr>
+<tr><td>ECS / plugin SDK</td><td>Overkill for this product</td></tr>
+<tr><td>Client-driven <code>render_frame</code> for v1</td><td>Testing seam only if appetite appears later</td></tr>
+<tr><td>Owning confirmation policy</td><td><strong>Network</strong> marks; <strong>app</strong> presents</td></tr>
+</table>
+<h2>Plan</h2>
+<table>
+<tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
+<tr><td><strong>P0</strong></td><td>Keep facade surface documented against <code>engine.hpp</code></td><td>Update when signatures change</td></tr>
+<tr><td><strong>P1</strong></td><td>Include hygiene</td><td>Forward-declare; avoid pulling <code>engine.hpp</code> into pure graphics private TUs unnecessarily</td></tr>
+<tr><td><strong>P1</strong></td><td>Document accepted domain leakage on facade</td><td><code>AlphBlock</code> / <code>BlockScene*</code> — when to slim</td></tr>
+<tr><td><strong>P2</strong></td><td>Optional headless / <code>render_frame</code> test seam</td><td>Only if automated GPU or integration tests need it</td></tr>
+<tr><td><strong>P2</strong></td><td>New systems</td><td>Copy <code>sln/_template_system.vcxproj.example</code>; see <a href="../build-performance.md">build-performance.md</a></td></tr>
+</table>
+<h2>Interfaces</h2>
+<p><strong>Host → engine</strong></p>
+<ul>
+<li>Lifecycle + registry</li>
+<li>Selection, multi-tx filter, dep hover, UI snapshot publish/copy</li>
+<li><code>switch_network_domain</code> / <code>network_domain</code> / <code>network_is_switching</code></li>
+</ul>
+<p><strong>Engine → systems</strong></p>
+<ul>
+<li>Owns pointers added via <code>add_system</code> (destroy on free)</li>
+<li>Forwards graphics methods to registered <code>IGraphicsSystem</code></li>
+<li>Resolves <code>INetworkSystem</code> by name for domain switch</li>
+</ul>
+<p><strong>Graphics → app (via contracts owned here)</strong></p>
+<ul>
+<li>Render thread calls <code>IFrameSource::prepare</code> then <code>publish_frame</code></li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="index.html">layers/README.md</a></li>
+<li><a href="app.html">app.md</a>, <a href="graphics.html">graphics.md</a>, <a href="network.html">network.md</a></li>
+<li>Historical modularization: <a href="../graphics-modularization-design.md">graphics-modularization-design.md</a> (landed)</li>
+</ul>
+  <footer>Edit <code>docs/layers/engine.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

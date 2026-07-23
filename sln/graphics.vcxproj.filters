@@ -10,102 +10,135 @@
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
     <Filter Include="Source Files\graphics">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000001}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\core">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000002}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\graphics\debug">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000002}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\platform">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000004}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\graphics\frame">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000003}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000005}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\graphics\frame\frame_graph">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000004}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000006}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\graphics\pipelines">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000005}</UniqueIdentifier>
+    <Filter Include="Source Files\graphics\frame\passes">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000007}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\graphics\frame\profiling">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000008}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\imgui">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000006}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000009}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\graphics">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000011}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000011}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\core">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000012}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\graphics\debug">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000012}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000013}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\platform">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000014}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\graphics\frame">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000013}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000015}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\graphics\frame\frame_graph">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000014}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000016}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\graphics\pipelines">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000015}</UniqueIdentifier>
+    <Filter Include="Header Files\graphics\frame\passes">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000017}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\graphics\frame\profiling">
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000018}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\engine">
-      <UniqueIdentifier>{g1000001-0001-4000-8000-000000000016}</UniqueIdentifier>
+      <UniqueIdentifier>{b1000001-0001-4000-8000-000000000019}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\src\graphics\buffer.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\pch.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\buffer_manager.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\camera.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp"><Filter>Source Files\graphics\debug</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\mesh_arena.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\device.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\descriptor.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\engine_requirements.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\image.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\instance.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\pipeline.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\shader.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\surface.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\swapchain.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\validation.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\graphics_system.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_sync.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_resources.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\mesh_arena.cpp"><Filter>Source Files\graphics</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\buffer.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\descriptor.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\device.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\image.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\instance.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\pipeline.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\sampler.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\shader.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\surface.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\swapchain.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\core\validation.cpp"><Filter>Source Files\graphics\core</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp"><Filter>Source Files\graphics\debug</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\platform\gpu_platform_common.cpp"><Filter>Source Files\graphics\platform</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\platform\gpu_platform_win32.cpp"><Filter>Source Files\graphics\platform</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\frame_descriptors.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_recorder.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp"><Filter>Source Files\graphics\frame\frame_graph</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\selection_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\sobel_async_pass.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_resources.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_shared_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_sync.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\gpu_frame_publish.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\screenshot.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\selection_state.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\sobel_async_pass.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\frame\picker.cpp"><Filter>Source Files\graphics\frame</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\pipelines\sobel_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\pipelines\cube_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
-    <ClCompile Include="..\src\graphics\pipelines\picker_pipeline.cpp"><Filter>Source Files\graphics\pipelines</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp"><Filter>Source Files\graphics\frame\frame_graph</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\edge_overlay_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\main_scene_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\outline_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\picker_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\sobel_compute_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\sobel_resources.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\profiling\frame_profiler.cpp"><Filter>Source Files\graphics\frame\profiling</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\profiling\timestamp_query_pool.cpp"><Filter>Source Files\graphics\frame\profiling</Filter></ClCompile>
     <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\graphics\pch.h"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\buffer_manager.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\camera.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\engine_requirements.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h"><Filter>Header Files\graphics</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\queue_types.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\buffer_manager.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\engine_requirements.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\mesh_arena.h"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\debug\debug_drawer.h"><Filter>Header Files\graphics\debug</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\graphics_system.hpp"><Filter>Header Files\graphics</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\frame_sync.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\frame_resources.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\mesh_arena.h"><Filter>Header Files\graphics</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\core\queue_types.hpp"><Filter>Header Files\graphics\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\core\sampler.hpp"><Filter>Header Files\graphics\core</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\debug\debug_drawer.h"><Filter>Header Files\graphics\debug</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\platform\gpu_platform.hpp"><Filter>Header Files\graphics\platform</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\frame_descriptors.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\frame_recorder.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\frame_presenter.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\frame\picker.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_resources.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_shared_state.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_sync.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\sobel_async_pass.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\sobel_types.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\pipelines\sobel_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\swapchain_targets.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\vertex_types.hpp"><Filter>Header Files\graphics\frame</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\pipelines\cube_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
-    <ClInclude Include="..\src\graphics\pipelines\picker_pipeline.hpp"><Filter>Header Files\graphics\pipelines</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_graph\frame_task_graph.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\frame_graph\ipass.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\edge_overlay_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\main_scene_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\outline_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\picker_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\sobel_compute_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\sobel_resources.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\profiling\frame_profiler.hpp"><Filter>Header Files\graphics\frame\profiling</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\profiling\timestamp_query_pool.hpp"><Filter>Header Files\graphics\frame\profiling</Filter></ClInclude>
     <ClInclude Include="..\src\engine\engine.hpp"><Filter>Header Files\engine</Filter></ClInclude>
     <ClInclude Include="..\src\engine\engine_identity.hpp"><Filter>Header Files\engine</Filter></ClInclude>
     <ClInclude Include="..\src\engine\system.hpp"><Filter>Header Files\engine</Filter></ClInclude>

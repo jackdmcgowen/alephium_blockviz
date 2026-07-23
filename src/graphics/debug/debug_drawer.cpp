@@ -67,6 +67,48 @@ void DebugDrawer::add_z_plane_quad(float z, float half_extent, const glm::vec4& 
     add_line(v[3].position, v[0].position, edge);
 }
 
+void DebugDrawer::add_z_slab(float z0, float z1, float half_xy, const glm::vec4& color)
+{
+    if (std::abs(z1 - z0) < 1e-4f)
+        return;
+    const float s = half_xy > 1e-4f ? half_xy : 1.f;
+    const float za = z0 < z1 ? z0 : z1;
+    const float zb = z0 < z1 ? z1 : z0;
+
+    // 8 corners of axis-aligned box.
+    const glm::vec3 p[8] = {
+        { -s, -s, za }, { s, -s, za }, { s, s, za }, { -s, s, za }, // z = za
+        { -s, -s, zb }, { s, -s, zb }, { s, s, zb }, { -s, s, zb }, // z = zb
+    };
+    DebugVertex v[8];
+    for (int i = 0; i < 8; ++i)
+        v[i] = { p[i], color };
+
+    // Single winding per face only — double-sided pairs z-fight under alpha blend + depth write
+    // and look like blinking while fading.
+    auto face = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+        const uint32_t idx[6] = { a, b, c, a, c, d };
+        add_mesh(v, 8, idx, 6);
+    };
+    // Outward-ish windings for a right-handed box (viewer may see backfaces when inside).
+    face(0, 3, 2, 1); // za (look toward -Z / older)
+    face(4, 5, 6, 7); // zb
+    face(0, 1, 5, 4); // -Y
+    face(3, 7, 6, 2); // +Y
+    face(0, 4, 7, 3); // -X
+    face(1, 2, 6, 5); // +X
+
+    // Wire silhouette (12 edges) — no depth fight with fill.
+    const glm::vec4 edge(color.r, color.g, color.b, std::min(1.f, color.a * 2.4f));
+    static const int eidx[12][2] = {
+        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, // za ring
+        { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 }, // zb ring
+        { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, // pillars
+    };
+    for (const auto& e : eidx)
+        add_line(p[e[0]], p[e[1]], edge);
+}
+
 void DebugDrawer::append_tri(uint32_t i0, uint32_t i1, uint32_t i2)
 {
     indices_.push_back(i0);

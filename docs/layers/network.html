@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Network layer</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a class="current" href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>Network layer</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="network.md"><code>network.md</code></a>.</p>
+<p>Ingest and confirmation library <strong>network</strong> (<code>src/network/</code>). Implements <code>INetworkSystem</code>; Alephium policy in <code>alephium/</code>.</p>
+<h2>Overview</h2>
+<p>Network owns curl lifecycle, the poller thread, REST helpers (<code>commands.c</code>), and <code>AlephiumAdapter</code>: lookback poll, tip identify, per-lane confirm walk, steady poll, main-chain cache, fetch pool, and detail-store slim/refill. It writes graph + confirmation into <code>BlockScene</code>. It does <strong>not</strong> choose cube colors or run Vulkan.</p>
+<h2>Ownership boundary</h2>
+<table>
+<tr><th>Owns</th><th>Must not own</th></tr>
+<tr><td><code>INetworkSystem</code> / poller thread</td><td>Vulkan, render thread</td></tr>
+<tr><td>REST poll watermark + overlap</td><td>ImGui chrome layout</td></tr>
+<tr><td><code>MainChainCache</code> (network thread only)</td><td>Product green/cyan/orange semantics</td></tr>
+<tr><td><code>mark_confirmed</code> dual-write into scene</td><td>Explorer URL chrome (app uses domain helper)</td></tr>
+<tr><td><code>AlphDetailStore</code> upsert / slim / pin</td><td>Cube layout math</td></tr>
+<tr><td>Domain switch (Mainnet ↔ Testnet)</td><td>Graphics pipelines</td></tr>
+</table>
+<h2>Current surface</h2>
+<table>
+<tr><th>Path</th><th>Role</th></tr>
+<tr><td><code>network_system.cpp</code></td><td>Concrete <code>INetworkSystem</code> (curl global, start/stop poller, <code>switch_domain</code>)</td></tr>
+<tr><td><code>network_domain.hpp</code></td><td><code>NetworkDomain</code>, defaults, URL resolve, <code>NetworkStatus</code> labels</td></tr>
+<tr><td><code>commands.c</code> / <code>commands.h</code></td><td>Alephium REST helpers</td></tr>
+<tr><td><code>alephium/network_poller.*</code></td><td>Thread loop: poll / drain verify / HUD</td></tr>
+<tr><td><code>alephium/alephium_adapter.*</code></td><td>Phase machine, confirm, flood, stats</td></tr>
+<tr><td><code>alephium/main_chain_cache.*</code></td><td><code>is_main</code> cache + hot-zone priority helpers</td></tr>
+<tr><td><code>alephium/block_fetch_pool.*</code></td><td>Concurrent hash fetches</td></tr>
+<tr><td><code>alephium/alph_detail_store.*</code></td><td>Full block detail + PR11 slim policy</td></tr>
+<tr><td><code>alephium/segment_disk_cache.*</code></td><td>Verified segment gzip cache under <code>%LOCALAPPDATA%</code>; bootstrap before network</td></tr>
+<tr><td><code>fake/fake_chain_simulator.*</code></td><td>Offline Debug domain: synthetic 16-lane growth + confirms</td></tr>
+</table>
+<p><strong>Factory:</strong> <code>create_network_system(BlockScene&amp;, IEngine&amp;)</code> / <code>destroy_network_system</code> (declared in <code>engine/engine.hpp</code>).</p>
+<h3>Adapter phases</h3>
+<pre><code>BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady  (UI: &quot;Stable&quot;)</code></pre>
+<table>
+<tr><th>Phase</th><th>Behavior (summary)</th></tr>
+<tr><td><strong>BootstrapPoll</strong></td><td>Live-first: exit when <strong>live window tip-ready</strong> (win1 best-effort; history gaps do not block)</td></tr>
+<tr><td><strong>IdentifyTips</strong></td><td>Establish tips / main-chain identity; poll may be gated</td></tr>
+<tr><td><strong>BfsTrace</strong></td><td>Parallel BFS confirm (<code>N=2G−1</code> <strong>logical workers</strong>, not OS threads): phase A diagonal tips; phase B remaining. Enters Steady without waiting for all dep fills (fills continue async).</td></tr>
+<tr><td><strong>Steady</strong></td><td>Interval polls; BFS maintenance. HUD primary label <strong>Stable</strong>. History gaps / missing deps are a <strong>secondary</strong> status line, not Bootstrapping.</td></tr>
+</table>
+<p><strong>Status HUD:</strong> primary = live product readiness (<strong>Stable</strong> / History / Catching up / …). Secondary = <code>status_detail</code> (e.g. filling deps, history incomplete near camera). Incomplete older chunks never demote Stable back to Bootstrapping.</p>
+<p>Additional policy themes (see header comments on <code>AlephiumAdapter</code>): <strong>anchor + forward novelty</strong> for live main, free-main dep fill, live vs historical fetch rules.</p>
+<p><strong>DAG missing fill:</strong> budgeted walk from confirmed tips collects broken edges (parent in graph, dep missing). <strong>≥2</strong> unique missing → inclusive time range <code>[min_parent_ts, max_parent_ts]</code> (+ slack, split at max patch) on the priority hole queue. <strong>Exactly 1</strong> missing → sparse <strong>single-hash queue</strong>, drained only after DepCritical ranges are idle (so ranges can resolve clusters first). Exit path: host hides the window (<code>SW_HIDE</code>) before engine stop for responsive close.</p>
+<p><strong>Live main-chain policy (simplified):</strong></p>
+<ol>
+<li><strong>Anchor:</strong> refresh network tip heights → tip hash per lane → mark Main and set green <code>H_c</code> (<code>mark_scene_anchor_</code>). Tip proof: hashes-at-height singleton and/or one <code>is_main</code> for the tip only.</li>
+<li><strong>Forward novelty:</strong> any admitted block whose <strong>all known deps are already Main</strong> is marked Main (<code>try_forward_promote_</code>) — <strong>no</strong> per-hop <code>is_main</code>.</li>
+<li><strong>Green tip steps:</strong> sequential <code>H_c+1</code> when that hash is Main; jump only via <strong>network tip</strong> anchor (not lagging bag).</li>
+<li><strong>Spoof / conflict:</strong> <code>is_main</code> / replace path only when tip is not main or duplicate competitor; not a safety-critical verifier (explorer remains deep truth).</li>
+<li><strong>Disk bootstrap:</strong> bag-only + <code>clear_sequential_frontiers</code>; live anchors re-establish green tips.</li>
+</ol>
+<p><strong>Live poll vs camera:</strong> while lookback index <code>k &gt; 0</code> (camera beyond the live segment), do <strong>not</strong> force-poll window 0 or start new live tip seeds; historical windows <code>1..k</code> still load. On return to <code>k == 0</code>, if <code>poll_interval</code> has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).</p>
+<p><strong>Chunked timeline:</strong> shared <strong>64s</strong> subsegment grid (disk + HTTP); G-segment = <strong>640s</strong> (exactly 10 subsegments). Live tip poll = full open genesis cell <code>[floor(now), next_boundary)</code>. History GETs stay <strong>strictly older</strong> (<code>to ≤ live_open_from</code>). Each pump: <strong>live first</strong>, then <strong>camera 64s subsegment → next unfilled older</strong> within the admit/render ring (<strong>7 G</strong>); disk before HTTP. <strong>Newer</strong> toward live only after older-in-ring has no holes (avoids forward jumps when the crawl hits the ring edge). Resume cursor keeps the older frontier across ring expansion. <strong>≤4</strong> concurrent interval GETs; multiple subsegs per G allowed. <strong>429/5xx</strong> → exponential backoff.</p>
+<p><strong>Soft RAM eviction:</strong> pressure prune outside the admit ring is <strong>soft</strong> (<code>BlockScene::prune(..., soft_evict=true)</code>). Presenter must <strong>not</strong> play red death VFX for those leaves (disk re-admit on return).</p>
+<p><strong>Dual-segment + tip priority:</strong> Bootstrap pumps windows 0 and 1, but <strong>gates IdentifyTips on live window tip-ready</strong> (not perfect dual history). Win1 continues in background. Live tip seeds / deep history still prefer Steady + live window 0 filled. <strong>View/fetch ring always follows <code>cam_k</code></strong>.</p>
+<p><strong>Terminology:</strong> <strong>G</strong> = number of <strong>groups</strong> (<code>ALPH_NUM_GROUPS</code>, 4); shards = G×G lanes; each block has <strong>2G−1</strong> deps. Timeline <strong>lookback k</strong> is tip-relative (<code>k=0</code> live tip window, higher = older). Do not confuse k with groups. Window <strong>ms bounds</strong> are genesis-aligned (<code>G_live − k</code>); minimap Z uses those bounds so bars match cubes/planes.</p>
+<p><strong>Three-ring segment model:</strong></p>
+<table>
+<tr><th>Ring</th><th>Size</th><th>Behavior</th></tr>
+<tr><td><strong>Load</strong></td><td><strong>15</strong> G-windows, camera-centered</td><td>Disk-first (<code>try_fill</code> / bootstrap); network body only for holes. Chunked disk admit on boot (no bulk hitch).</td></tr>
+<tr><td><strong>Render</strong></td><td><strong>7</strong> (app)</td><td>Draw corridor only; see app rule book</td></tr>
+<tr><td><strong>Live poll</strong></td><td><strong>64s</strong> open tip subseg</td><td>Genesis-aligned open slot; history never overlaps it</td></tr>
+</table>
+<p>Fetch priority: <strong>live open 64s cell first</strong> → disk admit for visible ring → network holes starting at <strong>camera subseg</strong>, then next unfilled (≤<strong>4</strong> concurrent interval GETs). History never overlaps the open tip cell. Minimap labels genesis segment numbers (<code>#G_seg</code>).</p>
+<p><strong>History mode:</strong> when <code>cam_k ≥ 1</code> (live outside the sliding window), HUD <strong>Status = History</strong>; <strong>halt</strong> live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.</p>
+<p><strong>Load-once 64s chunks:</strong> successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip <code>force_newest</code> on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.</p>
+<p><strong>Return-to-live catch-up:</strong> when camera returns to k=0 after History, fill missing ring sub-segments history-style (high budget, most-incomplete window first) with <strong>Status = Catching up</strong>, then tip refresh/seeds.</p>
+<p><strong>Cache / retention:</strong> keep loaded blocks when the view slides away (draw cull only). Soft/hard RAM warnings; last-resort oldest-node prune near ~2 GB. <strong>Segment disk cache (design):</strong> verified BFS windows → <code>%LOCALAPPDATA%</code> per domain; bootstrap load before network — <a href="../segment-disk-cache.md">segment-disk-cache.md</a>.</p>
+<p><strong>Timeline origin:</strong> sticky session origin (not min loaded block ts) so attached camera Z does not jump when history admits.</p>
+<h3>Domains</h3>
+<table>
+<tr><th>Domain</th><th>Selectable</th><th>Notes</th></tr>
+<tr><td>Mainnet</td><td>Yes</td><td>Default URL / config match</td></tr>
+<tr><td>Testnet</td><td>Yes</td><td>Hot switch supported</td></tr>
+<tr><td>Debug</td><td><strong>Yes</strong></td><td>Offline <code>FakeChainSimulator</code> (<code>debug://fake-chain</code>); no HTTP</td></tr>
+</table>
+<h3>Confirmation bridge</h3>
+<ul>
+<li><strong>Network thread</strong> calls <code>BlockScene::mark_confirmed</code> (self-locking) on verify success, poll re-admit of cached main, replace paths, etc.</li>
+<li><strong><code>MainChainCache</code> stays network-only</strong> — never shared with the render thread.</li>
+<li><strong>App presenter</strong> reads <code>is_confirmed_locked</code> / frontier helpers under the scene mutex already held in <code>prepare</code>.</li>
+<li>Erase confirmed on remove / uncle eviction (domain scene helpers).</li>
+</ul>
+<h3>Detail store (PR11 — landed)</h3>
+<ul>
+<li>Parse-time upsert of full <code>AlphBlock</code>.</li>
+<li>Slim unpinned txn payloads; pin selection for full detail; refill via engine/adapter when inspector needs payloads again.</li>
+<li><code>txn_count</code> survives slim for billboards / multi-tx filter.</li>
+</ul>
+<h2>Goals</h2>
+<ol>
+<li>Reliable BlockFlow ingest from config/node URLs with <strong>success-only</strong> watermark advance.</li>
+<li>Proven main-chain confirmation in <code>BlockScene</code> (dual-write + poll re-admit).</li>
+<li>Hot Mainnet ↔ Testnet switch that resets scene/poller without process teardown.</li>
+<li>Inspector continuity (<code>AlphDetailStore</code> + refill).</li>
+<li>Keep REST/cJSON/curl out of graphics and app chrome TUs.</li>
+<li>HUD observability: status, lookback windows, frontier lanes, open walks (<code>publish_hud</code> → scene → snapshot).</li>
+</ol>
+<h2>Non-goals</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>Auth / retry / multi-endpoint HA platform</td><td>Modularization non-goal; REST poll is v1</td></tr>
+<tr><td>WebSocket as prerequisite</td><td>Optional later; REST default</td></tr>
+<tr><td>Product visual semantics</td><td><strong>App</strong></td></tr>
+<tr><td>Vulkan / render thread</td><td><strong>Graphics</strong></td></tr>
+<tr><td>Second real chain in the same breath as FakeChain</td><td>Prove multi-adapter with Debug first</td></tr>
+<tr><td>Changing uncle/orphan product policy in docs</td><td>Code policy stays until an explicit product change</td></tr>
+<tr><td>Structured logging framework</td><td>printf + HUD OK</td></tr>
+</table>
+<h2>Plan</h2>
+<table>
+<tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
+<tr><td><strong>Done</strong></td><td>Offline Debug / FakeChain simulator</td><td><code>src/network/fake/fake_chain_simulator.*</code></td></tr>
+<tr><td><strong>Done</strong></td><td>Unit tests (no GPU)</td><td><code>vnv/mod/tests/</code> / <code>mod_domain</code> via <code>run_vnv.ps1</code></td></tr>
+<tr><td><strong>Done</strong></td><td>Live poll vs camera lookback <code>k</code></td><td>Skip window 0 while <code>k&gt;0</code>; resync on return</td></tr>
+<tr><td><strong>Done</strong></td><td>Chunked timeline interval polls</td><td><strong>64s</strong> grid / <strong>640s</strong> G; budgeted pump</td></tr>
+<tr><td><strong>Done</strong></td><td>Camera-subseg history walk</td><td>inflight starts at eye 64s cell → next unfilled</td></tr>
+<tr><td><strong>Done</strong></td><td>Three-ring segments</td><td>load <strong>15</strong> / admit+render <strong>7</strong> / live open <strong>64s</strong></td></tr>
+<tr><td><strong>Done</strong></td><td>HttpIoPool + async interval GETs</td><td>Workers overlap timeline RTT; <code>mod_network</code></td></tr>
+<tr><td><strong>P1</strong></td><td>Async is_main / hashes via pool</td><td>Confirm path not RTT-serialized</td></tr>
+<tr><td><strong>Done</strong></td><td>Retention / prune (branch)</td><td>Poller min_ts + soft node cap</td></tr>
+<tr><td><strong>Standing</strong></td><td>Keep phases, dual-write, thread contract accurate</td><td>Hygiene when adapter policy shifts</td></tr>
+<tr><td><strong>P1</strong></td><td>Config / URL resolution notes</td><td><code>config.json</code> array + <code>network_domain_resolve_url</code></td></tr>
+<tr><td><strong>P2</strong></td><td>Optional websocket tip stream</td><td>Focused feature, not a networking rewrite</td></tr>
+<tr><td><strong>P2</strong></td><td>Second real chain adapter</td><td>After FakeChain proves wiring</td></tr>
+<tr><td><strong>In progress</strong></td><td>Hole-priority subsegments + variable patches</td><td>Disk per-chunk presence; dep-critical hole queue before newest-first bulk; variable interval spans</td></tr>
+</table>
+<h2>Interfaces</h2>
+<p><strong>Inbound</strong></p>
+<ul>
+<li>Host/engine: <code>configure(NetworkSystemConfig)</code>, lifecycle, <code>switch_domain(domain, base_url)</code></li>
+<li>App domain combo → <code>IEngine::switch_network_domain</code> → network system</li>
+</ul>
+<p><strong>Outbound</strong></p>
+<ul>
+<li><code>BlockScene</code>: add/remove blocks, <code>mark_confirmed</code>, network HUD bag, detail store</li>
+<li>Engine: selection detail refill coordination</li>
+</ul>
+<p><strong>HTTP</strong></p>
+<ul>
+<li><code>commands.c</code> against <code>base_url</code>; curl global init/cleanup in <code>NetworkSystem</code></li>
+</ul>
+<h3>Threading</h3>
+<table>
+<tr><th>Thread</th><th>Work</th></tr>
+<tr><td>Network / poller</td><td>Policy: poll schedule, drain results, admit, confirm, cache, scene writes</td></tr>
+<tr><td><strong>HttpIoPool workers</strong> (default 6)</td><td>REST GETs only (interval chunks, block-by-hash, …); private curl / transport</td></tr>
+<tr><td>UI / render</td><td>Must not call into <code>MainChainCache</code>; domain switch may <strong>block</strong> until poller restarted</td></tr>
+</table>
+<p>Timeline <code>blocks-with-events</code> chunks are <strong>enqueued</strong> to the pool (inflight cap ~4) so bootstrap/history RTT overlaps; poller <strong>admits</strong> on drain. VnV: <code>vnv/mod/tests/network/</code> (<code>mod_network</code>).</p>
+<h2>Related</h2>
+<ul>
+<li><a href="index.html">layers/README.md</a> — confirmation split table</li>
+<li><a href="app.html">app.md</a> — presentation of confirmed state</li>
+<li><a href="engine.html">engine.md</a> — <code>INetworkSystem</code> on facade</li>
+<li>Historical: <a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> (dual-write matrix still conceptually valid; paths evolved to <code>src/network/alephium/</code>)</li>
+<li>Historical: <a href="../graphics-modularization-design.md">graphics-modularization-design.md</a> (adapter + detail store goals)</li>
+</ul>
+  <footer>Edit <code>docs/layers/network.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

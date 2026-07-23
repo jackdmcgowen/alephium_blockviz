@@ -37,15 +37,17 @@ Network owns curl lifecycle, the poller thread, REST helpers (`commands.c`), and
 ### Adapter phases
 
 ```text
-BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady
+BootstrapPoll → IdentifyTips → BfsTrace (parallel BFS) → Steady  (UI: "Stable")
 ```
 
 | Phase | Behavior (summary) |
 |-------|---------------------|
-| **BootstrapPoll** | First lookback window poll |
+| **BootstrapPoll** | Live-first: exit when **live window tip-ready** (win1 best-effort; history gaps do not block) |
 | **IdentifyTips** | Establish tips / main-chain identity; poll may be gated |
-| **BfsTrace** | Parallel BFS confirm (`N=2G−1` workers): phase A seeds diagonal tips `[g→g]` only; phase B seeds remaining tips only if not already visited. Cross-shard deps. Pool-only expand; live holes hash-fill, history time-slots. Restart when segment fully loads. |
-| **Steady** | Interval polls; BFS maintenance + camera-unlock restart |
+| **BfsTrace** | Parallel BFS confirm (`N=2G−1` **logical workers**, not OS threads): phase A diagonal tips; phase B remaining. Enters Steady without waiting for all dep fills (fills continue async). |
+| **Steady** | Interval polls; BFS maintenance. HUD primary label **Stable**. History gaps / missing deps are a **secondary** status line, not Bootstrapping. |
+
+**Status HUD:** primary = live product readiness (**Stable** / History / Catching up / …). Secondary = `status_detail` (e.g. filling deps, history incomplete near camera). Incomplete older chunks never demote Stable back to Bootstrapping.
 
 Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + forward novelty** for live main, free-main dep fill, live vs historical fetch rules.
 
@@ -61,9 +63,11 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** each lookback segment (default 10 min) is filled with budgeted **~60s** `blocks-with-events` GETs (newest-first). Steady live refresh re-requests only the **newest** chunk(s), not the full window. `drain_verify` pumps at most one chunk every ~400ms so blocks pop in between Steady polls. HUD `load_ratio` blends chunk progress with density.
+**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = full open genesis cell `[floor(now), next_boundary)`. History GETs stay **strictly older** (`to ≤ live_open_from`). Each pump: **live first**, then **camera 64s subsegment → next unfilled older** within the admit/render ring (**7 G**); disk before HTTP. **Newer** toward live only after older-in-ring has no holes (avoids forward jumps when the crawl hits the ring edge). Resume cursor keeps the older frontier across ring expansion. **≤4** concurrent interval GETs; multiple subsegs per G allowed. **429/5xx** → exponential backoff.
 
-**Dual-segment + tip priority:** Bootstrap high-budget fills **windows 0 then 1** before IdentifyTips. Live tip seeds / BFS still wait for Steady + live window 0 fully chunk-filled. **View/fetch ring always follows `cam_k`** (not frozen to `{0,1,2}` during tip pipeline) so paging into history past k2 still enqueues interval chunks.
+**Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
+
+**Dual-segment + tip priority:** Bootstrap pumps windows 0 and 1, but **gates IdentifyTips on live window tip-ready** (not perfect dual history). Win1 continues in background. Live tip seeds / deep history still prefer Steady + live window 0 filled. **View/fetch ring always follows `cam_k`**.
 
 **Terminology:** **G** = number of **groups** (`ALPH_NUM_GROUPS`, 4); shards = G×G lanes; each block has **2G−1** deps. Timeline **lookback k** is tip-relative (`k=0` live tip window, higher = older). Do not confuse k with groups. Window **ms bounds** are genesis-aligned (`G_live − k`); minimap Z uses those bounds so bars match cubes/planes.
 
@@ -73,13 +77,13 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 |------|------|----------|
 | **Load** | **15** G-windows, camera-centered | Disk-first (`try_fill` / bootstrap); network body only for holes. Chunked disk admit on boot (no bulk hitch). |
 | **Render** | **7** (app) | Draw corridor only; see app rule book |
-| **Live poll** | **~8s** tip edge | `force_newest` uses last block period when live G has body; full 60s chunks for cold fill |
+| **Live poll** | **64s** open tip subseg | Genesis-aligned open slot; history never overlaps it |
 
-Fetch priority: live 8s edge → load-ring disk → load-ring network. History dep-hole ranges are **history-only** (not live tip path). Minimap labels genesis segment numbers (`#G_seg`).
+Fetch priority: **live open 64s cell first** → disk admit for visible ring → network holes starting at **camera subseg**, then next unfilled (≤**4** concurrent interval GETs). History never overlaps the open tip cell. Minimap labels genesis segment numbers (`#G_seg`).
 
 **History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
 
-**Load-once 60s chunks:** successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip `force_newest` on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.
+**Load-once 64s chunks:** successful policy admit (including valid empty time spans) marks the chunk forever. Re-GET only on HTTP/parse failure (forget completed), hard-prune invalidation, or live tip `force_newest` on the open edge. Adapter is the sole hard-prune owner and clears chunk dedupe for dropped ranges.
 
 **Return-to-live catch-up:** when camera returns to k=0 after History, fill missing ring sub-segments history-style (high budget, most-incomplete window first) with **Status = Catching up**, then tip refresh/seeds.
 
@@ -136,8 +140,9 @@ Fetch priority: live 8s edge → load-ring disk → load-ring network. History d
 | **Done** | Offline Debug / FakeChain simulator | `src/network/fake/fake_chain_simulator.*` |
 | **Done** | Unit tests (no GPU) | `vnv/mod/tests/` / `mod_domain` via `run_vnv.ps1` |
 | **Done** | Live poll vs camera lookback `k` | Skip window 0 while `k>0`; resync on return |
-| **Done** | Chunked timeline interval polls | ~60s chunks, budgeted pump, newest-first |
-| **Done** | Dual-segment bootstrap + triple-buffer ring | ≤3 active segments; admit-driven progress |
+| **Done** | Chunked timeline interval polls | **64s** grid / **640s** G; budgeted pump |
+| **Done** | Camera-subseg history walk | inflight starts at eye 64s cell → next unfilled |
+| **Done** | Three-ring segments | load **15** / admit+render **7** / live open **64s** |
 | **Done** | HttpIoPool + async interval GETs | Workers overlap timeline RTT; `mod_network` |
 | **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
 | **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |

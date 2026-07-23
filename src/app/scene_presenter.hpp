@@ -8,7 +8,7 @@
 //   green    — per-lane frontier tip H_c (or walk-anim display) + full blockDeps arrows
 //   red      — unconfirmed height>H_c that deps a domain frontier tip + link arrows into tip
 //   orange   — missing-dep incompletes (not green/red unconfirmed)
-//   gold     — selection + full BFS block-dep fan from selected root
+//   gold     — selection + first-order (1-hop) deps; Replay re-grows hop-1 only
 //   red      — removal death fade
 //   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
 #include "domain/block_scene.hpp"
@@ -46,25 +46,23 @@ private:
     static constexpr float  kTipSolidAlpha = 0.90f;
     static constexpr float  kTipSecondaryAlpha = 0.40f; // floor > 0
     static constexpr uint32_t kMaxTipDepArrows = 2048;
-    // Selection BFS dep fan: multi-segment DAG + snappy level-wave anim.
-    static constexpr int    kMaxSelDepNodes       = 4096;
-    static constexpr int    kMaxSelDepEdges       = 8192;
-    static constexpr int    kMaxSelDepArrows      = 8192; // match edge cap (own budget)
-    static constexpr float  kSelDepGrowSec        = 0.08f;
-    static constexpr float  kSelDepLevelStagger   = 0.012f; // delay per BFS depth
-    static constexpr float  kSelDepEdgeStagger    = 0.0015f; // within-level micro delay
-    static constexpr float  kSelDepMaxStaggerSec  = 0.25f;  // hard cap — fan never waits seconds
+    // Selection first-order deps only (Replay re-grows hop-1; click is instant).
+    static constexpr int    kMaxSelDepNodes       = 128;
+    static constexpr int    kMaxSelDepEdges       = 64;
+    static constexpr int    kMaxSelDepArrows      = 64;
+    static constexpr float  kSelDepGrowSec        = 0.12f;
+    static constexpr float  kSelDepEdgeStagger    = 0.008f;
 
     // Growing → Held → Fading (replaced) | Dying (block removed). Never re-grow.
     enum class ArrowPhase : uint8_t { Growing, Held, Fading, Dying };
     enum class TipTier : uint8_t { Primary, Secondary, Unconfirmed };
 
-    // Full BFS of block deps from selected root (static gold fan).
+    // First-order deps from selected root (gold arrows).
     struct SelectionDepEdge
     {
         std::string from;
         std::string to;
-        int         depth = 0; // depth of `from` (edge spans depth → depth+1)
+        int         depth = 0; // always 0 for 1-hop
     };
 
     struct SelectionDepTrace
@@ -118,12 +116,15 @@ private:
                                 const std::unordered_map<std::string, glm::vec3>& positions,
                                 const std::unordered_map<std::string, glm::vec3>& block_colors,
                                 const std::unordered_set<std::string>& live_nodes,
+                                const std::unordered_set<std::string>& soft_evicted,
                                 const std::unordered_set<std::string>& drawn_set,
                                 const std::unordered_set<std::string>& green_display,
                                 const std::unordered_set<std::string>& cyan_owners,
                                 const std::unordered_set<std::string>& unconfirmed_tips,
                                 const std::unordered_set<std::string>& frontier_domain,
-                                float tip_len, float tip_rad, float shaft_r, float clearance);
+                                float tip_len, float tip_rad, float shaft_r, float clearance,
+                                const Frustum* frustum,
+                                const glm::vec3* camera_eye);
 
     // Per-lane previous primary tip hash (for secondary translucent fade).
     std::string prev_primary_tip_[BlockScene::kLaneCount]{};
@@ -135,6 +136,7 @@ private:
 
     void update_death_and_walk_(const std::unordered_set<std::string>& live_nodes,
                                 const std::unordered_map<std::string, glm::vec3>& positions,
+                                const std::unordered_set<std::string>& soft_evicted,
                                 float now);
 
     float ephemeral_grow_u_(const std::string& key, float stagger_delay,
@@ -142,11 +144,12 @@ private:
                             float grow_sec = kArrowGrowSec);
 
     void clear_selection_deps_();
-    void rebuild_selection_dep_bfs_(const std::string& root_hash);
+    // One-hop deps only. animate_grow: true = Replay re-grow; false = instant on click.
+    void rebuild_selection_dep_one_hop_(const std::string& root_hash, bool animate_grow);
     void collect_selection_dep_force_(std::unordered_set<std::string>& out) const;
     // Shard (chain_idx) for hash; 255 if unknown.
     int chain_idx_for_hash_(const std::string& hash) const;
-    // Deps of node sorted by chain_idx then hash (stable BFS expand + gold order).
+    // Deps of node sorted by chain_idx then hash (stable gold order).
     std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
 
     BlockScene& scene_;
@@ -164,6 +167,18 @@ private:
     std::unordered_map<int, float> seg_fade_alpha_;
     float last_seg_fade_sec_ = -1.f;
 
+    // Network history fill slabs: gray while queued; fade α after fulfilled.
+    // Once fade completes, from_ms is retired so HUD lag cannot re-spawn a flash.
+    struct FillSlabAnim
+    {
+        int64_t from_ms = 0;
+        int64_t to_ms   = 0;
+        float   fade_start_sec = -1.f; // <0 = active queued; ≥0 = fading out
+    };
+    std::unordered_map<int64_t, FillSlabAnim> fill_slab_anims_; // key = from_ms
+    std::unordered_set<int64_t> fill_slab_retired_;              // permanent fade done
+    static constexpr float kFillSlabFadeSec = 0.45f;
+
     // Rebuild layout only when graph generation / timeline origin change.
     struct LayoutCache
     {
@@ -180,7 +195,7 @@ private:
     };
     LayoutCache layout_cache_;
 
-    // Selection full BFS block-dep fan.
+    // Selection first-order dep fan.
     SelectionDepTrace sel_dep_;
     uint64_t          last_walk_replay_gen_ = 0;
 };

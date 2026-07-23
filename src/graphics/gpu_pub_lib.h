@@ -75,6 +75,14 @@ struct FrameSubmit
     uint64_t           client_seq     = 0; // correlates with pick map
 };
 
+// Scene draw filters (app UI → graphics → FrameSourceInput). 0 / false = off.
+struct SceneViewFilters
+{
+    bool   multi_tx_only     = false; // txn_count > 1 only
+    double min_alph          = 0.0;   // human ALPH; 0 = off
+    bool   unconfirmed_only  = false; // hide main-chain confirmed
+};
+
 struct PickQuery
 {
     uint32_t mouse_x = 0;

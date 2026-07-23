@@ -34,19 +34,22 @@ struct UiSnapshot
     int                   confirmed_tip_count  = 0;
     // Highest sequential confirmed height per lane (chainFrom*4+chainTo). -1 = not initialized.
     int                   confirmed_height_by_lane[16]{};
-    // Adapter confirm phase (0 Bootstrap, 1 Identify tips, 2 Confirm walk, 3 Steady).
+    // Adapter confirm phase (0 Bootstrap, 1 Identify tips, 2 Confirm walk, 3 Steady/Stable).
     int                   trace_phase  = 0;
     int                   trace_offset = 0; // lanes still walking confirm path
     uint64_t              seq                  = 0;
 
     // --- Network left rail ---
     int         net_domain = 0;          // NetworkDomain
-    int         net_status = 0;          // NetworkStatus
+    int         net_status = 0;          // NetworkStatus (Steady label = "Stable")
     char        net_base_url[160]{};
+    char        net_status_detail[96]{}; // secondary: gaps / deps (primary stays Stable)
     int         lookback_windows_done = 0;
     int         lookback_windows_need = 1;
     int         lanes_with_frontier   = 0;
     int         open_confirm_walks    = 0;
+    int         pending_dep_fills     = 0;
+    int         timeline_holes        = 0;
     int         tip_height_by_lane[16]{};
     int         stats_api_is_main     = 0;
     int         stats_fetch_admitted  = 0;

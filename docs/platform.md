@@ -21,9 +21,9 @@ src/app/platform/
   app_platform_linux.cpp     # GLFW host + F11/Esc
 
 src/graphics/platform/
-  gfx_platform.hpp           # surface, client size, ImGui platform, screenshot, log
-  gfx_platform_win32.cpp
-  gfx_platform_linux.cpp     # GLFW surface, ImGui_ImplGlfw, stderr log
+  gpu_platform.hpp           # surface, client size, ImGui platform, screenshot, log
+  gpu_platform_win32.cpp
+  gpu_platform_linux.cpp     # GLFW surface, ImGui_ImplGlfw, stderr log
 
 src/network/platform/
   net_platform.hpp           # cache root dir, process private bytes
@@ -43,7 +43,7 @@ src/network/platform/
 ```text
 # Audits (repo root)
 python3 scripts/check_pch.py              # MSVC PCH first-include rule
-python3 scripts/check_include_boundary.py # app must not include Vulkan / gfx_platform.hpp
+python3 scripts/check_include_boundary.py # app must not include Vulkan / gpu_platform.hpp
 ```
 
 ### Checklist: new platform `.cpp`
@@ -57,7 +57,7 @@ python3 scripts/check_include_boundary.py # app must not include Vulkan / gfx_pl
 Linux steps: [linux.md](linux.md).  
 VnV (unit / system): [vnv/TESTING.md](../vnv/TESTING.md) · CMake targets `mod_domain` / `mod_network` / `int_visual` + `scripts/run_vnv.sh`.
 
-**Headless:** `EngineCreateInfo.headless` → `VK_EXT_headless_surface` (no OS window). Screenshots use GPU swapchain readback (`TRANSFER_SRC` + `gfx_platform_write_png_rgba`). Shared helpers in `gfx_platform_common.cpp`.
+**Headless:** `EngineCreateInfo.headless` → `VK_EXT_headless_surface` (no OS window). Screenshots use GPU swapchain readback (`TRANSFER_SRC` + `gpu_platform_write_png_rgba`). Shared helpers in `gpu_platform_common.cpp`.
 
 Never link both `*_win32` and `*_linux` into the same target. GLFW is linked on Linux/CMake only (not the MSVC product).
 
@@ -68,11 +68,11 @@ The **app** MSVC project does **not** add `$(VULKAN_SDK)\Include`. Including any
 | Consumer | May include |
 |----------|-------------|
 | **app** (product + harnesses) | `gpu_pub_lib.h`, `app/platform/app_platform.hpp`, engine public APIs |
-| **app platform** `*_win32` / `*_linux` | OS headers + **forward decls** of thin graphics hooks — **not** `gfx_platform.hpp` today |
-| **graphics** product TUs | `gfx_platform.hpp`, Vulkan, layer pch |
+| **app platform** `*_win32` / `*_linux` | OS headers + **forward decls** of thin graphics hooks — **not** `gpu_platform.hpp` today |
+| **graphics** product TUs | `gpu_platform.hpp`, Vulkan, layer pch |
 | **network** product TUs | `net_platform.hpp`, curl/cJSON, layer pch |
 
-**Incident (2026-07):** `app_platform_*.cpp` included `graphics/platform/gfx_platform.hpp` (which includes Vulkan) → Windows app link/compile broke. Fix: forward-declare `gfx_platform_configure_headless(...)` in the app platform TU (linked via `graphics.lib`). Longer-term: split a Vulkan-free host-hooks header (see [ROADMAP](ROADMAP.md) P1).
+**Incident (2026-07):** `app_platform_*.cpp` included `graphics/platform/gpu_platform.hpp` (which includes Vulkan) → Windows app link/compile broke. Fix: forward-declare `gpu_platform_configure_headless(...)` in the app platform TU (linked via `graphics.lib`). Longer-term: split a Vulkan-free host-hooks header (see [ROADMAP](ROADMAP.md) P1).
 
 ## Dual-track smoke
 
@@ -87,7 +87,7 @@ Linux CMake/CI green does **not** prove Windows. After any change under `src/*/p
 
 ## Contracts
 
-- **App** owns the event loop and fullscreen; graphics only observes client size via `gfx_platform_get_window_size`.
+- **App** owns the event loop and fullscreen; graphics only observes client size via `gpu_platform_get_window_size`.
 - **Graphics** public types stay Vulkan-free (`gpu_pub_lib.h`); native handles remain `void*` in `EngineCreateInfo`.
 - **Network** uses `net_platform_cache_root()` + `std::filesystem` for paths (no hard-coded separators).
 

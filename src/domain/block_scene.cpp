@@ -136,7 +136,15 @@ bool BlockScene::remove_block(const std::string& hash)
     return true;
 }
 
-size_t BlockScene::prune(int64_t min_timestamp_ms, size_t max_nodes)
+std::unordered_set<NodeId> BlockScene::take_soft_evicted_locked()
+{
+    // Caller holds mu_ (e.g. ScenePresenter::prepare).
+    std::unordered_set<NodeId> out;
+    out.swap(soft_evicted_pending_);
+    return out;
+}
+
+size_t BlockScene::prune(int64_t min_timestamp_ms, size_t max_nodes, bool soft_evict)
 {
     std::lock_guard<std::mutex> lock(mu_);
 
@@ -200,6 +208,13 @@ size_t BlockScene::prune(int64_t min_timestamp_ms, size_t max_nodes)
 
     if (drop.empty())
         return 0;
+
+    if (soft_evict)
+    {
+        for (const NodeId& id : drop)
+            if (!id.empty())
+                soft_evicted_pending_.insert(id);
+    }
 
     GraphDelta delta;
     delta.remove_nodes = drop;
@@ -671,6 +686,15 @@ void BlockScene::set_network_hud(const NetworkHud& hud)
 {
     std::lock_guard<std::mutex> lock(mu_);
     network_hud_ = hud;
+}
+
+void BlockScene::set_pending_fill_slabs(const NetworkHud::PendingFillSlab* slabs, int count)
+{
+    std::lock_guard<std::mutex> lock(mu_);
+    const int n = std::clamp(count, 0, NetworkHud::kMaxPendingFillSlabs);
+    network_hud_.pending_fill_slab_count = n;
+    for (int i = 0; i < n; ++i)
+        network_hud_.pending_fill_slabs[i] = slabs[i];
 }
 
 BlockScene::NetworkHud BlockScene::network_hud() const

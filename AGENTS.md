@@ -39,6 +39,19 @@ git push origin app-vX.Y.Z engine-vA.B.C
 
 If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **current** identity versions are missing on that commit, the main push workflow is **incomplete** — create and push the tags before ending the session.
 
+## Timeline geometry ↔ minimap (required)
+
+**Whenever timeline geometry or fetch units change**, update and verify the timeline minimap in the **same change set**. Do not land constant edits without a minimap pass.
+
+| Constant | Role |
+|----------|------|
+| `ALPH_LOOKBACK_WINDOW_SECONDS` | G-segment length (**640s** = 10×64s) |
+| `ALPH_SUBSEGMENT_SECONDS` / `ALPH_SUBSEGMENT_MS` / `SegmentDiskCache::kChunkMs` | Subsegment / disk / HTTP unit (**64s**) |
+| `kTimelineChunkMs` | Network interval span (must match disk grid) |
+| Genesis + `meters_per_second` + `timeline_origin_ms` | G_seg numbering and Z map |
+
+Checklist: `draw_timeline_minimap_` uses no hard-coded 600/60/10min (sub-ticks = `ALPH_SUBSEGMENT_SECONDS`); presenter planes/`cam_k`/camera step match segment length; docs match (`docs/layers/app.md`, `network.md`, `segment-disk-cache.md`). When **user-facing** timeline/fill text changes, also update HTML under `docs/*.html` (hub: `docs/index.html`). Entry: `BlockflowOverlay::draw_timeline_minimap_`.
+
 ## Related gates
 
 - **VnV (verification & validation):** see `vnv/TESTING.md` (taxonomy) and `vnv/README.md` (run/sync).
@@ -58,7 +71,7 @@ If `origin/main` moved and the matching `app-v*` / `engine-v*` tags for the **cu
 - Audit: `python scripts/check_pch.py` and `python scripts/check_include_boundary.py` before claiming Windows build green after adding TUs.
 - Do not put frequently edited product headers into PCH files.
 - Prefer forward declarations in headers; keep `gpu_pub_lib.h` Vulkan-free.
-- **App never includes Vulkan:** do not `#include` `graphics/platform/gfx_platform.hpp` (or any header that pulls `vulkan/vulkan.h`) from `src/app/**`. The app vcxproj has no Vulkan include path. Forward-declare thin hooks or use `gpu_pub_lib.h` only.
+- **App never includes Vulkan:** do not `#include` `graphics/platform/gpu_platform.hpp` (or any header that pulls `vulkan/vulkan.h`) from `src/app/**`. The app vcxproj has no Vulkan include path. Forward-declare thin hooks or use `gpu_pub_lib.h` only.
 - **Dual-track:** after changes under `src/*/platform/**`, CMake, or platform deps, MSVC product build (`sln/alephium_visualizer.sln` Debug|x64) is required before done — Linux CI alone is not enough.
 - New static-lib systems: copy `sln/_template_system.vcxproj.example` and add a project-local PCH.
 - OS / WSI / process / cache-root code goes in `platform/*_<os>.cpp`, not shared product TUs.

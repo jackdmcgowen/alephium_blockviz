@@ -9,7 +9,7 @@ namespace app_identity
 {
 inline constexpr const char* kName          = "Alephium BlockFlow";
 inline constexpr uint32_t    kVersionMajor  = 1;
-inline constexpr uint32_t    kVersionMinor  = 2;
+inline constexpr uint32_t    kVersionMinor  = 3;
 inline constexpr uint32_t    kVersionPatch  = 0;
 
 inline SoftwareIdentity make()

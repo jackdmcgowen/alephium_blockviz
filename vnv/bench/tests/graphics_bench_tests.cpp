@@ -126,17 +126,21 @@ int main(int argc, char** argv)
     if (list_only)
     {
         std::printf("fake_steady_frame\n");
+        std::printf("fake_stress_instances\n");
         return 0;
     }
 
     if (out_path.empty())
         out_path = "vnv/bench/tests/out/" + case_id + "/actual.json";
 
-    if (case_id != "fake_steady_frame")
+    if (case_id != "fake_steady_frame" && case_id != "fake_stress_instances")
     {
-        std::printf("[bench] unsupported case '%s' (V1: fake_steady_frame only)\n", case_id.c_str());
+        std::printf("[bench] unsupported case '%s'\n", case_id.c_str());
         return 2;
     }
+    // Stress: longer sample for stable medians under load.
+    if (case_id == "fake_stress_instances" && samples < 120)
+        samples = 160;
     if (samples < 8)
         samples = 8;
 
@@ -301,9 +305,41 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Soft budgets (ms) for confidence: score 1 if median ≤ budget, decays over soft_tol band.
+    // Tuned as "good enough" on a modern discrete GPU; not absolute cross-device guarantees.
+    const float soft_tol = 0.40f; // 40% over budget → score 0
+    auto metric_score = [soft_tol](float median, float budget) -> float {
+        if (budget <= 0.f)
+            return 1.f;
+        if (median <= budget)
+            return 1.f;
+        const float over = (median - budget) / (budget * soft_tol);
+        if (over >= 1.f)
+            return 0.f;
+        return 1.f - over;
+    };
+    // Budgets: steady is tighter; stress allows higher frame time.
+    const bool stress = (case_id == "fake_stress_instances");
+    const float budget_frame = stress ? 12.0f : 8.0f;
+    const float budget_cpu = stress ? 6.0f : 4.0f;
+    const float budget_gpu = stress ? 8.0f : 5.0f;
+    const float s_frame = metric_score(frame_med, budget_frame);
+    const float s_cpu = metric_score(cpu_med, budget_cpu);
+    const float s_gpu = metric_score(gpu_med, budget_gpu);
+    // Weighted confidence (frame dominates).
+    const float confidence =
+        (0.5f * s_frame + 0.25f * s_cpu + 0.25f * s_gpu);
+
     std::fprintf(f, "{\n");
     std::fprintf(f, "  \"case\": \"%s\",\n", case_id.c_str());
     std::fprintf(f, "  \"samples\": %d,\n", got);
+    std::fprintf(f, "  \"confidence\": %.4f,\n", confidence);
+    std::fprintf(f, "  \"scores\": { \"frame\": %.4f, \"cpu\": %.4f, \"gpu\": %.4f },\n",
+                 s_frame, s_cpu, s_gpu);
+    std::fprintf(f,
+                 "  \"budgets_ms\": { \"frame\": %.2f, \"cpu\": %.2f, \"gpu\": %.2f, "
+                 "\"soft_tol\": %.2f },\n",
+                 budget_frame, budget_cpu, budget_gpu, soft_tol);
     std::fprintf(f, "  \"frame_ms\": { \"median\": %.4f, \"p95\": %.4f },\n", frame_med, frame_p95);
     std::fprintf(f, "  \"cpu_ms\": { \"median\": %.4f, \"p95\": %.4f },\n", cpu_med, cpu_p95);
     std::fprintf(f, "  \"gpu_ms\": { \"median\": %.4f, \"p95\": %.4f },\n", gpu_med, gpu_p95);
@@ -324,7 +360,18 @@ int main(int argc, char** argv)
     std::fprintf(f, "}\n");
     std::fclose(f);
 
-    std::printf("[bench] wrote %s (samples=%d frame_med=%.3f cpu_med=%.3f gpu_med=%.3f)\n",
-                out_path.c_str(), got, frame_med, cpu_med, gpu_med);
+    std::printf("[bench] wrote %s (samples=%d frame_med=%.3f cpu_med=%.3f gpu_med=%.3f "
+                "confidence=%.3f)\n",
+                out_path.c_str(), got, frame_med, cpu_med, gpu_med, confidence);
+    // Serious regression only: confidence < 0.4 fails harness exit (opt-in CI).
+    if (confidence < 0.4f)
+    {
+        std::printf("[bench] FAIL confidence %.3f < 0.4 (serious regression vs soft budgets)\n",
+                    confidence);
+        return 3;
+    }
+    if (confidence < 0.7f)
+        std::printf("[bench] WARN confidence %.3f < 0.7 (soft budget headroom low)\n",
+                    confidence);
     return 0;
 }

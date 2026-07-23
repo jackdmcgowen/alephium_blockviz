@@ -2,10 +2,15 @@
 
 // GPU pass interface: concrete passes own PSOs privately and plug into FrameTaskGraph.
 // Multi-queue submit stays outside IPass (executor). See docs/layers/graphics.md.
+//
+// Profiling: when PassRecordParams::profiler is set, begin record() with:
+//   frame_graph::PassProfileScope profile(*this, ctx);
+// so F3 / bench see stable IPass::name() scopes (CPU + GPU).
 
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
-#include "graphics/queue_types.hpp"
-#include "graphics/sampler.hpp"
+#include "graphics/frame/profiling/frame_profiler.hpp"
+#include "graphics/core/queue_types.hpp"
+#include "graphics/core/sampler.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -17,7 +22,6 @@
 class BufferManager;
 class MeshArena;
 class DebugDrawer;
-class FrameProfiler;
 struct ImDrawData;
 
 namespace frame_graph
@@ -105,6 +109,23 @@ public:
 
     virtual void declare_resources(std::vector<ResourceId>& /*reads*/,
                                    std::vector<ResourceId>& /*writes*/) const
+    {
+    }
+};
+
+// RAII: CPU + GPU scopes named after IPass::name(). No-op when profiler is null/disabled.
+struct PassProfileScope
+{
+    FrameProfiler::CpuScope cpu;
+    FrameProfiler::GpuScope gpu;
+
+    PassProfileScope(const IPass& pass, const PassRecordParams& p)
+        : cpu(p.profiler, pass.name())
+        , gpu(p.profiler,
+              p.base.cmd,
+              pass.name(),
+              VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+              VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT)
     {
     }
 };

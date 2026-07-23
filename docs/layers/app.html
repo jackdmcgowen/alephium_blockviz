@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — App layer</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a class="current" href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>App layer</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="app.md"><code>app.md</code></a>.</p>
+<p>Host process and product presentation for <strong>Alephium BlockFlow</strong> (<code>alephium_visualizer</code>).</p>
+<h2>Overview</h2>
+<p>The app owns the <strong>host window</strong> (Win32 on Windows, GLFW on Linux via <code>app/platform/*</code>), <code>config.json</code> / <code>user_prefs.json</code> load, wiring of systems into <code>IEngine</code>, ImGui chrome (<code>BlockflowOverlay</code>), render-thread camera (<code>CameraController</code>), and the production visual model (<code>ScenePresenter</code> as <code>IFrameSource</code>). It does not open sockets or create Vulkan devices.</p>
+<h2>Ownership boundary</h2>
+<table>
+<tr><th>Owns</th><th>Must not own</th></tr>
+<tr><td><code>main</code> + <code>app/platform/*</code> event loop, process lifetime</td><td>Vulkan handles, swapchain</td></tr>
+<tr><td><code>config.c</code> + domain URL list</td><td>curl / REST command table</td></tr>
+<tr><td><code>BlockflowOverlay</code> (Network + Block panels)</td><td>Poll watermark, <code>is_main</code></td></tr>
+<tr><td><code>ScenePresenter</code> visual policy</td><td>Graphics pipelines / Sobel barriers</td></tr>
+<tr><td><code>CameraController</code> timeline UX</td><td>Network thread lifecycle</td></tr>
+<tr><td>Host identity (<code>app_identity.hpp</code>)</td><td>Engine version tags</td></tr>
+<tr><td>Borderless fullscreen (Win32 HWND / GLFW F11)</td><td>Exclusive display mode / Vulkan FS exclusive</td></tr>
+</table>
+<h2>Current surface</h2>
+<table>
+<tr><th>Path</th><th>Role</th></tr>
+<tr><td><code>src/app/main.cpp</code></td><td>Window, config boot, system register, platform pump; F11/Esc fullscreen</td></tr>
+<tr><td><code>src/app/platform/*</code></td><td>OS host: Win32 or GLFW (see <a href="../platform.md">platform.md</a>)</td></tr>
+<tr><td><code>src/app/window_fullscreen.hpp</code></td><td>Borderless fullscreen enter/exit (Win32 style + placement)</td></tr>
+<tr><td><code>src/app/blockflow_overlay.*</code></td><td><code>IUiOverlay</code>: domain combo, loading HUD, feed, inspector</td></tr>
+<tr><td><code>src/app/scene_presenter.*</code></td><td><code>IFrameSource::prepare</code> — instances, arrows, colored <code>sobel_outlines</code>, <code>UiSnapshot</code></td></tr>
+<tr><td><code>src/app/camera_controller.hpp</code></td><td>Z-track attach/detach, LMB look, RMB pan, selection look-aim</td></tr>
+<tr><td>Timeline minimap (overlay)</td><td><strong>High-level multi-segment overview</strong> (~24 newest <code>#G_seg</code>, <strong>640s</strong> G); <strong>Z-proportional</strong> bins (match cubes/planes); optional <strong>64s</strong> ticks on hover/camera cell; <strong>click</strong> bin → teleport; Live / key <strong>3</strong> → tip. <strong>Must update whenever timeline constants change</strong> (see <code>Agents.md</code>)</td></tr>
+<tr><td>Camera view presets</td><td><strong>End</strong> (1) / <strong>Side</strong> (2) / <strong>V</strong> toggle with pose memory. <strong>3</strong> = live tip. <strong>L/R</strong> = Z. Short <strong>RMB</strong> = deselect only (no reattach); RMB drag = pan</td></tr>
+<tr><td>Selection + dep walk</td><td><strong>Full BFS block-dep fan</strong> from selected root (caps ~4k nodes / 8k edges+arrows). Gold arrows; <strong>fast</strong> level-wave grow (≤~0.25s stagger + 0.08s grow). 1-hop ghosts for missing direct deps only. <strong>R</strong> / Replay deps. Sharded <strong>group</strong> walk deferred (other view).</td></tr>
+<tr><td>Style tokens</td><td><code>style_blockflow.hpp</code> + JSON — <code>walk_trace</code> ≠ gold; hop/sobel fade timings</td></tr>
+<tr><td><code>src/app/ui_snapshot.hpp</code></td><td>Render-thread-safe UI bag (no live scene reads in overlay)</td></tr>
+<tr><td><code>src/app/config.c</code> / <code>config.h</code></td><td>Load URL array from <code>config.json</code></td></tr>
+<tr><td><code>src/app/app_identity.hpp</code></td><td>App name + semver → <code>EngineCreateInfo.application</code></td></tr>
+<tr><td><code>src/app/ui_chrome.hpp</code></td><td>Shared chrome helpers</td></tr>
+</table>
+<p><strong>Threading:</strong> Main thread = platform message pump + idle sleep. Overlay <code>draw()</code> and <code>ScenePresenter::prepare</code> run on the <strong>graphics render thread</strong>. Overlay must only read <code>UiSnapshot</code> / engine selection APIs, not live <code>BlockScene</code> without a published snapshot.</p>
+<h3>Visual model (production)</h3>
+<p>Documented in <code>scene_presenter.hpp</code> — keep layout spacing stable:</p>
+<table>
+<tr><th>Cue</th><th>Meaning</th></tr>
+<tr><td><strong>Solid α</strong></td><td>Confirmed bag with all deps live</td></tr>
+<tr><td><strong>Green Sobel</strong></td><td>Per-lane frontier tip <code>H_c</code> (or walk-anim display)</td></tr>
+<tr><td><strong>Tip dep arrows</strong></td><td>See <strong>Rule book</strong> below</td></tr>
+<tr><td><strong>Red Sobel</strong></td><td>Unconfirmed roles (outline) — high contrast vs green main</td></tr>
+<tr><td><strong>Orange</strong></td><td>Missing-dep incompletes (not green/unconfirmed red)</td></tr>
+<tr><td><strong>Gold</strong></td><td>Selection (Sobel + ephemeral arrows; re-grows on select/Replay)</td></tr>
+<tr><td><strong>Red (fade)</strong></td><td>Removal death α → 0 (same family as unconfirmed)</td></tr>
+<tr><td><strong>Gray volume</strong></td><td>Queued <strong>history</strong> subsegment network fill (translucent AABB); α-fades when admitted (never live tip)</td></tr>
+<tr><td>Segments rail</td><td>Compact “Segments (N)” line; <strong>hover tooltip</strong> for per-k load/blocks</td></tr>
+</table>
+<p>Presentation only — confirmation marks come from <strong>network</strong> into <code>BlockScene</code> (anchor tips + forward novelty: all-deps-Main ⇒ Main).</p>
+<h3>Rule book — tip arrows &amp; live segment planes</h3>
+<p><strong>Tip roles</strong></p>
+<table>
+<tr><th>Role</th><th>Who</th><th>Deps</th></tr>
+<tr><td>Primary confirmed</td><td>Domain <code>H_c</code> / walk hop</td><td>All live deps</td></tr>
+<tr><td>Unconfirmed tip</td><td>Per-lane max-height unconfirmed in ring</td><td>All live deps</td></tr>
+<tr><td>Secondary</td><td>Prior primary after tip advance</td><td>Full fan while retained</td></tr>
+</table>
+<p><strong>Tip arrow appearance (not selection gold)</strong></p>
+<table>
+<tr><th>State</th><th>Length</th><th>Color</th></tr>
+<tr><td>Primary</td><td>Full immediately (no grow)</td><td>Linear dual RGBA along axis: base=listing block, head=dep block (white if missing)</td></tr>
+<tr><td>Unconfirmed → unconfirmed</td><td>Full immediately</td><td><strong>Red both ends</strong></td></tr>
+<tr><td>Unconfirmed → confirmed</td><td>Full immediately</td><td>Red → main dual (color lerp)</td></tr>
+<tr><td>Secondary</td><td>Full immediately</td><td>Main dual; α solid → translucent floor (&amp;gt; 0)</td></tr>
+<tr><td>Replaced</td><td>Full</td><td>Fade α → 0 then erase</td></tr>
+<tr><td>Listing removed</td><td>Full</td><td>Red death α → 0</td></tr>
+<tr><td>Selection / hover</td><td>May grow</td><td>Gold; <strong>only</strong> these re-grow on select/Replay/hover</td></tr>
+</table>
+<p><strong>Segment rings (three-ring model)</strong></p>
+<table>
+<tr><th>Ring</th><th>Size</th><th>Role</th></tr>
+<tr><td><strong>Render</strong></td><td><strong>7</strong> G-windows, camera-centered (<code>cam_k±3</code>, clamped)</td><td>Cubes, tip arrows, Sobel, selection — <strong>all non-plane draw</strong></td></tr>
+<tr><td><strong>Load</strong></td><td><strong>15</strong> G-windows, camera-centered (<code>cam_k±7</code>)</td><td>Disk-first body (adapter) + <strong>barrier planes only</strong> (presenter)</td></tr>
+<tr><td><strong>Live poll</strong></td><td>last <strong>~8s</strong> of open G</td><td>Tip growth (not a separate G length)</td></tr>
+</table>
+<p><strong>Live segment barrier planes</strong></p>
+<ul>
+<li><strong>Do not</strong> draw a plane for the open live segment interior (<code>k=0</code> / <code>G=G_live</code>).</li>
+<li><strong>Do</strong> draw planes for completed boundaries (<code>k≥1</code>) <strong>out to the load ring</strong> (both directions).</li>
+<li><strong>No</strong> cubes / arrows / outlines outside the <strong>render</strong> ring.</li>
+<li>When live G rolls, the previous live G becomes historical and then gets a plane.</li>
+</ul>
+<p><strong>Frustum</strong></p>
+<ul>
+<li>Cull frustum near/far must match this frame’s camera UBO (clip set before prepare cull).</li>
+</ul>
+<h3>Sobel colors (app → graphics)</h3>
+<p>Graphics is domain-agnostic: the presenter emits <code>std::vector&lt;SobelOutlineInstance&gt;</code> with <code>instance_index</code> + <code>rgba</code> (intensity in <strong>a</strong>). Product roles map to palette constants in <code>scene_presenter.cpp</code> (gold / tip green / frontier cyan / incomplete orange). Selection is exclusive (gold only); otherwise role outlines are co-visible in <strong>one</strong> GPU pass. Kill-switch arrives as <code>FrameSourceInput::enable_role_outlines</code>.</p>
+<h2>Goals</h2>
+<ol>
+<li>Readable BlockFlow frontier at a glance (table above).</li>
+<li>Network + Block panels without racing live scene (<code>UiSnapshot</code>).</li>
+<li>Hot-switch Mainnet / Testnet; honest UX for reserved <strong>Debug</strong> domain.</li>
+<li>Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.</li>
+<li>Side/front camera toggle with Side orbit; selection BFS dep fan; brand-sleek arrows/Sobel.</li>
+</ol>
+<h2>Non-goals (presentation)</h2>
+<table>
+<tr><th>Non-goal</th><th>Why</th></tr>
+<tr><td>Dual / PiP cameras</td><td>One camera + presets</td></tr>
+<tr><td>Multi-threaded animation workers for walks / BFS viz</td><td>API is the bottleneck; single render-thread tick</td></tr>
+<tr><td>UI-driven parallel network dep traces</td><td>Adapter BFS remains policy-only (cooperative)</td></tr>
+<tr><td>Full theming / CSS ImGui skin</td><td>Tokens + JSON only</td></tr>
+<tr><td>Data-driving layout, network intervals, pipelines</td><td>Code-owned; only style + hop timing externalized</td></tr>
+<tr><td>Auto-fetch missing walk deps during animation</td><td>Graph-local; missing hop = death</td></tr>
+</table>
+<h2>Style / timing data-drive</h2>
+<ul>
+<li>Defaults: brand palette in <code>docs/brand/alephium_palette.md</code> + compiled <code>StyleBlockflow</code>.</li>
+<li>Optional override: <code>resource/style_blockflow.json</code> (loaded at presenter construct).</li>
+<li><strong>Do not</strong> grow this into a general config system.</li>
+</ul>
+<ol>
+<li>Keep product color / filter policy out of graphics Vulkan code.</li>
+<li>Ship host version via <code>app_identity</code> + <code>app-v*</code> tags on <code>main</code> (<code>AGENTS.md</code>).</li>
+<li><strong>Borderless fullscreen:</strong> F11 toggles; <strong>Esc exits fullscreen</strong> (windowed Esc still quits). Graphics only resizes.</li>
+</ol>
+<h2>Non-goals</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>Offline simulator backend</td><td><strong>Network</strong> implements FakeChain / Debug; app only enables the combo</td></tr>
+<tr><td>Multi-chain marketplace UI</td><td>Product non-goal for this wave</td></tr>
+<tr><td>Vulkan validation / PSO ownership</td><td><strong>Graphics</strong></td></tr>
+<tr><td>Structured logging framework</td><td>printf + ImGui remain OK</td></tr>
+<tr><td>Dual gold+green Sobel</td><td>Confirmed-tips non-goal; gold wins when selected</td></tr>
+<tr><td>Green cube body fill / full main-chain paint</td><td>Outline + arrows only</td></tr>
+</table>
+<h2>Plan</h2>
+<table>
+<tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
+<tr><td><strong>P0</strong></td><td>Keep this visual model + color legend aligned with code</td><td>Update when <code>ScenePresenter</code> semantics change</td></tr>
+<tr><td><strong>Done</strong></td><td>Enable Debug domain in overlay</td><td>FakeChain selectable in Network panel</td></tr>
+<tr><td><strong>Done</strong></td><td>Config persistence</td><td>Last domain, multi-tx + min ALPH filters (<code>user_prefs.json</code>)</td></tr>
+<tr><td><strong>Done</strong></td><td>Timeline minimap + segment jump</td><td>Overview bins; click → start; Live / key 3</td></tr>
+<tr><td><strong>Done</strong></td><td>ALPH out totals + amount filter</td><td>Sum txn outputs; billboard + inspector; min ALPH filter</td></tr>
+<tr><td><strong>Done</strong></td><td>Layout/camera orientation</td><td>Lane 0→0 screen-right; LMB/RMB signs fixed</td></tr>
+<tr><td><strong>P2</strong></td><td>Confirm polish</td><td>Feed-row confirmed badge; eye-check green vs shard palette; dual outline only if product asks</td></tr>
+<tr><td><strong>P2</strong></td><td>History / LOD presentation</td><td>Modes on top of segment cull / barrier planes</td></tr>
+</table>
+<p><strong>Layout convention:</strong> camera <code>up=(0,-1,0)</code> makes world <strong>+X</strong> screen-left; polar placement uses <strong>−r·cos(θ)</strong> so chain <strong>0→0</strong> sits on the viewer’s <strong>right</strong>.</p>
+<p><strong>Timeline origin:</strong> set once per session (<code>now − lookback</code>); never rewrite from earliest block (avoids attached-camera Z snaps on load).</p>
+<h2>Interfaces</h2>
+<p><strong>Outbound</strong></p>
+<ul>
+<li><code>create_engine</code> / <code>destroy_engine</code></li>
+<li>Register <code>IGraphicsSystem</code> + <code>INetworkSystem</code>, then <code>init_systems</code> / <code>start</code> / <code>stop</code> / <code>free_systems</code></li>
+<li><code>set_scene</code>, <code>set_camera</code>, <code>set_frame_source</code>, <code>set_ui_overlay</code></li>
+<li><code>switch_network_domain(domain, url)</code> from Network panel</li>
+</ul>
+<p><strong>Inbound</strong></p>
+<ul>
+<li><code>UiSnapshot</code> via <code>copy_ui_snapshot</code> / fields filled in <code>prepare</code></li>
+<li>Pick / selection / detail via engine facade</li>
+<li>Network HUD fields embedded in snapshot (status, lookback windows, frontier lanes)</li>
+</ul>
+<p><strong>Domain</strong></p>
+<ul>
+<li><code>main</code> owns <code>BlockScene</code> lifetime; presenter holds a reference</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="index.html">layers/README.md</a> — map</li>
+<li><a href="network.html">network.md</a> — marks and phases</li>
+<li><a href="graphics.html">graphics.md</a> — Sobel execution</li>
+<li><a href="engine.html">engine.md</a> — facade</li>
+<li>Historical: <a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> (landed &amp; evolved)</li>
+</ul>
+  <footer>Edit <code>docs/layers/app.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

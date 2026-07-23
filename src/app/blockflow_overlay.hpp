@@ -30,11 +30,14 @@ public:
     bool filter_multi_tx() const { return filter_multi_tx_; }
     void set_filter_min_alph(double min_alph);
     double filter_min_alph() const { return filter_min_alph_; }
+    void set_filter_unconfirmed_only(bool enabled);
+    bool filter_unconfirmed_only() const { return filter_unconfirmed_only_; }
 
     // Persist domain + filter to user_prefs.json (best-effort).
     void save_prefs() const;
 
 private:
+    void push_scene_view_filters_();
     void draw_inspector(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_network(const UiSnapshot& ui, float ui_w, float ui_h);
     void draw_block_billboard_(const UiSnapshot& ui, float ui_w, float ui_h, float dt_sec);
@@ -78,6 +81,7 @@ private:
     bool        filter_multi_tx_ = false;
     // Min block output ALPH (human); 0 = off.
     double      filter_min_alph_ = 0.0;
+    bool        filter_unconfirmed_only_ = false;
     // Minimap scrub state.
     bool        minimap_dragging_ = false;
     // Edge page rate-limit (ImGui time seconds); allows hold-to-page, not one-shot lock.

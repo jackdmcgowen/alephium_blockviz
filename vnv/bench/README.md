@@ -24,9 +24,12 @@ Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timesta
 | Source | `IEngine::copy_frame_timing_snapshot` after `enable_frame_profiler(true)` |
 | Config | Release\|x64 preferred for baselines; validation **off** in harness |
 | Baseline | `vnv/bench/baselines/<id>.json` |
-| Pass rule | `median <= baseline * (1 + tol)` with tol **15%** (tracked metrics) |
+| Pass rule | Baseline compare: `median <= baseline * (1 + tol)` (tol **15%**); **and** harness soft-budget **confidence** ∈ [0,1] |
+| Confidence | Weighted frame/cpu/gpu vs soft budgets; warn &lt; 0.7, fail &lt; 0.4 |
+| Cases | `fake_steady_frame`, `fake_stress_instances` |
 | Update | `run_vnv.ps1 -Bench -UpdateBaselines` on a golden machine |
 | Non-goals | Cross-machine absolute ms in free CI; replace `scripts/bench_build.ps1` |
+| Bottlenecks | [docs/perf-bottlenecks.md](../../docs/perf-bottlenecks.md) |
 
 ## Layout
 

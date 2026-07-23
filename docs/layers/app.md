@@ -28,9 +28,9 @@ The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platf
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
 | `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
-| Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`); **click** bin → teleport to segment start; Live / key **3** → tip; load bars when HUD known |
+| Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`, **640s** G); **Z-proportional** bins (match cubes/planes); optional **64s** ticks on hover/camera cell; **click** bin → teleport; Live / key **3** → tip. **Must update whenever timeline constants change** (see `Agents.md`) |
 | Camera view presets | **End** (1) / **Side** (2) / **V** toggle with pose memory. **3** = live tip. **L/R** = Z. Short **RMB** = deselect only (no reattach); RMB drag = pan |
-| Selection + dep walk | **Full BFS block-dep fan** from selected root (caps ~4k nodes / 8k edges+arrows). Gold arrows; **fast** level-wave grow (≤~0.25s stagger + 0.08s grow). 1-hop ghosts for missing direct deps only. **R** / Replay deps. Sharded **group** walk deferred (other view). |
+| Selection + deps | **First-order (1-hop) only** from selected root. Gold arrows **instant on click** (no grow). **R** / Replay deps re-grows hop-1 only. 1-hop ghosts for missing direct deps. |
 | Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
@@ -52,6 +52,8 @@ Documented in `scene_presenter.hpp` — keep layout spacing stable:
 | **Orange** | Missing-dep incompletes (not green/unconfirmed red) |
 | **Gold** | Selection (Sobel + ephemeral arrows; re-grows on select/Replay) |
 | **Red (fade)** | Removal death α → 0 (same family as unconfirmed) |
+| **Gray volume** | Queued **history** subsegment network fill (translucent AABB); α-fades when admitted (never live tip) |
+| Segments rail | Compact “Segments (N)” line; **hover tooltip** for per-k load/blocks |
 
 Presentation only — confirmation marks come from **network** into `BlockScene` (anchor tips + forward novelty: all-deps-Main ⇒ Main).
 

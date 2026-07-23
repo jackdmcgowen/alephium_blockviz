@@ -5,7 +5,7 @@
 // Multi-queue submit stays in SobelAsyncPass (executor).
 
 #include "graphics/frame/frame_graph/ipass.hpp"
-#include "graphics/sampler.hpp"
+#include "graphics/core/sampler.hpp"
 
 #include <vulkan/vulkan.h>
 

@@ -80,16 +80,18 @@ void GraphicsSystem::set_ui_dep_hover(const std::string& hash)
     ui_dep_hover_hash_ = hash;
 }
 
-void GraphicsSystem::set_scene_filter_multi_tx(bool enabled)
+void GraphicsSystem::set_scene_view_filters(const SceneViewFilters& filters)
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
-    filter_multi_tx_ = enabled;
+    scene_view_filters_ = filters;
+    if (scene_view_filters_.min_alph < 0.0)
+        scene_view_filters_.min_alph = 0.0;
 }
 
-void GraphicsSystem::set_scene_filter_min_alph(double min_alph)
+SceneViewFilters GraphicsSystem::scene_view_filters() const
 {
     std::lock_guard<std::mutex> lock(selection_mutex_);
-    filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
+    return scene_view_filters_;
 }
 
 std::string GraphicsSystem::consume_detail_refill_request()

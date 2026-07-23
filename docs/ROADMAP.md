@@ -4,8 +4,8 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).  
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
-**Last updated:** 2026-07-21 (docs pass: README platform matrix, P0 refresh)  
-**Versions:** app **1.2.0** · engine **1.2.0** (see identity headers / tags on `main`)
+**Last updated:** 2026-07-22 (timeline 64s grid, camera-subseg fill, HTML guides)  
+**Versions:** app **1.3.0** · engine **1.3.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|
@@ -38,7 +38,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | Graphics visual / bench harnesses (portable host) | `int_visual` · `bench_frame_profiler` |
 | **VnV framework** (unit/system/bench + dual slns) | `vnv/` · [TESTING.md](../vnv/TESTING.md) · `run_vnv.ps1` |
 | **PCH include audit** (`scripts/check_pch.py`) | CI + AGENTS |
-| **App include-boundary audit** (`scripts/check_include_boundary.py`) | App must not include Vulkan / `gfx_platform.hpp` |
+| **App include-boundary audit** (`scripts/check_include_boundary.py`) | App must not include Vulkan / `gpu_platform.hpp` |
 | CRT helpers (`common/time_util.hpp`, `env_util.hpp`) | Portable local_time / env flags |
 | **GPU screenshot primary**; window blit opt-in | `BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1` |
 | **Multi-platform goldens** + headless CI hard gate | `goldens/linux_headless/` · `compare_images.py --profile` |
@@ -46,6 +46,9 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | **Linux platform on `main`** (1.1.0) | CMake product, headless, GHA mod CI, dual-track docs |
 | **IPass frame graph** (pipelines as nodes) | `frame/passes/*` + `SamplerTable`; F12 pre-present GPU readback |
 | **Int visual cases** | `fake_overview`, `fake_side_cam`, `fake_selection_sobel` |
+| **64s / 640s timeline grid** + fill volumes + live open cell | [network](layers/network.md) · [user guide](index.html) |
+| **Camera-subseg history interval walk** (eye → next unfilled) | Adapter `pump_history_from_camera_` |
+| **Domain-agnostic single-pass Sobel** | App colors × white edge |
 
 ---
 
@@ -53,7 +56,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gfx_platform.hpp` — app can include without Vulkan |
+| 1 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gpu_platform.hpp` — app can include without Vulkan |
 
 ---
 
@@ -86,7 +89,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | Item | Reason |
 |------|--------|
-| Dual gold **and** green Sobel same frame | Confirmed-tips non-goal |
+| Dual exclusive **selection-gold vs tip-green modes** fighting for one overlay | Gold wins when selected; multi-role multi-color outlines in one pass are intentional |
 | Green cube **body fill** / full main-chain paint | Outline + arrows product |
 | D3D / OpenGL / WebGPU rewrite | Stack non-goal |
 | Full ECS, plugins, scripting | Overkill |
@@ -110,7 +113,7 @@ New MSVC product .cpp (PCH=Use)?
   → python scripts/check_pch.py
 
 App code needing a graphics platform hook?
-  → do NOT include gfx_platform.hpp (Vulkan)
+  → do NOT include gpu_platform.hpp (Vulkan)
   → forward-declare or gpu_pub_lib.h / future host-hooks header
 
 Platform / CMake / Linux-only change?

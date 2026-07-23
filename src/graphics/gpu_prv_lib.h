@@ -1,7 +1,7 @@
 #pragma once
 
 #include "gpu_pub_lib.h"
-#include "queue_types.hpp"
+#include "graphics/core/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -21,7 +21,7 @@ void destroy_instance(VkInstance instance);
 void create_debug_messenger(VkInstance instance);
 void destroy_debug_messenger(VkInstance instance);
 
-  //surface.cpp — delegates to graphics/platform/gfx_platform_*.cpp
+  //surface.cpp — delegates to graphics/platform/gpu_platform_*.cpp
 VkSurfaceKHR create_platform_surface(VkInstance instance, void* window, void* platform_instance);
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface);
 
@@ -91,7 +91,7 @@ void destroy_image(VkDevice device, VkImage image, VkDeviceMemory imageMemory);
 VkImageView create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
 void destroy_image_view(VkDevice device, VkImageView imageview);
 
-  //sampler.cpp — also SamplerTable / SamplerFilter in graphics/sampler.hpp
+  //core/sampler.cpp — also SamplerTable / SamplerFilter in graphics/core/sampler.hpp
 VkSampler create_sampler(VkDevice device, const VkSamplerCreateInfo& info);
 void destroy_sampler(VkDevice device, VkSampler sampler);
 

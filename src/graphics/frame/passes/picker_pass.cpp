@@ -261,13 +261,8 @@ void PickerPass::record(const PassRecordParams& p)
     if (!p.base.cmd || pipeline_ == VK_NULL_HANDLE || image_ == VK_NULL_HANDLE)
         throw std::runtime_error("PickerPass::record: not ready");
 
+    PassProfileScope profile(*this, p);
     const VkCommandBuffer cmd = p.base.cmd;
-
-    FrameProfiler::GpuScope picker_gpu(
-        p.profiler, cmd, "Picker",
-        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
     if (p.picker_image_undefined)
     {

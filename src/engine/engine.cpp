@@ -170,16 +170,15 @@ public:
             graphics_->set_ui_dep_hover(hash);
     }
 
-    void set_scene_filter_multi_tx(bool enabled) override
+    void set_scene_view_filters(const SceneViewFilters& filters) override
     {
         if (graphics_)
-            graphics_->set_scene_filter_multi_tx(enabled);
+            graphics_->set_scene_view_filters(filters);
     }
 
-    void set_scene_filter_min_alph(double min_alph) override
+    SceneViewFilters scene_view_filters() const override
     {
-        if (graphics_)
-            graphics_->set_scene_filter_min_alph(min_alph);
+        return graphics_ ? graphics_->scene_view_filters() : SceneViewFilters{};
     }
 
     void request_screenshot(const char* path_utf8) override

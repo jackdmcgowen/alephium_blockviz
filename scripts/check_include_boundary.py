@@ -2,7 +2,7 @@
 """Fail if app-layer sources pull Vulkan or graphics platform internals.
 
 The product **app** MSVC project does not add Vulkan SDK includes. Including
-`vulkan/vulkan.h` or `graphics/platform/gfx_platform.hpp` from `src/app/**`
+`vulkan/vulkan.h` or `graphics/platform/gpu_platform.hpp` from `src/app/**`
 breaks the Windows dual-track (C1083 / include isolation). See docs/platform.md.
 
 Scans:
@@ -11,7 +11,7 @@ Scans:
 Forbidden include path fragments (normalized /):
   vulkan/vulkan.h
   vulkan.h  (angle-bracket form without path)
-  graphics/platform/gfx_platform.hpp
+  graphics/platform/gpu_platform.hpp
   graphics/graphics_system.hpp
   graphics/gpu_prv_lib.h
 
@@ -34,7 +34,7 @@ FORBIDDEN = frozenset(
     {
         "vulkan/vulkan.h",
         "vulkan.h",
-        "graphics/platform/gfx_platform.hpp",
+        "graphics/platform/gpu_platform.hpp",
         "graphics/graphics_system.hpp",
         "graphics/gpu_prv_lib.h",
         "gpu_prv_lib.h",
@@ -67,12 +67,12 @@ def scan_file(path: Path, repo: Path) -> list[str]:
             errors.append(f"{rel}: forbidden include {inc!r}")
             continue
         # Also catch nested paths ending with forbidden basenames used as full paths
-        if base == "vulkan.h" or base == "gfx_platform.hpp" or base == "gpu_prv_lib.h":
+        if base == "vulkan.h" or base == "gpu_platform.hpp" or base == "gpu_prv_lib.h":
             if "gpu_pub_lib.h" in inc:
                 continue
-            # gfx_platform.hpp only forbidden under graphics/platform or as bare name
-            if base == "gfx_platform.hpp" and (
-                "graphics/platform" in inc or inc == "gfx_platform.hpp"
+            # gpu_platform.hpp only forbidden under graphics/platform or as bare name
+            if base == "gpu_platform.hpp" and (
+                "graphics/platform" in inc or inc == "gpu_platform.hpp"
             ):
                 errors.append(f"{rel}: forbidden include {inc!r}")
             elif base == "vulkan.h":
@@ -105,7 +105,7 @@ def main() -> int:
         for e in all_err:
             print(f"  {e}")
         print(
-            "\nRule: src/app/** must not include vulkan headers, gfx_platform.hpp, "
+            "\nRule: src/app/** must not include vulkan headers, gpu_platform.hpp, "
             "graphics_system.hpp, or gpu_prv_lib.h. Use gpu_pub_lib.h and forward decls "
             "(docs/platform.md)."
         )

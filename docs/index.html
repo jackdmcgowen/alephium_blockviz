@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Docs hub</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand current" href="index.html">BlockViz docs</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+    <a href="user-guide-network-fill.html">Network fill</a>
+    <a href="user-guide-legend.html">Legend</a>
+    <a href="user-guide-controls.html">Controls</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
+<main>
+  <h1>Alephium BlockViz documentation</h1>
+  <p class="muted">
+    Static guides for operators and contributors. Open these files in a browser from the repo
+    (<code>docs/index.html</code>). App / engine identities: see
+    <code>src/app/app_identity.hpp</code> and <code>src/engine/engine_identity.hpp</code>.
+  </p>
+
+  <h2>User guides</h2>
+  <div class="card-grid">
+    <div class="card">
+      <a href="user-guide-timeline.html">Timeline &amp; fill</a>
+      <p>64s / 640s grid, rings, gray volumes, status strings, F12.</p>
+    </div>
+    <div class="card">
+      <a href="user-guide-network-fill.html">Network fill policy</a>
+      <p>Live tip first, camera-subseg walk, inflight ≤4, disk vs HTTP.</p>
+    </div>
+    <div class="card">
+      <a href="user-guide-legend.html">Visual legend</a>
+      <p>Green / red tips, cyan planes, gold selection, gray fills.</p>
+    </div>
+    <div class="card">
+      <a href="user-guide-controls.html">Controls</a>
+      <p>Camera keys, F3 / F11 / F12, mouse, fullscreen Esc.</p>
+    </div>
+  </div>
+
+  <h2>Layer architecture (HTML)</h2>
+  <div class="card-grid">
+    <div class="card">
+      <a href="layers/index.html">Layers hub</a>
+      <p>Map, confirmation split, smoke checklist.</p>
+    </div>
+    <div class="card">
+      <a href="layers/app.html">App</a>
+      <p>Presenter, chrome, visual model, camera.</p>
+    </div>
+    <div class="card">
+      <a href="layers/domain.html">Domain</a>
+      <p>BlockScene, graph, layout, prune.</p>
+    </div>
+    <div class="card">
+      <a href="layers/engine.html">Engine</a>
+      <p>IEngine facade, frame types, lifecycle.</p>
+    </div>
+    <div class="card">
+      <a href="layers/graphics.html">Graphics</a>
+      <p>Vulkan, IPass, Sobel, publish.</p>
+    </div>
+    <div class="card">
+      <a href="layers/network.html">Network</a>
+      <p>Adapter phases, rings, fill, cache.</p>
+    </div>
+  </div>
+
+  <h2>Architecture &amp; backlog</h2>
+  <div class="card-grid">
+    <div class="card">
+      <a href="architecture.html">Architecture summary</a>
+      <p>Ownership diagram + links into layer HTML.</p>
+    </div>
+    <div class="card">
+      <a href="dev-roadmap.html">Roadmap (HTML)</a>
+      <p>Short summary; full backlog stays in Markdown.</p>
+    </div>
+  </div>
+
+  <h2>Living Markdown (agents / design)</h2>
+  <ul>
+    <li><a href="layers/README.md">docs/layers/README.md</a> — layer map + confirmation table
+        (browser: <a href="layers/index.html">layers/index.html</a>)</li>
+    <li><a href="layers/network.md">network.md</a> · <a href="layers/app.md">app.md</a> ·
+        <a href="layers/graphics.md">graphics.md</a> · <a href="layers/domain.md">domain.md</a> ·
+        <a href="layers/engine.md">engine.md</a></li>
+    <li><a href="segment-disk-cache.md">segment-disk-cache.md</a> ·
+        <a href="ROADMAP.md">ROADMAP.md</a> ·
+        <a href="platform.md">platform.md</a> ·
+        <a href="perf-bottlenecks.md">perf-bottlenecks.md</a></li>
+    <li><a href="../AGENTS.md">AGENTS.md</a> — version tags, timeline geometry gate, VnV</li>
+    <li><a href="../README.md">README.md</a> — build matrix &amp; short legend</li>
+  </ul>
+
+  <div class="callout">
+    <strong>Source of truth:</strong> layer contracts and adapter policy live in
+    <code>docs/layers/*.md</code>. HTML guides are for reading in a browser and must stay
+    consistent when user-facing numbers change (see <code>AGENTS.md</code>).
+  </div>
+
+  <h2>Historical designs</h2>
+  <ul>
+    <li><a href="graphics-modularization-design.md">graphics-modularization-design.md</a> — landed</li>
+    <li><a href="blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> — landed &amp; evolved</li>
+  </ul>
+
+  <footer>
+    Part of alephium_blockviz · hub entry <code>docs/index.html</code>
+  </footer>
+</main>
+</body>
+</html>

@@ -35,7 +35,13 @@ inline glm::vec4 kHoverArrowColor()
     c.a *= 0.45f;
     return c;
 }
-const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
+// Closed G barriers (not open live tip). Stronger α so F12/PNG and on-screen match.
+const glm::vec4 kBarrierPlaneColor(0.30f, 0.82f, 1.00f, 0.16f);
+const glm::vec4 kBarrierPlaneDim(0.30f, 0.78f, 0.98f, 0.12f);
+// History network fill volumes (64s subseg). In-flight vs fading must read differently.
+const glm::vec4 kFillVolumeInflight(0.55f, 0.56f, 0.60f, 0.16f);
+const glm::vec4 kFillVolumeFading(0.50f, 0.52f, 0.56f, 0.07f);
+constexpr int kMaxFullAlphaFillVolumes = 4; // matches HttpIoPool interval inflight
 
 // BFS confirm rays: muted brand family (not high-chroma rainbow).
 glm::vec4 bfs_thread_color(int thread_id)
@@ -140,7 +146,8 @@ void ScenePresenter::collect_selection_dep_force_(std::unordered_set<std::string
             out.insert(h);
 }
 
-void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
+void ScenePresenter::rebuild_selection_dep_one_hop_(const std::string& root_hash,
+                                                    bool animate_grow)
 {
     clear_selection_deps_();
     if (root_hash.empty())
@@ -150,52 +157,40 @@ void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
     sel_dep_.nodes.push_back(root_hash);
     sel_dep_.node_set.insert(root_hash);
 
-    std::unordered_map<std::string, int> depth;
-    depth[root_hash] = 0;
-
-    std::vector<std::string> queue;
-    queue.push_back(root_hash);
-    size_t qi = 0;
-
-    if (auto root = scene_.detail_store().get(root_hash))
-        if (!root->deps.empty())
-            sel_dep_.seeded_from_detail = true;
-
-    while (qi < queue.size() &&
-           static_cast<int>(sel_dep_.nodes.size()) < kMaxSelDepNodes &&
-           static_cast<int>(sel_dep_.edges.size()) < kMaxSelDepEdges)
+    std::vector<std::string> deps = sorted_deps_(root_hash);
+    if (deps.empty())
     {
-        const std::string u = queue[qi++];
-        const int du = depth[u];
-        std::vector<std::string> deps = sorted_deps_(u);
-        if (deps.empty())
-        {
-            if (auto d = scene_.detail_store().get(u))
-                deps = d->deps;
-        }
-        if (!deps.empty())
-            sel_dep_.seeded_from_detail = true;
+        if (auto d = scene_.detail_store().get(root_hash))
+            deps = d->deps;
+    }
+    if (!deps.empty())
+        sel_dep_.seeded_from_detail = true;
 
-        for (const std::string& v : deps)
-        {
-            if (v.empty())
-                continue;
-            if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
-                break;
-            sel_dep_.edges.push_back(SelectionDepEdge{ u, v, du });
+    for (const std::string& v : deps)
+    {
+        if (v.empty())
+            continue;
+        if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
+            break;
+        sel_dep_.edges.push_back(SelectionDepEdge{ root_hash, v, /*depth=*/0 });
+        if (sel_dep_.node_set.count(v) != 0)
+            continue;
+        if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
+            continue;
+        // Keep missing deps as edges for ghosts; only force-draw known cubes.
+        sel_dep_.node_set.insert(v);
+        sel_dep_.nodes.push_back(v);
+    }
 
-            if (sel_dep_.node_set.count(v) != 0)
-                continue;
-            // Expand only if we know the node (detail or graph) so BFS stays in loaded set.
-            const bool known = scene_.detail_store().get(v) || scene_.graph().get(v);
-            if (!known)
-                continue;
-            if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
-                continue;
-            sel_dep_.node_set.insert(v);
-            sel_dep_.nodes.push_back(v);
-            depth[v] = du + 1;
-            queue.push_back(v);
+    // Click/select: full length immediately. Replay: leave birth unset so grow runs.
+    if (!animate_grow)
+    {
+        const float now = now_sec_();
+        const float past = now - (kSelDepGrowSec + 0.05f);
+        for (const SelectionDepEdge& e : sel_dep_.edges)
+        {
+            const std::string key = std::string("s|") + e.from + '|' + e.to;
+            ephemeral_birth_sec_[key] = past;
         }
     }
 }
@@ -250,22 +245,25 @@ std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_ha
 // - Primary confirmed: solid dual-RGBA gradient listing→dep (white head if missing).
 // - Unconfirmed tip: full length immediately; color cyan→main dual over cyan_to_main_sec.
 // - Secondary (prior tip): solid→translucent main (alpha floor > 0).
-// - No length grow/restart for tip keys; leave-active → Fading; listing dead → Dying.
+// - No length grow/restart for tip keys; leave-active → Fading;
+//   listing hard-removed → Dying; soft corridor eviction → quiet erase.
 // - Barrier planes: never for open live k=0.
 void ScenePresenter::tip_dep_tick_and_draw_(
     DebugDrawer& debug,
     const std::unordered_map<std::string, glm::vec3>& positions,
     const std::unordered_map<std::string, glm::vec3>& block_colors,
     const std::unordered_set<std::string>& live_nodes,
+    const std::unordered_set<std::string>& soft_evicted,
     const std::unordered_set<std::string>& drawn_set,
     const std::unordered_set<std::string>& green_display,
     const std::unordered_set<std::string>& cyan_owners,
     const std::unordered_set<std::string>& unconfirmed_tips,
     const std::unordered_set<std::string>& frontier_domain,
-    float tip_len, float tip_rad, float shaft_r, float clearance)
+    float tip_len, float tip_rad, float shaft_r, float clearance,
+    const Frustum* frustum,
+    const glm::vec3* camera_eye)
 {
     const float now = now_sec_();
-    constexpr uint32_t kDepRadial = 8;
     const glm::vec4 kMissingWhite(1.f, 1.f, 1.f, kTipSolidAlpha);
     const glm::vec4 kUnc = kUnconfirmedArrowColor();
 
@@ -547,6 +545,12 @@ void ScenePresenter::tip_dep_tick_and_draw_(
         const bool listing_live = live_nodes.count(listing) != 0;
         if (!listing_live)
         {
+            // Soft corridor/RAM eviction (disk may re-admit): quiet erase — not chain death.
+            if (soft_evicted.count(listing) != 0)
+            {
+                it = tip_dep_anims_.erase(it);
+                continue;
+            }
             if (anim.has_pos)
             {
                 anim.phase = ArrowPhase::Dying;
@@ -636,9 +640,29 @@ void ScenePresenter::tip_dep_tick_and_draw_(
             (anim.phase == ArrowPhase::Fading || anim.phase == ArrowPhase::Dying))
             continue;
 
-        // Linear gradient base→head along arrow (listing color → dep color).
+        // Frustum cull: skip mesh if segment AABB is outside the view (anim still ages).
+        if (frustum)
+        {
+            const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+            const glm::vec3 half = 0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+            if (!frustum->intersects_aabb(mid, half))
+                continue;
+        }
+
+        // Distance LOD: fewer radial segments when far from camera.
+        uint32_t radial = 4;
+        if (camera_eye)
+        {
+            const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+            const float dist = glm::length(mid - *camera_eye);
+            if (dist < 40.f)
+                radial = 6;
+            else if (dist > 120.f)
+                radial = 3;
+        }
+
         debug.add_arrow(from_inset, to_inset, shaft, tipc, tip_len * anim.tip_scale,
-                        tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, kDepRadial, grow_u);
+                        tip_rad * anim.tip_scale, shaft_r * anim.tip_scale, radial, grow_u);
         ++drawn;
     }
 
@@ -716,11 +740,15 @@ void ScenePresenter::draw_bfs_traces_(
 void ScenePresenter::update_death_and_walk_(
     const std::unordered_set<std::string>& live_nodes,
     const std::unordered_map<std::string, glm::vec3>& positions,
+    const std::unordered_set<std::string>& soft_evicted,
     float now)
 {
     for (const std::string& h : prev_live_nodes_)
     {
         if (live_nodes.count(h) != 0)
+            continue;
+        // Soft eviction: no red cube death (will re-admit from disk).
+        if (soft_evicted.count(h) != 0)
             continue;
         bool already = false;
         for (const DyingBlock& d : dying_blocks_)
@@ -853,7 +881,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const BlockScene::NetworkHud hud = scene_.network_hud_locked();
 
     const float now = now_sec_();
-    update_death_and_walk_(live_nodes, block_positions, now);
+    const std::unordered_set<std::string> soft_evicted = scene_.take_soft_evicted_locked();
+    update_death_and_walk_(live_nodes, block_positions, soft_evicted, now);
 
     // ------------------------------------------------------------------
     // Classify once (BlockFlow visual model)
@@ -1229,6 +1258,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return alph_cmp_atto(placed.alph_out_atto, in.filter_min_alph_atto) >= 0;
     };
 
+    auto passes_unconfirmed_filter = [&](const PlacedBlock& placed) -> bool {
+        if (!in.filter_unconfirmed_only)
+            return true;
+        // Hide main-chain confirmed; uncles / unconfirmed stay.
+        if (scene_.is_confirmed_locked(placed.hash))
+            return false;
+        return true;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -1273,7 +1311,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Selection full BFS block-dep fan: rebuild on select change, replay, or late detail.
+    // Selection first-order deps: instant on click; grow only on Replay.
     const uint64_t replay_gen = scene_.walk_replay_gen();
     const bool want_replay =
         replay_gen != last_walk_replay_gen_ && !in.selected_hash.empty();
@@ -1285,16 +1323,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!sel_dep_.root.empty())
             clear_selection_deps_();
     }
-    else if (in.selected_hash != sel_dep_.root || want_replay)
+    else if (want_replay)
     {
-        rebuild_selection_dep_bfs_(in.selected_hash);
+        rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/true);
+    }
+    else if (in.selected_hash != sel_dep_.root)
+    {
+        rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/false);
     }
     else if (!sel_dep_.seeded_from_detail)
     {
         if (auto d = scene_.detail_store().get(in.selected_hash))
         {
             if (!d->deps.empty())
-                rebuild_selection_dep_bfs_(in.selected_hash);
+                rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/false);
         }
     }
 
@@ -1317,6 +1359,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             continue;
         if (!passes_amount_filter(placed))
             continue;
+        if (!passes_unconfirmed_filter(placed))
+            continue;
         if (push_instance(placed, /*force=*/false))
             drawn.insert(placed.hash);
     }
@@ -1332,6 +1376,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!always && !block_in_visible_segment(placed.timestamp_ms))
             return;
         if (!always && !passes_txn_filter(placed))
+            return;
+        // Min ALPH / unconfirmed-only apply to role force-draws too.
+        // Selection / hover / dep-walk keep always=true and stay visible.
+        if (!always && !passes_amount_filter(placed))
+            return;
+        if (!always && !passes_unconfirmed_filter(placed))
             return;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
@@ -1480,40 +1530,68 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         const float tip_rad = std::max(0.06f, meters_per_second * 0.03f * 8.f);
         const float shaft_r = tip_rad * 0.4f;
         const float clearance = std::max(0.55f, meters_per_second * 0.12f * 8.f);
-        constexpr uint32_t kDepRadial = 8;
+        constexpr uint32_t kDepRadialNear = 6;
+        constexpr uint32_t kDepRadialFar  = 3;
         constexpr uint32_t kMaxHoverArrows = 1024;
+        // Unconfirmed tip-dep listings only H_c+1 .. H_c+3 (payload tip surface).
+        constexpr int kUnconfirmedDepth = 3;
 
-        // Per-lane unconfirmed max-height tip (main dual-color path, cyan→main).
+        // Per-lane unconfirmed near tip (cyan→main). Not deep history behind H_c.
         std::unordered_set<std::string> unconfirmed_tips;
         {
-            int best_h[BlockScene::kLaneCount];
-            std::string best_id[BlockScene::kLaneCount];
-            for (int i = 0; i < BlockScene::kLaneCount; ++i)
-            {
-                best_h[i] = -1;
-                best_id[i].clear();
-            }
             for (const PlacedBlock& p : layout.placements)
             {
                 if (p.hash.empty() || drawn.count(p.hash) == 0)
                     continue;
-                if (p.lane >= BlockScene::kLaneCount)
+                if (p.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
                     continue;
                 if (scene_.is_confirmed_locked(p.hash) || p.is_uncle ||
                     scene_.is_uncle_locked(p.hash))
                     continue;
                 if (green_display.count(p.hash))
                     continue;
+                const int hc = hc_by_lane[p.lane];
                 const int h = p.height;
-                if (h > best_h[p.lane])
-                {
-                    best_h[p.lane] = h;
-                    best_id[p.lane] = p.hash;
-                }
+                if (h < 0 || hc < 0)
+                    continue; // no H_c → fallback pass below
+                // Only heights strictly above confirmed tip, within 3 deep.
+                if (h <= hc || h > hc + kUnconfirmedDepth)
+                    continue;
+                unconfirmed_tips.insert(p.hash);
             }
-            for (int i = 0; i < BlockScene::kLaneCount; ++i)
-                if (!best_id[i].empty())
-                    unconfirmed_tips.insert(best_id[i]);
+            // Fallback when no H_c: one max-height unconfirmed per lane.
+            if (unconfirmed_tips.empty())
+            {
+                int best_h[BlockScene::kLaneCount];
+                std::string best_id[BlockScene::kLaneCount];
+                for (int i = 0; i < BlockScene::kLaneCount; ++i)
+                {
+                    best_h[i] = -1;
+                    best_id[i].clear();
+                }
+                for (const PlacedBlock& p : layout.placements)
+                {
+                    if (p.hash.empty() || drawn.count(p.hash) == 0)
+                        continue;
+                    if (p.lane >= static_cast<uint32_t>(BlockScene::kLaneCount))
+                        continue;
+                    if (scene_.is_confirmed_locked(p.hash) || p.is_uncle ||
+                        scene_.is_uncle_locked(p.hash))
+                        continue;
+                    if (green_display.count(p.hash))
+                        continue;
+                    if (hc_by_lane[p.lane] >= 0)
+                        continue; // already handled above
+                    if (p.height > best_h[p.lane])
+                    {
+                        best_h[p.lane] = p.height;
+                        best_id[p.lane] = p.hash;
+                    }
+                }
+                for (int i = 0; i < BlockScene::kLaneCount; ++i)
+                    if (!best_id[i].empty())
+                        unconfirmed_tips.insert(best_id[i]);
+            }
         }
 
         std::unordered_map<std::string, glm::vec3> block_colors;
@@ -1521,9 +1599,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             block_colors[p.hash] = p.color;
 
-        tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, drawn,
-                               green_display, cyan_owners, unconfirmed_tips, frontier_domain,
-                               tip_len, tip_rad, shaft_r, clearance);
+        tip_dep_tick_and_draw_(*debug, block_positions, block_colors, live_nodes, soft_evicted,
+                               drawn, green_display, cyan_owners, unconfirmed_tips,
+                               frontier_domain, tip_len, tip_rad, shaft_r, clearance,
+                               in.frustum,
+                               in.has_camera_eye ? &in.camera_eye : nullptr);
         draw_bfs_traces_(*debug, block_positions, drawn);
 
         uint32_t arrow_count = 0;
@@ -1550,9 +1630,16 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                                  eph_seen);
             if (grow <= 0.f)
                 return;
+            if (in.frustum)
+            {
+                const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+                const glm::vec3 half = 0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+                if (!in.frustum->intersects_aabb(mid, half))
+                    return;
+            }
             debug->add_arrow(from_inset, to_inset, color,
                              tip_len * tip_scale, tip_rad * tip_scale,
-                             shaft_r * tip_scale, kDepRadial, grow);
+                             shaft_r * tip_scale, 4u, grow);
             ++arrow_count;
         };
 
@@ -1565,13 +1652,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             placement_color[p.hash] = p.color;
 
-        // Full BFS selection fan: own budget (matches edge cap) + fast level-wave anim.
+        // First-order selection deps: instant on click; grow only after Replay.
         const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
         if (!sel_dep_.root.empty() && !sel_dep_.edges.empty())
         {
             uint32_t sel_arrow_count = 0;
-            int within_level = 0;
-            int prev_depth = -1;
+            int edge_i = 0;
             for (const SelectionDepEdge& e : sel_dep_.edges)
             {
                 if (static_cast<int>(sel_arrow_count) >= kMaxSelDepArrows)
@@ -1579,14 +1665,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 auto fit = block_positions.find(e.from);
                 auto tit = block_positions.find(e.to);
                 if (fit == block_positions.end() || tit == block_positions.end())
-                    continue;
-                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
-                    continue;
-
-                if (e.depth != prev_depth)
                 {
-                    prev_depth = e.depth;
-                    within_level = 0;
+                    ++edge_i;
+                    continue;
+                }
+                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
+                {
+                    ++edge_i;
+                    continue;
                 }
 
                 const bool focus =
@@ -1602,34 +1688,34 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 }
                 else if (any_ui_dep_hover)
                     arrow_col.a = 0.35f;
-                else if (e.depth > 0)
-                {
-                    // Slightly softer for deeper shells so hop-1 stays strongest.
-                    arrow_col.a *= std::max(0.45f, 1.f - 0.08f * static_cast<float>(e.depth));
-                }
 
                 glm::vec3 from_inset, to_inset;
                 if (!inset_segment(fit->second, tit->second, clearance, from_inset, to_inset))
                 {
-                    ++within_level;
+                    ++edge_i;
                     continue;
                 }
 
-                // Quick shells: depth wave + micro within-level, hard-capped total delay.
-                const float delay = std::min(
-                    kSelDepMaxStaggerSec,
-                    static_cast<float>(e.depth) * kSelDepLevelStagger +
-                        static_cast<float>(within_level) * kSelDepEdgeStagger);
+                const float delay =
+                    static_cast<float>(edge_i) * kSelDepEdgeStagger;
                 const std::string key = eph_key('s', e.from, e.to);
                 const float grow =
                     ephemeral_grow_u_(key, delay, eph_seen, kSelDepGrowSec);
-                ++within_level;
+                ++edge_i;
                 if (grow <= 0.f)
                     continue;
+                if (in.frustum)
+                {
+                    const glm::vec3 mid = 0.5f * (from_inset + to_inset);
+                    const glm::vec3 half =
+                        0.5f * glm::abs(to_inset - from_inset) + glm::vec3(1.f);
+                    if (!in.frustum->intersects_aabb(mid, half))
+                        continue;
+                }
 
-                const float tip_scale = focus ? 1.28f : (e.depth == 0 ? 1.15f : 1.05f);
+                const float tip_scale = focus ? 1.28f : 1.15f;
                 debug->add_arrow(from_inset, to_inset, arrow_col, tip_len * tip_scale,
-                                 tip_rad * tip_scale, shaft_r * tip_scale, kDepRadial,
+                                 tip_rad * tip_scale, shaft_r * tip_scale, 4u,
                                  grow);
                 ++sel_arrow_count;
             }
@@ -1764,9 +1850,130 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 // Steady α for load-only planes; render-ring planes can use cube fade.
                 const float in_render = fade_for_k(k);
                 const float fa = (in_render > 0.02f) ? in_render : 0.07f;
-                glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
+                glm::vec4 col = bold ? kBarrierPlaneColor : kBarrierPlaneDim;
                 col.a *= fa;
+                // Frustum cull barrier planes (mesh only; pad reduces edge strobe).
+                if (in.frustum)
+                {
+                    const glm::vec3 center(0.f, 0.f, z_edge);
+                    const glm::vec3 half(plane_half * 1.15f, plane_half * 1.15f, 1.f);
+                    if (!in.frustum->intersects_aabb(center, half))
+                        continue;
+                }
                 debug->add_z_plane_quad(z_edge, plane_half, col);
+            }
+        }
+
+        // Gray translucent volumes: at API queue start; fade when fulfilled.
+        // Sticky fade + retire tombstone: HUD still lists fulfilled slabs ~800ms after
+        // admit; without retire we would re-create anim and re-flash every fade period.
+        {
+            const float now = now_sec_();
+            std::unordered_set<int64_t> seen;
+            const int nslab = std::clamp(hud.pending_fill_slab_count, 0,
+                                         BlockScene::NetworkHud::kMaxPendingFillSlabs);
+            for (int i = 0; i < nslab; ++i)
+            {
+                const auto& s = hud.pending_fill_slabs[i];
+                if (s.to_ms <= s.from_ms)
+                    continue;
+                seen.insert(s.from_ms);
+
+                // True re-queue after permanent fade: only unfulfilled HUD reopens.
+                if (fill_slab_retired_.count(s.from_ms) != 0)
+                {
+                    if (s.fulfilled != 0)
+                        continue; // still lagging fulfilled in HUD — stay gone
+                    fill_slab_retired_.erase(s.from_ms);
+                }
+
+                auto it = fill_slab_anims_.find(s.from_ms);
+                if (it == fill_slab_anims_.end())
+                {
+                    FillSlabAnim a;
+                    a.from_ms = s.from_ms;
+                    a.to_ms = s.to_ms;
+                    // First sight at full α. If already fulfilled, start fade immediately.
+                    a.fade_start_sec = (s.fulfilled != 0) ? now : -1.f;
+                    fill_slab_anims_[s.from_ms] = a;
+                }
+                else
+                {
+                    it->second.to_ms = s.to_ms;
+                    // Only start fade when first told fulfilled; never un-fade while alive.
+                    if (s.fulfilled != 0 && it->second.fade_start_sec < 0.f)
+                        it->second.fade_start_sec = now;
+                }
+            }
+            // Left HUD entirely: begin fade if still solid.
+            for (auto it = fill_slab_anims_.begin(); it != fill_slab_anims_.end(); )
+            {
+                if (seen.count(it->first) == 0 && it->second.fade_start_sec < 0.f)
+                    it->second.fade_start_sec = now;
+                if (it->second.fade_start_sec >= 0.f &&
+                    (now - it->second.fade_start_sec) >= kFillSlabFadeSec)
+                {
+                    fill_slab_retired_.insert(it->first);
+                    // Soft cap so long sessions do not retain unbounded tombstones.
+                    if (fill_slab_retired_.size() > 4096u)
+                    {
+                        // Drop an arbitrary older half (set has no order — full clear is fine).
+                        fill_slab_retired_.clear();
+                        fill_slab_retired_.insert(it->first);
+                    }
+                    it = fill_slab_anims_.erase(it);
+                    continue;
+                }
+                ++it;
+            }
+
+            const float slab_half = kLayoutBaseRadius * 6.5f;
+            // Draw newest in-flight first; cap full-α to HTTP inflight so stacked fades
+            // do not read as "12 subsegments loading."
+            std::vector<const FillSlabAnim*> ordered;
+            ordered.reserve(fill_slab_anims_.size());
+            for (const auto& kv : fill_slab_anims_)
+                ordered.push_back(&kv.second);
+            std::sort(ordered.begin(), ordered.end(),
+                      [](const FillSlabAnim* a, const FillSlabAnim* b) {
+                          return a->from_ms > b->from_ms;
+                      });
+            int full_alpha_drawn = 0;
+            for (const FillSlabAnim* ap : ordered)
+            {
+                const FillSlabAnim& a = *ap;
+                const bool fading = a.fade_start_sec >= 0.f;
+                glm::vec4 col = fading ? kFillVolumeFading : kFillVolumeInflight;
+                if (fading)
+                {
+                    const float t =
+                        std::clamp((now - a.fade_start_sec) / kFillSlabFadeSec, 0.f, 1.f);
+                    const float u = t * t * (3.f - 2.f * t);
+                    col.a *= (1.f - u);
+                }
+                else
+                {
+                    if (full_alpha_drawn >= kMaxFullAlphaFillVolumes)
+                        col.a *= 0.35f; // extra queued: dim, not "another full load"
+                    else
+                        ++full_alpha_drawn;
+                }
+                if (col.a < 0.008f)
+                    continue;
+                const float z0 = ts_to_z(a.from_ms, timeline_origin_ms, meters_per_second);
+                const float z1 = ts_to_z(a.to_ms, timeline_origin_ms, meters_per_second);
+                if (in.frustum)
+                {
+                    const float z_lo = std::min(z0, z1);
+                    const float z_hi = std::max(z0, z1);
+                    const glm::vec3 center(0.f, 0.f, 0.5f * (z_lo + z_hi));
+                    const float pad = 1.15f;
+                    const glm::vec3 half(slab_half * pad, slab_half * pad,
+                                         std::max(0.5f, 0.5f * (z_hi - z_lo) * pad));
+                    if (!in.frustum->intersects_aabb(center, half))
+                        continue;
+                }
+                debug->add_z_slab(z0, z1, slab_half, col);
             }
         }
     }
@@ -1870,10 +2077,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         out.ui.net_domain = hud.domain;
         out.ui.net_status = hud.status;
         std::snprintf(out.ui.net_base_url, sizeof(out.ui.net_base_url), "%s", hud.base_url);
+        std::snprintf(out.ui.net_status_detail, sizeof(out.ui.net_status_detail), "%s",
+                      hud.status_detail);
         out.ui.lookback_windows_done = hud.lookback_windows_done;
         out.ui.lookback_windows_need = hud.lookback_windows_need;
         out.ui.lanes_with_frontier = hud.lanes_with_frontier;
         out.ui.open_confirm_walks = hud.open_confirm_walks;
+        out.ui.pending_dep_fills = hud.pending_dep_fills;
+        out.ui.timeline_holes = hud.timeline_holes;
         for (int i = 0; i < 16; ++i)
             out.ui.tip_height_by_lane[i] = hud.tip_height_by_lane[i];
         out.ui.stats_api_is_main = hud.stats_api_is_main;

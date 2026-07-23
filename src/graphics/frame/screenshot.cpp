@@ -1,6 +1,6 @@
 #include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 #include "graphics/gpu_prv_lib.h"
 #include "common/time_util.hpp"
 #include "common/env_util.hpp"
@@ -13,8 +13,8 @@ namespace
 {
 std::string make_default_path()
 {
-    gfx_platform_ensure_directory("docs");
-    gfx_platform_ensure_directory("docs/images");
+    gpu_platform_ensure_directory("docs");
+    gpu_platform_ensure_directory("docs/images");
 
     const std::time_t t = std::time(nullptr);
     std::tm tm_local{};
@@ -34,7 +34,7 @@ void ensure_parent_dirs(const std::string& path)
     {
         const std::string dir = path.substr(0, slash);
         if (!dir.empty())
-            gfx_platform_ensure_directory(dir.c_str());
+            gpu_platform_ensure_directory(dir.c_str());
     }
 }
 } // namespace
@@ -104,27 +104,32 @@ void GraphicsSystem::destroy_screenshot_staging_()
     screenshot_extent_w_ = screenshot_extent_h_ = 0;
 }
 
-void GraphicsSystem::record_screenshot_before_present_(VkCommandBuffer cmd, VkImage swapchain_image)
+void GraphicsSystem::record_screenshot_before_present_(VkCommandBuffer cmd, VkImage presentable_image)
 {
-    if (!cmd || swapchain_image == VK_NULL_HANDLE || screenshot_staging_ == VK_NULL_HANDLE ||
+    // F12 must run only after the final color pass for this frame (cubes + debug mesh +
+    // ImGui, and Sobel overlay when used). presentable_image is always the swapchain
+    // image that will be presented — never the MSAA multi-sample target.
+    if (!cmd || presentable_image == VK_NULL_HANDLE || screenshot_staging_ == VK_NULL_HANDLE ||
         screenshot_path_this_frame_.empty())
         return;
 
-    // Still acquired: last draw left COLOR_ATTACHMENT. Copy then present layout.
-    cmd_image_barrier(cmd, swapchain_image,
+    // Full pipeline visibility: all prior color writes (including resolve) before copy.
+    cmd_image_barrier(cmd, presentable_image,
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+        VK_PIPELINE_STAGE_2_COPY_BIT,
         { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
     VkBufferImageCopy region{};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
     region.imageExtent = { screenshot_extent_w_, screenshot_extent_h_, 1 };
-    vkCmdCopyImageToBuffer(cmd, swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    vkCmdCopyImageToBuffer(cmd, presentable_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            screenshot_staging_, 1, &region);
 
-    cmd_image_barrier(cmd, swapchain_image,
+    // Same image goes to the present engine next (post-final-draw, pre-present).
+    cmd_image_barrier(cmd, presentable_image,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_ACCESS_2_TRANSFER_READ_BIT, 0,
         VK_PIPELINE_STAGE_2_COPY_BIT, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
@@ -159,7 +164,7 @@ void GraphicsSystem::finish_screenshot_after_submit_()
             VK_SUCCESS &&
         mapped)
     {
-        ok = gfx_platform_write_png_rgba(
+        ok = gpu_platform_write_png_rgba(
             path.c_str(), static_cast<int>(screenshot_extent_w_),
             static_cast<int>(screenshot_extent_h_),
             static_cast<const unsigned char*>(mapped));
@@ -175,14 +180,14 @@ void GraphicsSystem::finish_screenshot_after_submit_()
 
     std::printf("[gfx] screenshot: GPU readback failed\n");
     const bool allow_blit = blockviz::env_flag("BLOCKVIZ_SCREENSHOT_WINDOW_BLIT", false);
-    if (!allow_blit || gfx_platform_is_headless() || !hwnd)
+    if (!allow_blit || gpu_platform_is_headless() || !hwnd)
     {
         std::printf("[gfx] screenshot failed: %s (set BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1 for "
                     "legacy window blit)\n",
                     path.c_str());
         return;
     }
-    if (gfx_platform_save_window_png(hwnd, path.c_str()))
+    if (gpu_platform_save_window_png(hwnd, path.c_str()))
         std::printf("[gfx] screenshot (window blit) saved: %s\n", path.c_str());
     else
         std::printf("[gfx] screenshot failed: %s\n", path.c_str());
