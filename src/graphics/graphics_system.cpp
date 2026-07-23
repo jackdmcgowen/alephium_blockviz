@@ -205,8 +205,10 @@ void GraphicsSystem::init()
     log_engine_startup(deviceProps, engine_id);
     query_optional_device_features(physicalDevice, device_optional_features_);
     log_optional_device_features(device_optional_features_);
-    // Classic cube path + GPU frustum cull (PR2). Mesh path remains PR3+.
-    create_device(instance, physicalDevice, surface, &device, &queues_);
+    // PR2 cull + classic always; PR3 enables mesh extension when hardware supports it.
+    create_device(instance, physicalDevice, surface, &device, &queues_,
+                 /*enable_mesh_shaders=*/device_optional_features_.mesh_path_usable(),
+                 &mesh_shaders_enabled_);
     buffer_manager_.reset(device, &deviceMemProps);
     sampler_table_.create(device);
 
@@ -236,6 +238,9 @@ void GraphicsSystem::init()
         pci.frame_ubo_layout = frame_descriptors_.layout();
         pci.graphics_family = queues_.family_index(QueueType::_3D);
         pci.compute_family = queues_.family_index(QueueType::CMP);
+        pci.enable_mesh_cube = mesh_shaders_enabled_;
+        pci.frame_ubo_buffer = frame_resources_.uniform_buffer();
+        pci.frame_ubo_range = sizeof(UniformBufferObject);
         main_scene_pass_.create(pci);
         instance_cull_pass_.create(pci);
         // Picker is 1×; selection pick uses cleared depth (independent of MSAA scene depth).
@@ -464,6 +469,9 @@ void GraphicsSystem::resize_internal()
         pci.frame_ubo_layout = frame_descriptors_.layout();
         pci.graphics_family = queues_.family_index(QueueType::_3D);
         pci.compute_family = queues_.family_index(QueueType::CMP);
+        pci.enable_mesh_cube = mesh_shaders_enabled_;
+        pci.frame_ubo_buffer = frame_resources_.uniform_buffer();
+        pci.frame_ubo_range = sizeof(UniformBufferObject);
         main_scene_pass_.recreate(pci);
         picker_pass_.recreate(pci);
         // Resources first (images + descriptors), then PSOs that bind their layouts.
@@ -640,8 +648,14 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.transition_color_to_present = !defer_present && !capture_screenshot;
     rp.profiler = prof;
 
-    // PR2: GPU frustum cull → compact SSBO + DrawIndexedIndirect (classic mesh still).
+    // PR2: GPU frustum cull → compact SSBO + classic DrawIndexedIndirect / mesh clamp.
     // Picker keeps pre-cull instance_buffer + host instance_count for stable IDs.
+    // PR3: mesh cube path when device enabled + prefer flag + PSO ready.
+    rp.use_mesh_cube_path =
+        prefer_mesh_cube_ && mesh_shaders_enabled_ && main_scene_pass_.mesh_cube_ready();
+    if (frame_resources_.cull_buffers_ready())
+        rp.cull_draw_args_buffer = frame_resources_.cull_draw_args_buffer();
+
     const bool use_cull =
         instance_cull_pass_.ready() && frame_resources_.cull_buffers_ready() &&
         instanceCount > 0;

@@ -26,7 +26,7 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, `SceneViewFilters`, pick types |
 | `gpu_prv_lib.h` | Vulkan free-function surface (private) — implemented under `core/` |
 | `core/` | Instance/device/swapchain, buffer/image/sampler, shader/pipeline/descriptor (Vulkan lifetime primitives) |
-| `engine_requirements.*` | Required features + optional query (`DeviceOptionalFeatures`: mesh shaders log-only until mesh PR) |
+| `engine_requirements.*` | Required features + optional query (`DeviceOptionalFeatures`: mesh shaders); `create_device` enables `VK_EXT_mesh_shader` when usable |
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `sampler.*` | `SamplerTable` by `SamplerFilter` index (shared; not pass-private) |
 | `frame/` | Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes |
@@ -56,7 +56,9 @@ render thread (frame_loop.cpp):
   IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
   publish_frame / upload
   InstanceCullPass (compute in graphics CB): frustum cull → compact SSBO + indirect args
-  MainScenePass: cubes (DrawIndexedIndirect when cull ready) → debug mesh → ImGui
+  MainScenePass cubes:
+    mesh path (if VK_EXT_mesh_shader enabled): DrawMeshTasksEXT from instance SSBO
+    classic path: VBO/IBO DrawIndexed / DrawIndexedIndirect after cull
   optional PickerPass (pre-cull instance buffer; policy stays on GS)
   optional SobelAsyncPass executor:
     OutlinePass → CMP SobelComputePass → EdgeOverlayPass → present

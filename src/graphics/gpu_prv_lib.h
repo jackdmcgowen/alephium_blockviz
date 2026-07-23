@@ -32,12 +32,16 @@ VkPhysicalDevice pick_physical_device(
     VkPhysicalDeviceMemoryProperties* device_mem_props);
 
 // Creates device with _3D / TX / CMP queues (see QueueType). surface used for present support.
+// When enable_mesh_shaders is true and the device supports VK_EXT_mesh_shader + meshShader,
+// enables the extension/feature (required for mesh cube PSO). Sets *mesh_enabled when armed.
 void create_device(
     VkInstance          instance,
     VkPhysicalDevice    physicalDevice,
     VkSurfaceKHR        surface,
     VkDevice           *device,
-    DeviceQueues       *out_queues);
+    DeviceQueues       *out_queues,
+    bool                enable_mesh_shaders = false,
+    bool*               mesh_enabled = nullptr);
 void destroy_device(VkDevice device);
 
 uint32_t find_device_memory_type(
@@ -210,6 +214,9 @@ struct GraphicsPipelineCreateInfo
 
     bool dynamic_viewport_scissor = true;
     bool dynamic_primitive_topology = false;
+
+    // VK_EXT_mesh_shader graphics PSO: mesh (+ optional task) + fragment; no vertex input.
+    bool mesh_shading = false;
 };
 
 // Unified create: type selects graphics vs compute path. Throws on failure.

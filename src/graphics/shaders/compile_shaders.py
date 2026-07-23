@@ -5,8 +5,14 @@ import glob
 import sys
 
 def get_shader_stage(filename):
-    """Infer shader stage from filename."""
-    name = os.path.splitext(filename.lower())[0]
+    """Infer shader stage from filename (e.g. cube.mesh.glsl → mesh)."""
+    name = os.path.splitext(filename.lower())[0]  # strip .glsl
+    # Prefer explicit stage tokens in multi-part stems (cube.mesh, foo.task).
+    parts = name.split(".")
+    if "mesh" in parts or name.endswith("mesh"):
+        return "mesh"
+    if "task" in parts or name.endswith("task"):
+        return "task"
     if "vert" in name:
         return "vertex"
     elif "frag" in name:
@@ -34,7 +40,11 @@ def compile_shader(input_file, output_file):
         return False
 
     stage = get_shader_stage(input_file)
-    cmd = ["glslc", "-fshader-stage=" + stage, input_file, "-o", output_file]
+    # Mesh/task need SPIR-V high enough for GL_EXT_mesh_shader (vulkan1.3 → spv1.6).
+    cmd = ["glslc", "-fshader-stage=" + stage]
+    if stage in ("mesh", "task"):
+        cmd += ["--target-env=vulkan1.3"]
+    cmd += [input_file, "-o", output_file]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:

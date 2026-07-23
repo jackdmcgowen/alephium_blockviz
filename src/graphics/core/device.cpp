@@ -145,11 +145,15 @@ void create_device(
     VkPhysicalDevice    physicalDevice,
     VkSurfaceKHR        surface,
     VkDevice           *device,
-    DeviceQueues       *out_queues)
+    DeviceQueues       *out_queues,
+    bool                enable_mesh_shaders,
+    bool*               mesh_enabled)
 {
     (void)instance;
     if (!device || !out_queues)
         throw std::runtime_error("create_device: null out params");
+    if (mesh_enabled)
+        *mesh_enabled = false;
 
     DeviceQueues qinfo{};
     select_queue_families(physicalDevice, surface, qinfo);
@@ -178,15 +182,31 @@ void create_device(
         queue_cis[i].pQueuePriorities = &priority;
     }
 
+    DeviceOptionalFeatures opt{};
+    query_optional_device_features(physicalDevice, opt);
+    const bool arm_mesh = enable_mesh_shaders && opt.mesh_path_usable();
+
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vulkan13Features.dynamicRendering = VK_TRUE;
     vulkan13Features.synchronization2 = VK_TRUE;
+    // Mesh SPIR-V from glslc may use LocalSizeId; requires maintenance4 (VUID-…-06434).
+    vulkan13Features.maintenance4 = VK_TRUE;
 
     VkPhysicalDeviceVulkan12Features vulkan12Features{};
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vulkan12Features.timelineSemaphore = VK_TRUE;
     vulkan12Features.pNext = &vulkan13Features;
+
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    if (arm_mesh)
+    {
+        meshFeatures.meshShader = VK_TRUE;
+        // Task optional; PR3 is mesh-only (one WG per instance).
+        meshFeatures.taskShader = VK_FALSE;
+        meshFeatures.pNext = &vulkan12Features;
+    }
 
     VkPhysicalDeviceFeatures deviceFeatures{};
     VkDeviceCreateInfo createInfo{};
@@ -194,10 +214,14 @@ void create_device(
     createInfo.pQueueCreateInfos = queue_cis.data();
     createInfo.queueCreateInfoCount = unique_count;
     createInfo.pEnabledFeatures = &deviceFeatures;
-    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    createInfo.enabledExtensionCount = 1;
+
+    const char* ext_swapchain = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    const char* ext_mesh = VK_EXT_MESH_SHADER_EXTENSION_NAME;
+    const char* extensions[2] = { ext_swapchain, ext_mesh };
+    createInfo.enabledExtensionCount = arm_mesh ? 2u : 1u;
     createInfo.ppEnabledExtensionNames = extensions;
-    createInfo.pNext = &vulkan12Features;
+    createInfo.pNext = arm_mesh ? static_cast<void*>(&meshFeatures)
+                                : static_cast<void*>(&vulkan12Features);
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, device) != VK_SUCCESS)
     {
@@ -212,6 +236,10 @@ void create_device(
     }
 
     *out_queues = qinfo;
+    if (mesh_enabled)
+        *mesh_enabled = arm_mesh;
+    if (arm_mesh)
+        std::printf("[engine] mesh_shaders=enabled (VK_EXT_mesh_shader + meshShader)\n");
 }
 
 void destroy_device(VkDevice device)

@@ -136,7 +136,7 @@ void log_engine_startup(const VkPhysicalDeviceProperties& props,
 
 void log_optional_device_features(const DeviceOptionalFeatures& opt)
 {
-    // Product draw still uses classic instanced path until mesh PR lands.
+    // "available" = hardware can do mesh; create_device may set "enabled" on the log line after.
     std::printf("[engine] mesh_shaders=%s (ext=%s meshFeature=%s taskFeature=%s)\n",
                 opt.mesh_path_usable() ? "available" : "off",
                 opt.mesh_shader_ext ? "yes" : "no",

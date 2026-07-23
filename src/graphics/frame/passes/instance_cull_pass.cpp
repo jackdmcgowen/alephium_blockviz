@@ -145,7 +145,7 @@ void InstanceCullPass::record_cull(const InstanceCullRecordParams& p)
     const uint32_t groups = (p.instance_count + 63u) / 64u;
     vkCmdDispatch(p.cmd, groups, 1, 1);
 
-    // Compute write → vertex / draw indirect.
+    // Compute write → classic vertex/indirect and/or mesh shader SSBO read (PR3).
     {
         VkMemoryBarrier2 mem{};
         mem.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
@@ -153,7 +153,9 @@ void InstanceCullPass::record_cull(const InstanceCullRecordParams& p)
         mem.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
         mem.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT |
                            VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
-                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                           VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT |
+                           VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT;
         mem.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT |
                             VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
                             VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
