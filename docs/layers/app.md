@@ -39,6 +39,8 @@ The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platf
 
 **Threading:** Main thread = platform message pump + idle sleep. Overlay `draw()` and `ScenePresenter::prepare` run on the **graphics render thread**. Overlay must only read `UiSnapshot` / engine selection APIs, not live `BlockScene` without a published snapshot.
 
+**Dense N / FPS:** `prepare` holds `BlockScene` mutex and may rebuild **full polar layout** when the graph generation changes (every network admit). That host work is the usual framerate limit with thousands of blocks — not GPU overdraw. Prefer shorter critical sections and amortized layout (see [network.md](network.md#interaction-with-graphics--frame-rate), [perf-bottlenecks.md](../perf-bottlenecks.md)). Opaque instance front-to-back sort runs after build for early-Z only.
+
 ### Visual model (production)
 
 Documented in `scene_presenter.hpp` — keep layout spacing stable:

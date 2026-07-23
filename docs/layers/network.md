@@ -112,6 +112,37 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 - Slim unpinned txn payloads; pin selection for full detail; refill via engine/adapter when inspector needs payloads again.
 - `txn_count` survives slim for billboards / multi-tx filter.
 
+### Interaction with graphics / frame rate
+
+Network **never** touches Vulkan or records command buffers. FPS under “thousands of blocks” is still coupled through **shared `BlockScene`**:
+
+```text
+HttpIoPool (async GET)  →  poller drain / admit / mark_confirmed
+                              locks BlockScene::mu_
+                              bumps graph_generation
+Render thread prepare()  →  locks same mu_ for (today) the whole prepare
+                              if gen changed: snapshot ALL nodes + full layout rebuild
+                              ring filter → instances → publish_frame (GPU cheap)
+```
+
+| Fact | Implication |
+|------|-------------|
+| Dense benches: **Prepare ~18–27 ms**, Cubes GPU ≪ 0.1 ms | Hitch is **host layout + lock**, not mesh/overdraw |
+| Every admit bumps `graph_generation` | Continuous live growth rebuilds layout **most frames** |
+| Render ring (7 G) limits **draw** set only | Does **not** limit full-graph layout cost |
+| HTTP is already async (pool + ≤4 interval GETs) | Non-blocking network I/O; **admit + prepare** remain the coupling |
+
+**Do not** fix this with **secondary command buffers per 64s subsegment**: the product draw is one instanced/mesh pass over a **per-frame** `GpuInstance[]` (camera, frustum, fade, selection change every frame). Pre-recorded subseg CBs would go stale immediately and network never records Vulkan. Prefer simpler data-path work (see Plan).
+
+**Keep graphics non-blocking (direction):**
+
+1. Shrink prepare critical section (snapshot under lock → unlock → layout).  
+2. Amortize / incremental layout so cost tracks ΔN not full N.  
+3. Optional per-pump admit budget to soften mutex + gen churn.  
+4. Keep existing rings, soft prune, disk-first, history mode (already reduce pressure).
+
+Measure: F3 `Prepare` vs `Cubes*` while scrolling history; benches `fake_overdraw_end_z*`. Details: [perf-bottlenecks.md](../perf-bottlenecks.md).
+
 ## Goals
 
 1. Reliable BlockFlow ingest from config/node URLs with **success-only** watermark advance.
@@ -120,6 +151,7 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 4. Inspector continuity (`AlphDetailStore` + refill).
 5. Keep REST/cJSON/curl out of graphics and app chrome TUs.
 6. HUD observability: status, lookback windows, frontier lanes, open walks (`publish_hud` → scene → snapshot).
+7. **Minimize render-thread stalls**: short scene-lock holds; avoid full-graph host work on every admit (layout amortize / unlock snapshot — plan items below).
 
 ## Non-goals
 
@@ -128,7 +160,7 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 | Auth / retry / multi-endpoint HA platform | Modularization non-goal; REST poll is v1 |
 | WebSocket as prerequisite | Optional later; REST default |
 | Product visual semantics | **App** |
-| Vulkan / render thread | **Graphics** |
+| Vulkan / render thread / secondary CBs for subsegs | **Graphics** host path; wrong fix for Prepare cost |
 | Second real chain in the same breath as FakeChain | Prove multi-adapter with Debug first |
 | Changing uncle/orphan product policy in docs | Code policy stays until an explicit product change |
 | Structured logging framework | printf + HUD OK |
@@ -144,8 +176,12 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 | **Done** | Camera-subseg history walk | inflight starts at eye 64s cell → next unfilled |
 | **Done** | Three-ring segments | load **15** / admit+render **7** / live open **64s** |
 | **Done** | HttpIoPool + async interval GETs | Workers overlap timeline RTT; `mod_network` |
-| **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
 | **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |
+| **P0** | Doc: network ↔ prepare FPS coupling | This section + perf-bottlenecks |
+| **P1** | Snapshot under lock → unlock → layout | App prepare; network admits during layout |
+| **P1** | Amortize / incremental layout | Cap Prepare under continuous admit |
+| **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
+| **P2** | Per-pump admit budget | Soften mutex burst + gen churn |
 | **Standing** | Keep phases, dual-write, thread contract accurate | Hygiene when adapter policy shifts |
 | **P1** | Config / URL resolution notes | `config.json` array + `network_domain_resolve_url` |
 | **P2** | Optional websocket tip stream | Focused feature, not a networking rewrite |
@@ -170,18 +206,21 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 
 ### Threading
 
-| Thread | Work |
-|--------|------|
-| Network / poller | Policy: poll schedule, drain results, admit, confirm, cache, scene writes |
-| **HttpIoPool workers** (default 6) | REST GETs only (interval chunks, block-by-hash, …); private curl / transport |
-| UI / render | Must not call into `MainChainCache`; domain switch may **block** until poller restarted |
+| Thread | Work | Contends with render when… |
+|--------|------|----------------------------|
+| Network / poller | Policy: poll schedule, drain results, **admit**, confirm, cache, scene writes | Holds `BlockScene` mutex |
+| **HttpIoPool workers** (default 6) | REST GETs only (interval chunks, block-by-hash, …); private curl / transport | **Never** (until poller drain) |
+| **Render** (`prepare` + GPU record) | `ScenePresenter::prepare` under same mutex; then publish + draw | Long prepare **stalls admits**; waits on mutex if poller holds it |
+| UI (main / overlay) | Must not call into `MainChainCache`; domain switch may **block** until poller restarted | Domain switch only |
 
 Timeline `blocks-with-events` chunks are **enqueued** to the pool (inflight cap ~4) so bootstrap/history RTT overlaps; poller **admits** on drain. VnV: `vnv/mod/tests/network/` (`mod_network`).
 
 ## Related
 
 - [layers/README.md](README.md) — confirmation split table
-- [app.md](app.md) — presentation of confirmed state
+- [app.md](app.md) — presentation of confirmed state; prepare on render thread
+- [graphics.md](graphics.md) — GPU path stays light; dense-N limit is host prepare
+- [perf-bottlenecks.md](../perf-bottlenecks.md) — Prepare vs Cubes measurements
 - [engine.md](engine.md) — `INetworkSystem` on facade
 - Historical: [blockflow-confirmed-tips-design.md](../blockflow-confirmed-tips-design.md) (dual-write matrix still conceptually valid; paths evolved to `src/network/alephium/`)
 - Historical: [graphics-modularization-design.md](../graphics-modularization-design.md) (adapter + detail store goals)

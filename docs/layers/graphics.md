@@ -93,6 +93,10 @@ Toggle: `GraphicsSystem::set_prefer_mesh_cube(bool)` (fallback classic kept fore
 
 Profiler scopes: `InstanceCullCMP`, `CubesMesh` / `CubesClassic`, `Picker`, `SelectionDepth`, `SobelAsyncCMP`, `EdgeOverlay`. See [perf-bottlenecks.md](../perf-bottlenecks.md).
 
+### Dense scene / network coupling
+
+GPU cube path (cull + mesh/classic) stays cheap with large N. Frame time under heavy admit is dominated by **host `Prepare`** on the render thread (`ScenePresenter` locks `BlockScene`, may full-rebuild layout when `graph_generation` changes). Network never records Vulkan; HTTP is async. **Do not** reach for secondary command buffers per timeline subsegment — fix prepare lock/layout first. Full write-up: [network.md § Interaction with graphics](network.md#interaction-with-graphics--frame-rate).
+
 ### IPass + task graph
 
 Every render pipeline is an **`IPass`**: private PSO create/destroy helpers, public `create` / `destroy` / `record` / `declare_resources`.  
