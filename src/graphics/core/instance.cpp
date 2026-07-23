@@ -1,7 +1,7 @@
 #include "graphics/pch.h"
 #include "gpu_prv_lib.h"
 #include "engine_requirements.hpp"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 #include <cstring>
 #include <vector>
@@ -76,7 +76,7 @@ VkInstance create_instance(const SoftwareIdentity& application,
 #endif
     {
         const char* surf[4] = {};
-        const uint32_t n = gfx_platform_surface_extension_names(surf, 4);
+        const uint32_t n = gpu_platform_surface_extension_names(surf, 4);
         for (uint32_t i = 0; i < n && ext_count < 8; ++i)
         {
             if (instance_extension_available(surf[i]))

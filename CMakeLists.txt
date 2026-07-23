@@ -74,12 +74,12 @@ endif()
 # ---------------------------------------------------------------------------
 if(WIN32)
   set(APP_PLATFORM_SRC src/app/platform/app_platform_win32.cpp)
-  set(GFX_PLATFORM_SRC src/graphics/platform/gfx_platform_win32.cpp)
+  set(gpu_platform_SRC src/graphics/platform/gpu_platform_win32.cpp)
   set(NET_PLATFORM_SRC src/network/platform/net_platform_win32.cpp)
   set(IMGUI_PLATFORM_SRC ${IMGUI_ROOT}/backends/imgui_impl_win32.cpp)
 else()
   set(APP_PLATFORM_SRC src/app/platform/app_platform_linux.cpp)
-  set(GFX_PLATFORM_SRC src/graphics/platform/gfx_platform_linux.cpp)
+  set(gpu_platform_SRC src/graphics/platform/gpu_platform_linux.cpp)
   set(NET_PLATFORM_SRC src/network/platform/net_platform_linux.cpp)
   set(IMGUI_PLATFORM_SRC ${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp)
 endif()
@@ -158,23 +158,23 @@ target_link_libraries(network PUBLIC CURL::libcurl ZLIB::ZLIB ${CJSON_LIBRARY} T
 # graphics
 # ---------------------------------------------------------------------------
 add_library(graphics STATIC
-  src/graphics/buffer.cpp
+  src/graphics/core/buffer.cpp
   src/graphics/buffer_manager.cpp
   src/graphics/camera.cpp
   src/graphics/debug/debug_drawer.cpp
   src/graphics/mesh_arena.cpp
-  src/graphics/device.cpp
-  src/graphics/descriptor.cpp
+  src/graphics/core/device.cpp
+  src/graphics/core/descriptor.cpp
   src/graphics/engine_requirements.cpp
-  src/graphics/image.cpp
-  src/graphics/instance.cpp
-  src/graphics/pipeline.cpp
-  src/graphics/shader.cpp
-  src/graphics/sampler.cpp
-  src/graphics/surface.cpp
-  src/graphics/swapchain.cpp
-  src/graphics/validation.cpp
-  src/graphics/platform/gfx_platform_common.cpp
+  src/graphics/core/image.cpp
+  src/graphics/core/instance.cpp
+  src/graphics/core/pipeline.cpp
+  src/graphics/core/shader.cpp
+  src/graphics/core/sampler.cpp
+  src/graphics/core/surface.cpp
+  src/graphics/core/swapchain.cpp
+  src/graphics/core/validation.cpp
+  src/graphics/platform/gpu_platform_common.cpp
   src/graphics/graphics_system.cpp
   src/graphics/frame/frame_sync.cpp
   src/graphics/frame/frame_resources.cpp
@@ -196,7 +196,7 @@ add_library(graphics STATIC
   src/graphics/frame/frame_loop.cpp
   src/graphics/frame/screenshot.cpp
   src/graphics/frame/swapchain_targets.cpp
-  ${GFX_PLATFORM_SRC}
+  ${gpu_platform_SRC}
   ${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp
 )
 blockviz_target_common(graphics)

@@ -77,10 +77,9 @@ public:
     virtual AlphBlock copy_selected_block() const = 0;
     // Inspector Deps list hover (empty clears); used to recolor selection arrows.
     virtual void set_ui_dep_hover(const std::string& hash) = 0;
-    // Scene view filter: only blocks with txn_count > 1.
-    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
-    // Min block total output ALPH (human units, e.g. 1.5); 0 = off.
-    virtual void set_scene_filter_min_alph(double min_alph) = 0;
+    // Scene draw filters (multi-tx / min ALPH / unconfirmed-only). Selection always drawn.
+    virtual void set_scene_view_filters(const SceneViewFilters& filters) = 0;
+    virtual SceneViewFilters scene_view_filters() const = 0;
     // Client-area PNG capture (includes ImGui). Empty path auto-names under docs/images/.
     virtual void request_screenshot(const char* path_utf8) = 0;
     virtual std::string consume_detail_refill_request() = 0;
@@ -137,8 +136,8 @@ public:
     virtual bool is_selected(const std::string& hash) const = 0;
     virtual AlphBlock copy_selected_block() const = 0;
     virtual void set_ui_dep_hover(const std::string& hash) = 0;
-    virtual void set_scene_filter_multi_tx(bool enabled) = 0;
-    virtual void set_scene_filter_min_alph(double min_alph) = 0;
+    virtual void set_scene_view_filters(const SceneViewFilters& filters) = 0;
+    virtual SceneViewFilters scene_view_filters() const = 0;
     virtual void request_screenshot(const char* path_utf8) = 0;
     virtual std::string consume_detail_refill_request() = 0;
 

@@ -4,8 +4,8 @@ Cross-platform **Vulkan + ImGui** visualizer for **Alephium BlockFlow** — sixt
 
 | | |
 |--|--|
-| **Host** | Alephium BlockFlow **1.2.0** (`src/app/app_identity.hpp`) |
-| **Engine** | BlockvizEngine **1.2.0** (`src/engine/engine_identity.hpp`) |
+| **Host** | Alephium BlockFlow **1.3.0** (`src/app/app_identity.hpp`) |
+| **Engine** | BlockvizEngine **1.3.0** (`src/engine/engine_identity.hpp`) |
 | **Windows** | `sln/alephium_visualizer.sln` (MSVC) |
 | **Linux** | CMake + GLFW — [docs/linux.md](docs/linux.md) |
 | **VnV** | `vnv/` · [TESTING.md](vnv/TESTING.md) · `sln/blockviz_vnv.sln` · `.\scripts\run_vnv.ps1` / `./scripts/run_vnv.sh` |
@@ -13,7 +13,7 @@ Cross-platform **Vulkan + ImGui** visualizer for **Alephium BlockFlow** — sixt
 
 Release tags on `main`: `app-vMAJOR.MINOR.PATCH` + `engine-v…` — see [AGENTS.md](AGENTS.md).
 
-**Timeline & fill guide (HTML):** [docs/user-guide-timeline.html](docs/user-guide-timeline.html) — 64s grid, rings, concurrent loads, color legend.
+**Docs hub (HTML):** [docs/index.html](docs/index.html) — timeline, network fill, legend, controls, architecture.
 
 ## Platform support
 
@@ -31,7 +31,7 @@ Release tags on `main`: `app-vMAJOR.MINOR.PATCH` + `engine-v…` — see [AGENTS
 - 3D BlockFlow cubes + tip/selection **Sobel** outlines
 - Selection + dependency BFS fan; camera **End** / **Side** / **Live** (keys **1** / **2** / **3**)
 - Timeline **64s subsegments** · **640s G-segments** · Z-proportional minimap
-- Visible-ring history fill (≤**4** concurrent interval GETs); live tip open **64s** cell first
+- History fill from **camera 64s subseg** → next unfilled (≤**4** concurrent GETs); live tip open **64s** cell first
 - Gray translucent volumes = history fills in flight (fade when admitted)
 - **F3** profiler · **F12** GPU screenshot (final swapchain after scene+UI, before present) · **F11** fullscreen
 

@@ -115,7 +115,7 @@ Requires a Vulkan ICD (Mesa lavapipe is fine). Golden policy: [vnv/int/tests/vis
 | Target | TU |
 |--------|-----|
 | app | `src/app/platform/app_platform_linux.cpp` (GLFW) |
-| graphics | `src/graphics/platform/gfx_platform_linux.cpp` |
+| graphics | `src/graphics/platform/gpu_platform_linux.cpp` |
 | network | `src/network/platform/net_platform_linux.cpp` |
 
 MSVC continues to compile only `*_win32.cpp`.

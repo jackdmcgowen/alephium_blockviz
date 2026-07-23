@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Network fill policy</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+    <a class="current" href="user-guide-network-fill.html">Network fill</a>
+    <a href="user-guide-legend.html">Legend</a>
+    <a href="user-guide-controls.html">Controls</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
+<main>
+  <h1>Network fill policy</h1>
+  <p class="muted">How interval GETs are ordered so cubes and gray volumes appear near the camera first.</p>
+
+  <h2>Grid</h2>
+  <table>
+    <tr><th>Unit</th><th>Length</th><th>Role</th></tr>
+    <tr><td>Subsegment</td><td><code>64s</code></td><td>Atomic HTTP + disk key</td></tr>
+    <tr><td>G-segment</td><td><code>640s</code> (10×64s)</td><td>Genesis-aligned window</td></tr>
+    <tr><td>Live open cell</td><td>one 64s</td><td><code>[floor(now), next boundary)</code></td></tr>
+  </table>
+
+  <h2>Rings</h2>
+  <table>
+    <tr><th>Ring</th><th>Size</th><th>Role</th></tr>
+    <tr><td>Load / schedule</td><td>15 G</td><td>Which G may be scheduled</td></tr>
+    <tr><td>Admit / render</td><td>7 G</td><td>Draw + network body / fill corridor</td></tr>
+    <tr><td>Live open</td><td>1 × 64s</td><td>Tip poll priority every pump</td></tr>
+  </table>
+
+  <h2>Enqueue order (each pump)</h2>
+  <ol>
+    <li><strong>Live first</strong> — when camera is on the live tip segment, force the open 64s cell if needed.</li>
+    <li><strong>Disk</strong> — try admit for lookback <code>k</code> in the visible 7-G ring.</li>
+    <li><strong>History from camera</strong> — map camera Z → genesis-aligned 64s cell (<code>cam_sub</code>), then:
+      <ul>
+        <li>enqueue holes from the eye (or resume cursor) walking <strong>older</strong>,</li>
+        <li>when the crawl hits the admit-ring edge, <strong>stop</strong> — do not spend budget toward the tip,</li>
+        <li>only after older-in-ring is complete, fill <strong>newer</strong> toward the live open edge,</li>
+        <li>when the camera catches up / ring expands, <strong>resume</strong> the older frontier (no index jump).</li>
+      </ul>
+    </li>
+    <li><strong>Dep-critical holes</strong> — priority patches after the camera walk, if budget remains.</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Concurrent interval GETs ≤ 4</strong>
+    (<code>HttpIoPool::kDefaultMaxInflightIntervals</code>).
+    Multiple 64s holes in the <em>same</em> G may be in flight together so the pool is not stuck on one subseg per window.
+  </div>
+
+  <h2>What you should see</h2>
+  <ul>
+    <li>Gray translucent volumes appear first <strong>near the camera</strong>, then crawl into neighbors.</li>
+    <li>Up to <strong>4</strong> full-opacity volumes ≈ true concurrent HTTP intervals.</li>
+    <li>The live tip open cell is never drawn as a gray history volume.</li>
+    <li>History ranges always stay strictly older than the open live cell.</li>
+  </ul>
+
+  <h2>Status strings</h2>
+  <table>
+    <tr><th>Status</th><th>Meaning</th></tr>
+    <tr><td>Bootstrapping</td><td>Cold start toward live tip-ready</td></tr>
+    <tr><td>Stable</td><td>Live tip path usable; history may still backfill</td></tr>
+    <tr><td>History</td><td>Camera lookback off live; tip growth halted</td></tr>
+    <tr><td>Catching up</td><td>Returned to live; filling missed 64s cells</td></tr>
+  </table>
+
+  <h2>Deep docs</h2>
+  <ul>
+    <li><a href="layers/network.md">docs/layers/network.md</a> — adapter phases, rings, cache</li>
+    <li><a href="segment-disk-cache.md">segment-disk-cache.md</a> — disk schema</li>
+  </ul>
+
+  <div class="pager">
+    <a href="user-guide-timeline.html">← Timeline</a>
+    <a href="user-guide-legend.html">Legend →</a>
+  </div>
+  <footer>Source of truth for agents: <code>docs/layers/network.md</code></footer>
+</main>
+</body>
+</html>

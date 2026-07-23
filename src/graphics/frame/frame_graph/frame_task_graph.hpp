@@ -2,7 +2,7 @@
 
 // Lightweight GPU pass DAG: topology + image barriers on edges (G2).
 // Passes record into caller-provided command buffers; multi-queue submits stay in the executor.
-#include "graphics/queue_types.hpp"
+#include "graphics/core/queue_types.hpp"
 
 #include <vulkan/vulkan.h>
 

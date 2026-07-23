@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Controls</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+    <a href="user-guide-network-fill.html">Network fill</a>
+    <a href="user-guide-legend.html">Legend</a>
+    <a class="current" href="user-guide-controls.html">Controls</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
+<main>
+  <h1>Controls</h1>
+  <p class="muted">Keyboard and mouse on the product window (Windows Win32 host / Linux GLFW).</p>
+
+  <h2>Camera</h2>
+  <table>
+    <tr><th>Input</th><th>Action</th></tr>
+    <tr><td><strong>1</strong></td><td>End view</td></tr>
+    <tr><td><strong>2</strong></td><td>Side view</td></tr>
+    <tr><td><strong>3</strong></td><td>Jump to live tip</td></tr>
+    <tr><td><strong>V</strong></td><td>Toggle End / Side</td></tr>
+    <tr><td>Scroll</td><td>Move along timeline Z (detach auto-follow when scrubbing history)</td></tr>
+    <tr><td>LMB drag</td><td>Look</td></tr>
+    <tr><td>RMB drag</td><td>Pan</td></tr>
+    <tr><td>Click cube</td><td>Select + look-aim</td></tr>
+    <tr><td>Minimap click</td><td>Teleport to segment bin</td></tr>
+  </table>
+
+  <h2>System</h2>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><strong>F3</strong></td><td>Frame profiler HUD</td></tr>
+    <tr><td><strong>F11</strong></td><td>Borderless fullscreen toggle</td></tr>
+    <tr><td><strong>Esc</strong></td><td>Exit fullscreen if FS; else quit (windowed)</td></tr>
+    <tr><td><strong>F12</strong></td><td>GPU screenshot of final presentable frame (scene + ImGui)</td></tr>
+  </table>
+
+  <p class="muted">Screenshots land under <code>docs/images/capture_YYYYMMDD_HHMMSS.png</code>.</p>
+
+  <div class="pager">
+    <a href="user-guide-legend.html">← Legend</a>
+    <a href="architecture.html">Architecture →</a>
+  </div>
+  <footer>Also summarized in <a href="../README.md">README.md</a></footer>
+</main>
+</body>
+</html>

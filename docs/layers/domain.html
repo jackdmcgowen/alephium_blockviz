@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Domain layer</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a class="current" href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>Domain layer</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="domain.md"><code>domain.md</code></a>.</p>
+<p>Shared <strong>data plane</strong> for BlockFlow visualization (<code>src/domain/</code>). Not a static lib by itself — sources compile into the host app (<code>block_scene</code>, <code>block_graph</code>, <code>layout</code>) while <code>AlphDetailStore</code> lives under <code>network</code> but is owned through <code>BlockScene</code>.</p>
+<h2>Overview</h2>
+<p>Domain holds chain-agnostic graph metadata, the live scene (confirmed frontiers, uncles, feed, HUD bag), and polar layout. <strong>Network</strong> writes; <strong>app</strong> <code>ScenePresenter</code> reads under the scene mutex; <strong>graphics</strong> may hold a <code>BlockScene*</code> for selection detail only.</p>
+<h2>Ownership boundary</h2>
+<table>
+<tr><th>Owns</th><th>Must not own</th></tr>
+<tr><td><code>BlockGraph</code> nodes/edges, prune helpers</td><td>Vulkan, ImGui chrome</td></tr>
+<tr><td><code>BlockScene</code> confirmed bag / <code>H_c</code> / feed / network HUD copy</td><td>REST / <code>is_main</code> policy</td></tr>
+<tr><td><code>PolarShardLayout</code> positions + session Z origins</td><td>Poll watermark</td></tr>
+<tr><td><code>alph_block.hpp</code> parse model (shared)</td><td>Curl lifecycle</td></tr>
+</table>
+<h2>Current surface</h2>
+<table>
+<tr><th>Path</th><th>Role</th></tr>
+<tr><td><code>block_graph.*</code></td><td>Metadata graph + optional edges; <code>prune(min_ts, max_nodes)</code></td></tr>
+<tr><td><code>block_scene.*</code></td><td>Ingest, confirm, uncles, feed, HUD, detail store, scene-level <code>prune</code></td></tr>
+<tr><td><code>layout.*</code></td><td>16-lane polar layout; <code>txn_count</code> on placements</td></tr>
+<tr><td><code>alph_block.hpp</code></td><td>Alephium block/txn parse + constants (<code>ALPH_*</code>)</td></tr>
+</table>
+<h3>Confirm vs present</h3>
+<table>
+<tr><th>Concern</th><th>Layer</th></tr>
+<tr><td><code>mark_confirmed</code> / dual-write</td><td><strong>network</strong></td></tr>
+<tr><td>Solid / green / cyan / orange drawing</td><td><strong>app</strong></td></tr>
+<tr><td>Sobel multi-draw</td><td><strong>graphics</strong></td></tr>
+</table>
+<h3>Retention (<code>BlockScene::prune</code>)</h3>
+<ul>
+<li>Drops nodes older than <code>min_timestamp_ms</code> and/or excess over <code>max_nodes</code>.</li>
+<li><strong>Protects</strong> per-lane confirmed tips, pending tips, and frontier-walk hashes.</li>
+<li>Removes matching detail-store entries, confirmed bag membership, uncles, feed rows.</li>
+<li>Invoked from the network poller (~2× lookback, cap 12k) and FakeChain (soft cap).</li>
+</ul>
+<h2>Goals</h2>
+<ol>
+<li>Single source of truth for live block identity + layout inputs.</li>
+<li>Thread-safe scene mutex for network write / presenter read.</li>
+<li>Confirmation state without putting Alephium policy in the graph node type.</li>
+<li>Bounded memory via prune (not unbounded session growth).</li>
+<li>Layout parity for 16-shard polar presentation.</li>
+</ol>
+<h2>Non-goals</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>HTTP / main-chain API</td><td><strong>network</strong></td></tr>
+<tr><td>Cube shaders / pick images</td><td><strong>graphics</strong></td></tr>
+<tr><td>Explorer URLs / chrome</td><td><strong>app</strong></td></tr>
+<tr><td>Full ECS</td><td>Overkill</td></tr>
+</table>
+<h2>Plan</h2>
+<table>
+<tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
+<tr><td><strong>Done</strong></td><td>Scene confirm + frontier heights</td><td>Evolved past original tips design</td></tr>
+<tr><td><strong>Done</strong></td><td>Scene-level prune + poller/FakeChain hooks</td><td>Protects frontier tips</td></tr>
+<tr><td><strong>P1</strong></td><td>Stronger GC of non-tip <code>confirmed_</code> bag</td><td>Optional; bag can still grow with marks</td></tr>
+<tr><td><strong>P2</strong></td><td>First-class graph edge visualization inputs</td><td>App product decision (ROADMAP)</td></tr>
+</table>
+<h2>Interfaces</h2>
+<ul>
+<li><strong>In:</strong> <code>add_block</code> / <code>remove_block</code> / <code>mark_confirmed</code> / <code>mark_uncle</code> / <code>set_network_hud</code> / <code>prune</code></li>
+<li><strong>Out:</strong> snapshots for layout, locked confirm queries for presenter, <code>detail_store</code> for inspector</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="index.html">layers/README.md</a></li>
+<li><a href="network.html">network.md</a> · <a href="app.html">app.md</a></li>
+<li>VnV mod: <code>vnv/mod/tests/domain/&lt;test_id&gt;/test.cpp</code> · <code>.\scripts\run_vnv.ps1 -Mod</code></li>
+</ul>
+  <footer>Edit <code>docs/layers/domain.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

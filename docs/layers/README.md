@@ -2,6 +2,8 @@
 
 Living docs for **alephium_blockviz** after modularization. Prefer these over July 2026 design drafts when deciding where code belongs.
 
+**Browser HTML:** open [index.html](index.html) (and `app.html` / `domain.html` / `engine.html` / `graphics.html` / `network.html`) from this folder — same content as the Markdown, navigable via the site hub.
+
 Versions (see `src/app/app_identity.hpp`, `src/engine/engine_identity.hpp`, `AGENTS.md`):
 
 | Component | Identity | Tag pattern |
@@ -9,7 +11,7 @@ Versions (see `src/app/app_identity.hpp`, `src/engine/engine_identity.hpp`, `AGE
 | Host app | Alephium BlockFlow | `app-vMAJOR.MINOR.PATCH` |
 | Product engine | BlockvizEngine | `engine-vMAJOR.MINOR.PATCH` |
 
-Current identities: **app 1.2.0 / engine 1.2.0**. Tagged `main` may lag until release push (`AGENTS.md`).
+Current identities: **app 1.3.0 / engine 1.3.0**. Tagged `main` may lag until release push (`AGENTS.md`).
 
 ---
 
@@ -53,7 +55,7 @@ See **[domain.md](domain.md)**. Summary: `BlockScene` / `BlockGraph` / layout un
 |---------|--------|
 | API `is_main`, seed queue, `H_c` advance, `mark_confirmed` dual-write | [network](network.md) |
 | Solid / green / cyan / orange / gold / red presentation | [app](app.md) |
-| Multi-instance Sobel GPU path, gold vs green overlay | [graphics](graphics.md) |
+| Domain-agnostic Sobel (app-fed outline colors, edge×color) | [graphics](graphics.md) |
 
 ---
 

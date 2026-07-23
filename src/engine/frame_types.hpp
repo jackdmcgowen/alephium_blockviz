@@ -30,6 +30,8 @@ struct FrameSourceInput
     bool      filter_txn_gt_1 = false;
     // Min block output ALPH (atto digit string); empty or "0" = off.
     std::string filter_min_alph_atto;
+    // When true, hide confirmed main-chain cubes (selection/hover still drawn).
+    bool      filter_unconfirmed_only = false;
     // When false, presenter omits role outlines (tips/cyan/orange); selection gold still emitted.
     bool      enable_role_outlines = true;
 };

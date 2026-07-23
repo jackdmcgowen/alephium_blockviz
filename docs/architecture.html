@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Architecture</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+    <a href="user-guide-network-fill.html">Network fill</a>
+    <a href="user-guide-legend.html">Legend</a>
+    <a href="user-guide-controls.html">Controls</a>
+    <a class="current" href="architecture.html">Architecture</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
+<main>
+  <h1>Layer architecture</h1>
+  <p class="muted">Where code belongs after modularization. Full HTML: <a href="layers/index.html">docs/layers/</a>. Canonical Markdown under <code>docs/layers/*.md</code>.</p>
+
+  <pre style="background:#1a1a22;padding:1rem;border-radius:8px;overflow:auto;font-size:0.85rem;border:1px solid var(--border)">main / app/platform/* / config.json
+        │
+        ▼
+   app (overlay, ScenePresenter, camera)
+        │  IEngine
+        ▼
+   engine (BlockVizEngine, ISystem registry)
+     ├── network (poll, adapter, confirm) ──► domain BlockScene
+     │     └── network/platform/*
+     └── graphics (render thread, Vulkan)
+           ├── graphics/platform/*
+           └── IFrameSource::prepare (app ScenePresenter)</pre>
+
+  <h2>Layer docs</h2>
+  <table>
+    <tr><th>Layer</th><th>HTML</th><th>Markdown</th><th>Owns</th></tr>
+    <tr><td>Map</td><td><a href="layers/index.html">index.html</a></td><td><a href="layers/README.md">README.md</a></td><td>Overview + smoke</td></tr>
+    <tr><td>App</td><td><a href="layers/app.html">app.html</a></td><td><a href="layers/app.md">app.md</a></td><td>Presentation, colors, UI, fullscreen</td></tr>
+    <tr><td>Engine</td><td><a href="layers/engine.html">engine.html</a></td><td><a href="layers/engine.md">engine.md</a></td><td>Facade, system registry</td></tr>
+    <tr><td>Graphics</td><td><a href="layers/graphics.html">graphics.html</a></td><td><a href="layers/graphics.md">graphics.md</a></td><td>Vulkan, Sobel path, publish</td></tr>
+    <tr><td>Network</td><td><a href="layers/network.html">network.html</a></td><td><a href="layers/network.md">network.md</a></td><td>Poll, confirm, timeline fill, cache</td></tr>
+    <tr><td>Domain</td><td><a href="layers/domain.html">domain.html</a></td><td><a href="layers/domain.md">domain.md</a></td><td>BlockScene / graph / layout</td></tr>
+  </table>
+
+  <h2>Confirmation split</h2>
+  <table>
+    <tr><th>Concern</th><th>Layer</th></tr>
+    <tr><td><code>is_main</code>, <code>H_c</code>, <code>mark_confirmed</code></td><td>Network</td></tr>
+    <tr><td>Solid / green / cyan / orange / gold / red presentation</td><td>App</td></tr>
+    <tr><td>Sobel GPU (edge × app-fed color)</td><td>Graphics</td></tr>
+  </table>
+
+  <div class="callout">
+    Historical design drafts:
+    <a href="graphics-modularization-design.md">modularization</a>,
+    <a href="blockflow-confirmed-tips-design.md">confirmed tips</a> — landed; use layer docs first.
+  </div>
+
+  <div class="pager">
+    <a href="user-guide-controls.html">← Controls</a>
+    <a href="dev-roadmap.html">Roadmap →</a>
+  </div>
+  <footer>Full map: <a href="layers/README.md">docs/layers/README.md</a></footer>
+</main>
+</body>
+</html>

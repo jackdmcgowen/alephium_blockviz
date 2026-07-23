@@ -44,6 +44,6 @@ Baselines under `vnv/bench/baselines/` remain for stricter device-local median c
 2. **Debug drawer** — avoid per-frame full upload when arrows stable.  
 3. **Sobel chain** — ensure zero-outline path never submits CMP (verify after outline changes).  
 4. **Disk/network admit** — lazy disk admit (schedule 15, RAM admit ring) reduces hitch during boot/scroll.  
-5. **Timeline chunks** — 64s subsegments / 640s G; live-first then **visible 7-G** history fill; interval inflight cap **4**.
+5. **Timeline chunks** — 64s subsegments / 640s G; live-first then **camera-subseg → next unfilled** within visible 7-G ring; interval inflight cap **4**.
 
 Update this table after major graphics changes with fresh bench JSON.

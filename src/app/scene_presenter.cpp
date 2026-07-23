@@ -146,7 +146,8 @@ void ScenePresenter::collect_selection_dep_force_(std::unordered_set<std::string
             out.insert(h);
 }
 
-void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
+void ScenePresenter::rebuild_selection_dep_one_hop_(const std::string& root_hash,
+                                                    bool animate_grow)
 {
     clear_selection_deps_();
     if (root_hash.empty())
@@ -156,52 +157,40 @@ void ScenePresenter::rebuild_selection_dep_bfs_(const std::string& root_hash)
     sel_dep_.nodes.push_back(root_hash);
     sel_dep_.node_set.insert(root_hash);
 
-    std::unordered_map<std::string, int> depth;
-    depth[root_hash] = 0;
-
-    std::vector<std::string> queue;
-    queue.push_back(root_hash);
-    size_t qi = 0;
-
-    if (auto root = scene_.detail_store().get(root_hash))
-        if (!root->deps.empty())
-            sel_dep_.seeded_from_detail = true;
-
-    while (qi < queue.size() &&
-           static_cast<int>(sel_dep_.nodes.size()) < kMaxSelDepNodes &&
-           static_cast<int>(sel_dep_.edges.size()) < kMaxSelDepEdges)
+    std::vector<std::string> deps = sorted_deps_(root_hash);
+    if (deps.empty())
     {
-        const std::string u = queue[qi++];
-        const int du = depth[u];
-        std::vector<std::string> deps = sorted_deps_(u);
-        if (deps.empty())
-        {
-            if (auto d = scene_.detail_store().get(u))
-                deps = d->deps;
-        }
-        if (!deps.empty())
-            sel_dep_.seeded_from_detail = true;
+        if (auto d = scene_.detail_store().get(root_hash))
+            deps = d->deps;
+    }
+    if (!deps.empty())
+        sel_dep_.seeded_from_detail = true;
 
-        for (const std::string& v : deps)
-        {
-            if (v.empty())
-                continue;
-            if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
-                break;
-            sel_dep_.edges.push_back(SelectionDepEdge{ u, v, du });
+    for (const std::string& v : deps)
+    {
+        if (v.empty())
+            continue;
+        if (static_cast<int>(sel_dep_.edges.size()) >= kMaxSelDepEdges)
+            break;
+        sel_dep_.edges.push_back(SelectionDepEdge{ root_hash, v, /*depth=*/0 });
+        if (sel_dep_.node_set.count(v) != 0)
+            continue;
+        if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
+            continue;
+        // Keep missing deps as edges for ghosts; only force-draw known cubes.
+        sel_dep_.node_set.insert(v);
+        sel_dep_.nodes.push_back(v);
+    }
 
-            if (sel_dep_.node_set.count(v) != 0)
-                continue;
-            // Expand only if we know the node (detail or graph) so BFS stays in loaded set.
-            const bool known = scene_.detail_store().get(v) || scene_.graph().get(v);
-            if (!known)
-                continue;
-            if (static_cast<int>(sel_dep_.nodes.size()) >= kMaxSelDepNodes)
-                continue;
-            sel_dep_.node_set.insert(v);
-            sel_dep_.nodes.push_back(v);
-            depth[v] = du + 1;
-            queue.push_back(v);
+    // Click/select: full length immediately. Replay: leave birth unset so grow runs.
+    if (!animate_grow)
+    {
+        const float now = now_sec_();
+        const float past = now - (kSelDepGrowSec + 0.05f);
+        for (const SelectionDepEdge& e : sel_dep_.edges)
+        {
+            const std::string key = std::string("s|") + e.from + '|' + e.to;
+            ephemeral_birth_sec_[key] = past;
         }
     }
 }
@@ -1269,6 +1258,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return alph_cmp_atto(placed.alph_out_atto, in.filter_min_alph_atto) >= 0;
     };
 
+    auto passes_unconfirmed_filter = [&](const PlacedBlock& placed) -> bool {
+        if (!in.filter_unconfirmed_only)
+            return true;
+        // Hide main-chain confirmed; uncles / unconfirmed stay.
+        if (scene_.is_confirmed_locked(placed.hash))
+            return false;
+        return true;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -1313,7 +1311,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
-    // Selection full BFS block-dep fan: rebuild on select change, replay, or late detail.
+    // Selection first-order deps: instant on click; grow only on Replay.
     const uint64_t replay_gen = scene_.walk_replay_gen();
     const bool want_replay =
         replay_gen != last_walk_replay_gen_ && !in.selected_hash.empty();
@@ -1325,16 +1323,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!sel_dep_.root.empty())
             clear_selection_deps_();
     }
-    else if (in.selected_hash != sel_dep_.root || want_replay)
+    else if (want_replay)
     {
-        rebuild_selection_dep_bfs_(in.selected_hash);
+        rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/true);
+    }
+    else if (in.selected_hash != sel_dep_.root)
+    {
+        rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/false);
     }
     else if (!sel_dep_.seeded_from_detail)
     {
         if (auto d = scene_.detail_store().get(in.selected_hash))
         {
             if (!d->deps.empty())
-                rebuild_selection_dep_bfs_(in.selected_hash);
+                rebuild_selection_dep_one_hop_(in.selected_hash, /*animate_grow=*/false);
         }
     }
 
@@ -1357,6 +1359,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             continue;
         if (!passes_amount_filter(placed))
             continue;
+        if (!passes_unconfirmed_filter(placed))
+            continue;
         if (push_instance(placed, /*force=*/false))
             drawn.insert(placed.hash);
     }
@@ -1372,6 +1376,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!always && !block_in_visible_segment(placed.timestamp_ms))
             return;
         if (!always && !passes_txn_filter(placed))
+            return;
+        // Min ALPH / unconfirmed-only apply to role force-draws too.
+        // Selection / hover / dep-walk keep always=true and stay visible.
+        if (!always && !passes_amount_filter(placed))
+            return;
+        if (!always && !passes_unconfirmed_filter(placed))
             return;
         if (push_instance(placed, /*force=*/true))
             drawn.insert(placed.hash);
@@ -1642,13 +1652,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         for (const PlacedBlock& p : layout.placements)
             placement_color[p.hash] = p.color;
 
-        // Full BFS selection fan: own budget (matches edge cap) + fast level-wave anim.
+        // First-order selection deps: instant on click; grow only after Replay.
         const bool any_ui_dep_hover = !in.ui_dep_hover_hash.empty();
         if (!sel_dep_.root.empty() && !sel_dep_.edges.empty())
         {
             uint32_t sel_arrow_count = 0;
-            int within_level = 0;
-            int prev_depth = -1;
+            int edge_i = 0;
             for (const SelectionDepEdge& e : sel_dep_.edges)
             {
                 if (static_cast<int>(sel_arrow_count) >= kMaxSelDepArrows)
@@ -1656,14 +1665,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 auto fit = block_positions.find(e.from);
                 auto tit = block_positions.find(e.to);
                 if (fit == block_positions.end() || tit == block_positions.end())
-                    continue;
-                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
-                    continue;
-
-                if (e.depth != prev_depth)
                 {
-                    prev_depth = e.depth;
-                    within_level = 0;
+                    ++edge_i;
+                    continue;
+                }
+                if (drawn.count(e.from) == 0 || drawn.count(e.to) == 0)
+                {
+                    ++edge_i;
+                    continue;
                 }
 
                 const bool focus =
@@ -1679,28 +1688,20 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 }
                 else if (any_ui_dep_hover)
                     arrow_col.a = 0.35f;
-                else if (e.depth > 0)
-                {
-                    // Slightly softer for deeper shells so hop-1 stays strongest.
-                    arrow_col.a *= std::max(0.45f, 1.f - 0.08f * static_cast<float>(e.depth));
-                }
 
                 glm::vec3 from_inset, to_inset;
                 if (!inset_segment(fit->second, tit->second, clearance, from_inset, to_inset))
                 {
-                    ++within_level;
+                    ++edge_i;
                     continue;
                 }
 
-                // Quick shells: depth wave + micro within-level, hard-capped total delay.
-                const float delay = std::min(
-                    kSelDepMaxStaggerSec,
-                    static_cast<float>(e.depth) * kSelDepLevelStagger +
-                        static_cast<float>(within_level) * kSelDepEdgeStagger);
+                const float delay =
+                    static_cast<float>(edge_i) * kSelDepEdgeStagger;
                 const std::string key = eph_key('s', e.from, e.to);
                 const float grow =
                     ephemeral_grow_u_(key, delay, eph_seen, kSelDepGrowSec);
-                ++within_level;
+                ++edge_i;
                 if (grow <= 0.f)
                     continue;
                 if (in.frustum)
@@ -1712,7 +1713,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                         continue;
                 }
 
-                const float tip_scale = focus ? 1.28f : (e.depth == 0 ? 1.15f : 1.05f);
+                const float tip_scale = focus ? 1.28f : 1.15f;
                 debug->add_arrow(from_inset, to_inset, arrow_col, tip_len * tip_scale,
                                  tip_rad * tip_scale, shaft_r * tip_scale, 4u,
                                  grow);
@@ -1864,7 +1865,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         }
 
         // Gray translucent volumes: at API queue start; fade when fulfilled.
-        // Sticky fade: once fading, never snap back to full α (avoids blink from HUD races).
+        // Sticky fade + retire tombstone: HUD still lists fulfilled slabs ~800ms after
+        // admit; without retire we would re-create anim and re-flash every fade period.
         {
             const float now = now_sec_();
             std::unordered_set<int64_t> seen;
@@ -1876,6 +1878,15 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 if (s.to_ms <= s.from_ms)
                     continue;
                 seen.insert(s.from_ms);
+
+                // True re-queue after permanent fade: only unfulfilled HUD reopens.
+                if (fill_slab_retired_.count(s.from_ms) != 0)
+                {
+                    if (s.fulfilled != 0)
+                        continue; // still lagging fulfilled in HUD — stay gone
+                    fill_slab_retired_.erase(s.from_ms);
+                }
+
                 auto it = fill_slab_anims_.find(s.from_ms);
                 if (it == fill_slab_anims_.end())
                 {
@@ -1902,6 +1913,14 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 if (it->second.fade_start_sec >= 0.f &&
                     (now - it->second.fade_start_sec) >= kFillSlabFadeSec)
                 {
+                    fill_slab_retired_.insert(it->first);
+                    // Soft cap so long sessions do not retain unbounded tombstones.
+                    if (fill_slab_retired_.size() > 4096u)
+                    {
+                        // Drop an arbitrary older half (set has no order — full clear is fine).
+                        fill_slab_retired_.clear();
+                        fill_slab_retired_.insert(it->first);
+                    }
                     it = fill_slab_anims_.erase(it);
                     continue;
                 }

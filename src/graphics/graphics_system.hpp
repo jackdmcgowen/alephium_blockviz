@@ -46,8 +46,8 @@
 #include "graphics/buffer_manager.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
-#include "graphics/queue_types.hpp"
-#include "graphics/sampler.hpp"
+#include "graphics/core/queue_types.hpp"
+#include "graphics/core/sampler.hpp"
 
 #define MAX_FRAMES_IN_FLIGHT ( 3 )
 #define WDW_WIDTH  1024
@@ -85,8 +85,8 @@ public:
     bool is_selected(const std::string& hash) const override;
     AlphBlock copy_selected_block() const override;
     void set_ui_dep_hover(const std::string& hash) override;
-    void set_scene_filter_multi_tx(bool enabled) override;
-    void set_scene_filter_min_alph(double min_alph) override;
+    void set_scene_view_filters(const SceneViewFilters& filters) override;
+    SceneViewFilters scene_view_filters() const override;
     // Capture client area (scene + ImGui) to PNG. Empty path → docs/images/capture_*.png
     void request_screenshot(const char* path_utf8) override;
     std::string consume_detail_refill_request() override;
@@ -181,8 +181,7 @@ private:
     AlphBlock   selected_block;
     std::string hovered_hash_;
     std::string ui_dep_hover_hash_; // inspector Deps row hover
-    bool        filter_multi_tx_ = false; // scene: txn_count > 1 only
-    double      filter_min_alph_ = 0.0;   // human ALPH; 0 = off
+    SceneViewFilters scene_view_filters_{};
     float     last_frame_dt_sec_ = 1.f / 60.f;
     std::vector<std::string> pick_id_to_hash_;
     uint64_t  gpu_frame_seq_ = 0;

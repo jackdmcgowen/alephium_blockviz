@@ -1,4 +1,4 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -26,7 +26,7 @@
 
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 // ensure configure can call headless setup
 
@@ -164,7 +164,7 @@ void GraphicsSystem::configure(const EngineCreateInfo& info)
 {
     create_info_ = info;
     configured_ = true;
-    gfx_platform_configure_headless(info.headless, info.width, info.height);
+    gpu_platform_configure_headless(info.headless, info.width, info.height);
 }
 
 void GraphicsSystem::init()
@@ -180,11 +180,11 @@ void GraphicsSystem::init()
     const EngineCreateInfo& info = create_info_;
     void* hInst = info.platform_instance;
     void* hwnd_ = info.window;
-    headless_ = info.headless || gfx_platform_is_headless();
-    gfx_platform_configure_headless(headless_, info.width, info.height);
+    headless_ = info.headless || gpu_platform_is_headless();
+    gpu_platform_configure_headless(headless_, info.width, info.height);
 
     uint32_t client_w = 0, client_h = 0;
-    gfx_platform_get_window_size(hwnd_, &client_w, &client_h);
+    gpu_platform_get_window_size(hwnd_, &client_w, &client_h);
     width = info.width ? info.width : client_w;
     height = info.height ? info.height : client_h;
     if (width == 0)
@@ -283,7 +283,7 @@ void GraphicsSystem::init()
     style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.28f, 0.30f, 1.f);
     style.Colors[ImGuiCol_PlotHistogram] = ImVec4(1.f, 0.36f, 0.0f, 0.85f);
 
-    gfx_platform_imgui_init(hwnd);
+    gpu_platform_imgui_init(hwnd);
     ImGui_ImplVulkan_InitInfo imgui_vk = {};
 
     imgui_vk.ApiVersion = VK_API_VERSION_1_3;
@@ -398,7 +398,7 @@ void GraphicsSystem::stop()
 void GraphicsSystem::Resize()
 {
     uint32_t new_width = 0, new_height = 0;
-    gfx_platform_get_window_size(hwnd, &new_width, &new_height);
+    gpu_platform_get_window_size(hwnd, &new_width, &new_height);
 
     if (0 == new_width && 0 == new_height)
         return;
@@ -714,7 +714,7 @@ void GraphicsSystem::cleanup()
     vkDeviceWaitIdle(device);
 
     ImGui_ImplVulkan_Shutdown();
-    gfx_platform_imgui_shutdown();
+    gpu_platform_imgui_shutdown();
     ImGui::DestroyContext();
 
     frame_profiler_.destroy(device);

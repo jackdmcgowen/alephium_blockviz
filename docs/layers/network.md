@@ -63,7 +63,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 
 **Live poll vs camera:** while lookback index `k > 0` (camera beyond the live segment), do **not** force-poll window 0 or start new live tip seeds; historical windows `1..k` still load. On return to `k == 0`, if `poll_interval` has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).
 
-**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = full open genesis cell `[floor(now), next_boundary)`. History GETs stay **strictly older** (`to ≤ live_open_from`). Each pump: **live first**, then fill **all incomplete subsegs in the visible admit/render ring (7 G)** ASAP (disk first, then network)—not a camera-local ±half-G time bubble. **429/5xx** → exponential backoff.
+**Chunked timeline:** shared **64s** subsegment grid (disk + HTTP); G-segment = **640s** (exactly 10 subsegments). Live tip poll = full open genesis cell `[floor(now), next_boundary)`. History GETs stay **strictly older** (`to ≤ live_open_from`). Each pump: **live first**, then **camera 64s subsegment → next unfilled older** within the admit/render ring (**7 G**); disk before HTTP. **Newer** toward live only after older-in-ring has no holes (avoids forward jumps when the crawl hits the ring edge). Resume cursor keeps the older frontier across ring expansion. **≤4** concurrent interval GETs; multiple subsegs per G allowed. **429/5xx** → exponential backoff.
 
 **Soft RAM eviction:** pressure prune outside the admit ring is **soft** (`BlockScene::prune(..., soft_evict=true)`). Presenter must **not** play red death VFX for those leaves (disk re-admit on return).
 
@@ -79,7 +79,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 | **Render** | **7** (app) | Draw corridor only; see app rule book |
 | **Live poll** | **64s** open tip subseg | Genesis-aligned open slot; history never overlaps it |
 
-Fetch priority: **live open 64s cell first** → disk admit for visible ring → network holes in visible 7 G (≤**4** concurrent interval GETs). History never overlaps the open tip cell. Minimap labels genesis segment numbers (`#G_seg`).
+Fetch priority: **live open 64s cell first** → disk admit for visible ring → network holes starting at **camera subseg**, then next unfilled (≤**4** concurrent interval GETs). History never overlaps the open tip cell. Minimap labels genesis segment numbers (`#G_seg`).
 
 **History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
 
@@ -140,8 +140,9 @@ Fetch priority: **live open 64s cell first** → disk admit for visible ring →
 | **Done** | Offline Debug / FakeChain simulator | `src/network/fake/fake_chain_simulator.*` |
 | **Done** | Unit tests (no GPU) | `vnv/mod/tests/` / `mod_domain` via `run_vnv.ps1` |
 | **Done** | Live poll vs camera lookback `k` | Skip window 0 while `k>0`; resync on return |
-| **Done** | Chunked timeline interval polls | ~60s chunks, budgeted pump, newest-first |
-| **Done** | Dual-segment bootstrap + triple-buffer ring | ≤3 active segments; admit-driven progress |
+| **Done** | Chunked timeline interval polls | **64s** grid / **640s** G; budgeted pump |
+| **Done** | Camera-subseg history walk | inflight starts at eye 64s cell → next unfilled |
+| **Done** | Three-ring segments | load **15** / admit+render **7** / live open **64s** |
 | **Done** | HttpIoPool + async interval GETs | Workers overlap timeline RTT; `mod_network` |
 | **P1** | Async is_main / hashes via pool | Confirm path not RTT-serialized |
 | **Done** | Retention / prune (branch) | Poller min_ts + soft node cap |

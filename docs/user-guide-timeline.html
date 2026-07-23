@@ -4,95 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Alephium BlockViz — Timeline &amp; fill guide</title>
-  <style>
-    :root {
-      --bg: #0b0b0c;
-      --panel: #16161a;
-      --text: #e8e8ec;
-      --muted: #9a9aa8;
-      --cyan: #4dd0ff;
-      --gray: #8c8e98;
-      --green: #3ddc84;
-      --red: #ff3b30;
-      --orange: #ff8a1f;
-      --gold: #f0c24b;
-      --border: #2a2a32;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "Segoe UI", system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.55;
-    }
-    main {
-      max-width: 880px;
-      margin: 0 auto;
-      padding: 2rem 1.25rem 4rem;
-    }
-    h1 { font-size: 1.75rem; font-weight: 600; margin: 0 0 0.35rem; }
-    h2 { font-size: 1.2rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
-    h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: var(--muted); }
-    p, li { color: var(--text); }
-    .muted { color: var(--muted); }
-    a { color: var(--cyan); }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.95rem;
-      margin: 0.75rem 0 1.25rem;
-    }
-    th, td {
-      border: 1px solid var(--border);
-      padding: 0.5rem 0.65rem;
-      text-align: left;
-      vertical-align: top;
-    }
-    th { background: var(--panel); color: var(--muted); font-weight: 600; }
-    .swatch {
-      display: inline-block;
-      width: 0.85rem;
-      height: 0.85rem;
-      border-radius: 2px;
-      margin-right: 0.4rem;
-      vertical-align: -0.1rem;
-      border: 1px solid rgba(255,255,255,0.15);
-    }
-    .swatch.cyan { background: rgba(77, 208, 255, 0.55); }
-    .swatch.gray { background: rgba(140, 142, 152, 0.65); }
-    .swatch.green { background: var(--green); }
-    .swatch.red { background: var(--red); }
-    .swatch.orange { background: var(--orange); }
-    .swatch.gold { background: var(--gold); }
-    figure {
-      margin: 1rem 0 1.5rem;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    figure img { display: block; width: 100%; height: auto; }
-    figcaption { padding: 0.65rem 0.85rem; font-size: 0.9rem; color: var(--muted); }
-    code {
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-      font-size: 0.88em;
-      background: #1e1e24;
-      padding: 0.1em 0.35em;
-      border-radius: 3px;
-    }
-    .callout {
-      background: #1a1a22;
-      border-left: 3px solid var(--cyan);
-      padding: 0.75rem 1rem;
-      margin: 1rem 0;
-      border-radius: 0 6px 6px 0;
-    }
-    ul { padding-left: 1.25rem; }
-    footer { margin-top: 3rem; font-size: 0.85rem; color: var(--muted); }
-  </style>
+  <link rel="stylesheet" href="site.css" />
 </head>
 <body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a class="current" href="user-guide-timeline.html">Timeline</a>
+    <a href="user-guide-network-fill.html">Network fill</a>
+    <a href="user-guide-legend.html">Legend</a>
+    <a href="user-guide-controls.html">Controls</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
 <main>
   <h1>Timeline &amp; network fill guide</h1>
   <p class="muted">Alephium BlockViz — how to read the 3D timeline, gray volumes, cyan planes, and concurrent loads.</p>
@@ -106,14 +31,14 @@
     </figcaption>
   </figure>
 
-  <h2>1. What you are looking at</h2>
+  <h2 id="looking-at">1. What you are looking at</h2>
   <ul>
     <li><strong>16 shards</strong> (4×4 group lanes) as cubes along world <strong>Z = time</strong> (newer toward the live tip).</li>
     <li><strong>Live tip</strong> is the newest open edge of the chain; green outlines mark confirmed tips.</li>
     <li>Left rail: Network / status / cache. Right: Block inspector. Bottom: timeline minimap.</li>
   </ul>
 
-  <h2>2. Time grid</h2>
+  <h2 id="time-grid">2. Time grid</h2>
   <table>
     <tr><th>Unit</th><th>Length</th><th>Role</th></tr>
     <tr><td>Subsegment</td><td><code>64s</code></td><td>Atomic HTTP interval + disk chunk key</td></tr>
@@ -122,27 +47,28 @@
   </table>
   <p>History network ranges stay <strong>strictly older</strong> than the open live cell so they never overlap the tip poll.</p>
 
-  <h2>3. Rings</h2>
+  <h2 id="rings">3. Rings</h2>
   <table>
     <tr><th>Ring</th><th>Size</th><th>Behavior</th></tr>
     <tr><td>Load / schedule</td><td>15 G</td><td>Which G may be scheduled (disk / network schedule)</td></tr>
-    <tr><td>Admit / render</td><td>7 G</td><td>What you draw and fill ASAP (visible corridor)</td></tr>
+    <tr><td>Admit / render</td><td>7 G</td><td>What you draw and fill (visible corridor)</td></tr>
     <tr><td>Live open</td><td>1 × 64s</td><td>Tip poll priority every pump</td></tr>
   </table>
 
-  <h2>4. How network fill works</h2>
+  <h2 id="network-fill">4. How network fill works</h2>
   <ol>
     <li><strong>Live first</strong> — force the open 64s tip cell when needed.</li>
     <li><strong>Disk</strong> — try admit for each lookback <code>k</code> in the visible 7-G ring.</li>
-    <li><strong>Network history</strong> — enqueue incomplete 64s holes in that ring (newest-first bias).</li>
+    <li><strong>Network history</strong> — start at the <strong>camera’s 64s subsegment</strong>, crawl older; only fill toward live after older-in-ring is complete (resume, no forward jump). See <a href="user-guide-network-fill.html">Network fill policy</a>.</li>
   </ol>
   <div class="callout">
     <strong>Concurrent interval GETs ≤ 4</strong>
     (<code>HttpIoPool::kDefaultMaxInflightIntervals</code>).
-    Steady pumps enqueue at most 4 per poll; bootstrap can enqueue more into the job queue but still only 4 run at once.
+    Multiple subsegments may be in flight even inside one G so the pool fills holes near the eye.
   </div>
 
-  <h2>5. Color legend</h2>
+  <h2 id="colors">5. Color legend</h2>
+  <p>Full table: <a href="user-guide-legend.html">Visual legend</a>.</p>
   <table>
     <tr><th>Cue</th><th>Meaning</th></tr>
     <tr><td><span class="swatch green"></span>Green Sobel / tip arrows</td><td>Confirmed per-lane tip <code>H_c</code></td></tr>
@@ -155,16 +81,17 @@
     <tr><td>Minimap green bin</td><td>Live G; gold caret = camera Z</td></tr>
   </table>
 
-  <h2>6. Why so many gray boxes?</h2>
+  <h2 id="gray-boxes">6. Why so many gray boxes?</h2>
   <p>Each gray volume is one history subsegment that was <strong>enqueued</strong> (API queue start), not one cube load.</p>
   <ul>
     <li>Up to <strong>4</strong> at full opacity ≈ true concurrent HTTP intervals.</li>
     <li>More boxes at lower opacity = <strong>fading after admit</strong> or dim extras past the full-α cap.</li>
     <li>The live tip open cell is <strong>never</strong> drawn as a gray volume.</li>
+    <li>With camera-subseg ordering, new volumes should cluster <strong>near the camera</strong> first.</li>
   </ul>
   <p class="muted">If stacks look milky, prefer a side camera view (key <strong>2</strong>) so volumes separate along Z.</p>
 
-  <h2>7. Status meanings</h2>
+  <h2 id="status">7. Status meanings</h2>
   <table>
     <tr><th>Status</th><th>Meaning</th></tr>
     <tr><td>Bootstrapping</td><td>Cold start; filling live window toward tip-ready</td></tr>
@@ -173,7 +100,7 @@
     <tr><td>Catching up</td><td>Returned to live; filling missed subsegments</td></tr>
   </table>
 
-  <h2>8. F12 screenshots</h2>
+  <h2 id="f12">8. F12 screenshots</h2>
   <p>
     <strong>F12</strong> requests a GPU readback of the <em>final presentable swapchain image</em>
     after cubes, debug volumes/planes, and ImGui are drawn, still acquired, <em>before</em> present.
@@ -184,23 +111,29 @@
     Opaque UI should match the monitor; translucent overlays are intentionally semi-transparent.
   </p>
 
-  <h2>9. Keyboard</h2>
+  <h2 id="keyboard">9. Keyboard</h2>
+  <p>See <a href="user-guide-controls.html">Controls</a> for the full table.</p>
   <ul>
     <li><strong>1</strong> End view · <strong>2</strong> Side view · <strong>3</strong> Live tip · <strong>V</strong> toggle End/Side</li>
     <li><strong>F3</strong> frame profiler · <strong>F11</strong> fullscreen · <strong>F12</strong> screenshot</li>
   </ul>
 
-  <h2>10. More docs</h2>
+  <h2 id="more">10. More docs</h2>
   <ul>
+    <li><a href="index.html">Docs hub</a></li>
+    <li><a href="user-guide-network-fill.html">Network fill policy</a></li>
     <li><a href="layers/network.md">docs/layers/network.md</a> — adapter phases, rings, chunk policy</li>
     <li><a href="layers/app.md">docs/layers/app.md</a> — presentation rule book</li>
     <li><a href="segment-disk-cache.md">docs/segment-disk-cache.md</a> — disk schema / 64s chunks</li>
-    <li><a href="../AGENTS.md">AGENTS.md</a> — timeline geometry ↔ minimap gate for contributors</li>
-    <li><a href="../README.md">README.md</a> — build, legend summary</li>
+    <li><a href="../AGENTS.md">AGENTS.md</a> — timeline geometry ↔ minimap gate</li>
   </ul>
 
+  <div class="pager">
+    <a href="index.html">← Hub</a>
+    <a href="user-guide-network-fill.html">Network fill →</a>
+  </div>
   <footer>
-    Part of alephium_blockviz · open this file in a browser from the repo (<code>docs/user-guide-timeline.html</code>).
+    Part of alephium_blockviz · <code>docs/user-guide-timeline.html</code>
   </footer>
 </main>
 </body>

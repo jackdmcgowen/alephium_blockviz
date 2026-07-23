@@ -1,4 +1,4 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
 #include "graphics/frame/frame_shared_state.hpp"
 #include "graphics/frame/profiling/frame_profiler.hpp"
@@ -16,7 +16,7 @@
 
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 namespace
 {
@@ -87,7 +87,7 @@ void GraphicsSystem::render_loop()
     while (running)
     {
         ImGui_ImplVulkan_NewFrame();
-        gfx_platform_imgui_new_frame();
+        gpu_platform_imgui_new_frame();
         ImGui::NewFrame();
 
         const auto t1 = std::chrono::steady_clock::now();
@@ -98,8 +98,7 @@ void GraphicsSystem::render_loop()
         std::string selected_hash_local;
         std::string hovered_hash_local;
         std::string ui_dep_hover_local;
-        bool filter_multi_tx_local = false;
-        double filter_min_alph_local = 0.0;
+        SceneViewFilters filters_local{};
         AlphBlock selected_detail_local;
 
         {
@@ -107,8 +106,7 @@ void GraphicsSystem::render_loop()
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
-            filter_multi_tx_local = filter_multi_tx_;
-            filter_min_alph_local = filter_min_alph_;
+            filters_local = scene_view_filters_;
             selected_detail_local = selected_block;
         }
 
@@ -121,8 +119,7 @@ void GraphicsSystem::render_loop()
             selected_hash_local = selected_hash_;
             hovered_hash_local = hovered_hash_;
             ui_dep_hover_local = ui_dep_hover_hash_;
-            filter_multi_tx_local = filter_multi_tx_;
-            filter_min_alph_local = filter_min_alph_;
+            filters_local = scene_view_filters_;
             selected_detail_local = selected_block;
         }
 
@@ -142,9 +139,10 @@ void GraphicsSystem::render_loop()
             fin.selected_hash = selected_hash_local;
             fin.hovered_hash = hovered_hash_local;
             fin.ui_dep_hover_hash = ui_dep_hover_local;
-            fin.filter_txn_gt_1 = filter_multi_tx_local;
-            if (filter_min_alph_local > 0.0)
-                fin.filter_min_alph_atto = alph_from_double_to_atto(filter_min_alph_local);
+            fin.filter_txn_gt_1 = filters_local.multi_tx_only;
+            if (filters_local.min_alph > 0.0)
+                fin.filter_min_alph_atto = alph_from_double_to_atto(filters_local.min_alph);
+            fin.filter_unconfirmed_only = filters_local.unconfirmed_only;
             fin.selected_detail = selected_detail_local;
             fin.enable_role_outlines = visualize_confirmed_tips_;
             // Half-extents for unit cube mesh (±1); slight inflate avoids edge pop.

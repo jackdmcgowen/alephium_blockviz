@@ -1,5 +1,5 @@
 #include "graphics/pch.h"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -47,7 +47,7 @@ void append_chunk(std::vector<unsigned char>& png,
 }
 } // namespace
 
-void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t height)
+void gpu_platform_configure_headless(bool enabled, uint32_t width, uint32_t height)
 {
     g_headless = enabled;
     if (width > 0)
@@ -56,22 +56,22 @@ void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t heig
         g_headless_h = height;
 }
 
-bool gfx_platform_is_headless()
+bool gpu_platform_is_headless()
 {
     return g_headless;
 }
 
-uint32_t gfx_platform_headless_width()
+uint32_t gpu_platform_headless_width()
 {
     return g_headless_w;
 }
 
-uint32_t gfx_platform_headless_height()
+uint32_t gpu_platform_headless_height()
 {
     return g_headless_h;
 }
 
-VkSurfaceKHR gfx_platform_create_headless_surface(VkInstance instance)
+VkSurfaceKHR gpu_platform_create_headless_surface(VkInstance instance)
 {
     VkHeadlessSurfaceCreateInfoEXT ci{};
     ci.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
@@ -86,7 +86,7 @@ VkSurfaceKHR gfx_platform_create_headless_surface(VkInstance instance)
     return surface;
 }
 
-bool gfx_platform_write_png_rgba(const char* path_utf8, int w, int h, const unsigned char* rgba)
+bool gpu_platform_write_png_rgba(const char* path_utf8, int w, int h, const unsigned char* rgba)
 {
     if (!path_utf8 || w < 1 || h < 1 || !rgba)
         return false;

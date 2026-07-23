@@ -52,16 +52,31 @@ void BlockflowOverlay::set_initial_domain(NetworkDomain d)
     domain_ = d;
 }
 
+void BlockflowOverlay::push_scene_view_filters_()
+{
+    SceneViewFilters f{};
+    f.multi_tx_only = filter_multi_tx_;
+    f.min_alph = filter_min_alph_;
+    f.unconfirmed_only = filter_unconfirmed_only_;
+    engine_.set_scene_view_filters(f);
+}
+
 void BlockflowOverlay::set_filter_multi_tx(bool enabled)
 {
     filter_multi_tx_ = enabled;
-    engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+    push_scene_view_filters_();
 }
 
 void BlockflowOverlay::set_filter_min_alph(double min_alph)
 {
     filter_min_alph_ = (min_alph > 0.0) ? min_alph : 0.0;
-    engine_.set_scene_filter_min_alph(filter_min_alph_);
+    push_scene_view_filters_();
+}
+
+void BlockflowOverlay::set_filter_unconfirmed_only(bool enabled)
+{
+    filter_unconfirmed_only_ = enabled;
+    push_scene_view_filters_();
 }
 
 void BlockflowOverlay::save_prefs() const
@@ -70,6 +85,7 @@ void BlockflowOverlay::save_prefs() const
     p.domain = domain_;
     p.filter_multi_tx = filter_multi_tx_;
     p.filter_min_alph = filter_min_alph_;
+    p.filter_unconfirmed_only = filter_unconfirmed_only_;
     if (!save_user_prefs(p))
         std::printf("[app] warning: failed to save %s\n", kUserPrefsPath);
 }
@@ -1045,11 +1061,20 @@ void BlockflowOverlay::draw_network(const UiSnapshot& ui, float ui_w, float ui_h
     {
         if (ImGui::Checkbox("Multi-tx only", &filter_multi_tx_))
         {
-            engine_.set_scene_filter_multi_tx(filter_multi_tx_);
+            push_scene_view_filters_();
             save_prefs();
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Show only blocks with more than 1 transaction\n(hides coinbase-only / unknown).");
+        if (ImGui::Checkbox("Unconfirmed only", &filter_unconfirmed_only_))
+        {
+            push_scene_view_filters_();
+            save_prefs();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Show only unconfirmed blocks (hides main-chain confirmed).\n"
+                "Selection / hover still draw.");
         {
             float min_alph_f = static_cast<float>(filter_min_alph_);
             if (ImGui::DragFloat("Min ALPH out", &min_alph_f, 0.1f, 0.f, 1.0e9f, "%.3f",
@@ -1251,7 +1276,7 @@ void BlockflowOverlay::draw_inspector(const UiSnapshot& ui, float ui_w, float ui
         if (scene_ && ImGui::SmallButton("Replay deps"))
             scene_->request_walk_replay();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Re-run multi-hop dep trace (R)");
+            ImGui::SetTooltip("Re-grow first-order (direct) deps (R)");
 
         // --- Dependencies: hover recolors 3D arrow; click selects + looks (no explorer) ---
         if (!inspector.deps.empty() &&

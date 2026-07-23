@@ -23,8 +23,9 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | Path | Role |
 |------|------|
 | `graphics_system.*` | Concrete `IGraphicsSystem` — lifecycle, init/resize, `record_command_buffer` glue |
-| `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, pick types, `IUiOverlay` |
-| `gpu_prv_lib.h` | Vulkan free-function helpers (private): pipeline, descriptor, image barriers |
+| `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, `SceneViewFilters`, pick types |
+| `gpu_prv_lib.h` | Vulkan free-function surface (private) — implemented under `core/` |
+| `core/` | Instance/device/swapchain, buffer/image/sampler, shader/pipeline/descriptor (Vulkan lifetime primitives) |
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `sampler.*` | `SamplerTable` by `SamplerFilter` index (shared; not pass-private) |
 | `frame/` | Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes |

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Graphics layer</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a class="current" href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>Graphics layer</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="graphics.md"><code>graphics.md</code></a>.</p>
+<p>Vulkan backend library <strong>graphics</strong> (<code>src/graphics/</code>). Implements <code>IGraphicsSystem</code>; owns the <strong>render thread</strong>.</p>
+<h2>Overview</h2>
+<p>Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw, ImGui host, optional async Sobel), and presents. Public types in <code>gpu_pub_lib.h</code> stay <strong>Vulkan-free</strong>. Private helpers and <code>GraphicsSystem</code> are internal to the lib — host and network must not include <code>graphics_system.hpp</code>.</p>
+<h2>Ownership boundary</h2>
+<table>
+<tr><th>Owns</th><th>Must not own</th></tr>
+<tr><td>Vulkan lifecycle, queues (<code>_3D</code> / <code>TX</code> / <code>CMP</code>)</td><td>Alephium REST / <code>is_main</code></td></tr>
+<tr><td>Render thread, frame publish slots</td><td>Explorer URLs, feed chrome</td></tr>
+<tr><td>Pipelines, mesh arena, descriptors, barriers</td><td>Product color semantics (green/cyan/orange)</td></tr>
+<tr><td>Pick pass + Sobel compute / overlay</td><td>Poll watermark</td></tr>
+<tr><td>ImGui <strong>host</strong> (backends NewFrame / Render)</td><td>Overlay widget layout (app)</td></tr>
+<tr><td><code>gpu_pub_lib.h</code> public types</td><td>curl / cJSON</td></tr>
+<tr><td>Client-rect resize / swapchain recreate</td><td>Host borderless fullscreen (app HWND)</td></tr>
+</table>
+<h2>Current surface</h2>
+<table>
+<tr><th>Path</th><th>Role</th></tr>
+<tr><td><code>graphics_system.*</code></td><td>Concrete <code>IGraphicsSystem</code> — lifecycle, init/resize, <code>record_command_buffer</code> glue</td></tr>
+<tr><td><code>gpu_pub_lib.h</code></td><td><code>EngineCreateInfo</code>, <code>GpuInstance</code>, <code>CameraUBO</code>, <code>FrameSubmit</code>, pick types, <code>IUiOverlay</code></td></tr>
+<tr><td><code>gpu_prv_lib.h</code></td><td>Vulkan free-function helpers (private): pipeline, descriptor, image barriers</td></tr>
+<tr><td><code>pipeline.cpp</code> / <code>descriptor.cpp</code> / <code>image.cpp</code></td><td>Shared <code>PipelineType</code> PSOs, descriptor layout/pool/write, <code>cmd_image_barrier</code></td></tr>
+<tr><td><code>sampler.*</code></td><td><code>SamplerTable</code> by <code>SamplerFilter</code> index (shared; not pass-private)</td></tr>
+<tr><td><code>frame/</code></td><td>Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes</td></tr>
+<tr><td><code>frame/frame_graph/</code></td><td><code>IPass</code>, <code>FrameTaskGraph</code> (DAG nodes + image barrier edges)</td></tr>
+<tr><td><code>frame/passes/</code></td><td>Concrete <code>IPass</code>: <code>MainScenePass</code>, <code>PickerPass</code>, <code>OutlinePass</code>, <code>SobelComputePass</code>, <code>EdgeOverlayPass</code> + <code>SobelResources</code></td></tr>
+<tr><td><code>frame/profiling/</code></td><td><code>TimestampQueryPool</code> + <code>FrameProfiler</code> (CPU scopes + GPU timestamps; F3 HUD)</td></tr>
+<tr><td><code>frame/frame_loop.cpp</code></td><td><code>render_loop</code> / <code>render</code> (prepare → record → submit/present)</td></tr>
+<tr><td><code>frame/sobel_async_pass.*</code></td><td>Multi-queue executor (_3D outline → CMP → _3D overlay) + fence; not a PSO owner</td></tr>
+<tr><td><code>frame/sobel_types.hpp</code></td><td>Thin request type; outline list is <code>SobelOutlineInstance</code> in <code>gpu_pub_lib.h</code></td></tr>
+<tr><td><code>frame/gpu_frame_publish.cpp</code></td><td>Triple-buffer <code>publish_frame</code> / <code>apply_published_frame</code></td></tr>
+<tr><td><code>frame/selection_state.cpp</code></td><td>Selection, hover, multi-tx filter, detail refill pin</td></tr>
+<tr><td><code>frame/frame_shared_state.*</code></td><td>Debug drawer / mesh arena / viewProj shared by loop + record</td></tr>
+<tr><td><code>frame/screenshot.cpp</code></td><td>F12 / <code>request_screenshot</code>: GPU readback <strong>while swapchain image is still acquired</strong> (copy before present); window blit opt-in only</td></tr>
+<tr><td><code>mesh_arena.*</code>, <code>buffer_manager.*</code></td><td>Mesh / buffer pooling</td></tr>
+<tr><td><code>debug/debug_drawer.*</code></td><td>Arrows and debug geometry</td></tr>
+<tr><td><code>shaders/*.glsl</code> + <code>compile_shaders.py</code></td><td>SPIR-V pre-build</td></tr>
+<tr><td><code>camera.*</code></td><td>View/proj helpers used by UBO path</td></tr>
+<tr><td><code>validation.cpp</code></td><td>Debug layers (<code>#ifndef NDEBUG</code>)</td></tr>
+</table>
+<p><strong>Factory:</strong> <code>create_graphics_system</code> / <code>destroy_graphics_system</code> (declared in <code>engine/engine.hpp</code>).</p>
+<h3>Frame path (simplified)</h3>
+<pre><code>render thread (frame_loop.cpp):
+  apply published GpuFrameSlot (gpu_frame_publish.cpp)
+  IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
+  publish_frame / upload
+  MainScenePass: cubes → debug mesh → ImGui
+  optional PickerPass (same graphics CB; policy stays on GS)
+  optional SobelAsyncPass executor:
+    OutlinePass → CMP SobelComputePass → EdgeOverlayPass → present
+  present (non-Sobel path)</code></pre>
+<h3>IPass + task graph</h3>
+<p>Every render pipeline is an <strong><code>IPass</code></strong>: private PSO create/destroy helpers, public <code>create</code> / <code>destroy</code> / <code>record</code> / <code>declare_resources</code>.</p>
+<p><code>FrameTaskGraph::register_pass(IPass&amp;)</code> plugs nodes; dependency edges carry image access transitions. Multi-queue submit stays in <strong><code>SobelAsyncPass</code></strong> (not inside IPass). Shared Sobel images/descriptors/semaphores live on <strong><code>SobelResources</code></strong> (attached by Outline / Compute / Overlay).</p>
+<p><strong>Order note:</strong> segment barrier planes are debug quads in the main pass. Sobel edge composite runs <strong>after</strong> planes (and ImGui) as a depth-free overlay so selection/TRACE edges read as a highlight on top of translucent planes.</p>
+<h3>Sobel (domain-agnostic, single pass)</h3>
+<ul>
+<li>App builds <code>std::vector&lt;SobelOutlineInstance&gt;</code> (<code>instance_index</code> + <code>color</code>); graphics has <strong>no</strong> role names (gold/green/cyan/orange).</li>
+<li>All outline cubes drawn in <strong>one</strong> private depth+color pass (scene depth unused).</li>
+<li>Compute Sobel produces a <strong>white</strong> edge mask; overlay multiplies <code>edge × instance_color</code> onto swapchain <strong>after</strong> main color (cubes + planes).</li>
+<li>Kill-switch <code>visualize_confirmed_tips</code> is passed to the presenter as <code>enable_role_outlines</code> (selection gold still emitted when selected).</li>
+<li>Product colors live in <code>ScenePresenter</code> (brand palette); see <a href="app.html">app.md</a>.</li>
+</ul>
+<p>Validation: follow <code>.grok/skills/vulkan-validator</code> before commit/push of graphics changes.</p>
+<h2>Goals</h2>
+<ol>
+<li>Pure GPU concerns: device, swapchain, pipelines, upload, present.</li>
+<li>Validation-clean async Sobel (fence + queue serialization).</li>
+<li>Latest-wins triple-buffer publish; pick returns <code>instance_index</code> + <code>frame_seq</code>.</li>
+<li>ImGui host only; chrome via <code>IUiOverlay</code> on the render thread.</li>
+<li>Fast rebuilds: PCH, <code>/MP</code>, incremental shaders — <a href="../build-performance.md">build-performance.md</a>.</li>
+<li>Public header remains Vulkan-free.</li>
+<li>Fullscreen is <strong>host-owned</strong> (borderless HWND); graphics only follows client size via <code>Resize()</code>.</li>
+</ol>
+<h2>Non-goals</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>REST / main-chain cache / explorer links</td><td><strong>Network</strong> / <strong>app</strong></td></tr>
+<tr><td>Deciding green vs unconfirmed-red vs orange meaning</td><td><strong>App</strong> presenter</td></tr>
+<tr><td>Dual simultaneous gold and green Sobel</td><td>Confirmed-tips non-goal</td></tr>
+<tr><td>Rewrite to D3D / OpenGL / WebGPU</td><td>Stack non-goal</td></tr>
+<tr><td>Dual-GPU presentation deep-dive</td><td>Discrete pick is enough</td></tr>
+<tr><td>Structured logging framework</td><td>printf OK</td></tr>
+</table>
+<h2>Plan</h2>
+<table>
+<tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
+<tr><td><strong>P0</strong></td><td>Keep module map accurate as files move</td><td>Updated for frame_loop / selection / publish / async Sobel TUs</td></tr>
+<tr><td><strong>P0</strong></td><td>Enforce public vs private include rules</td><td>App never includes <code>graphics_system.hpp</code> or <code>frame/*</code> internals</td></tr>
+<tr><td><strong>P1</strong></td><td>Document kill-switch + highlight mode matrix</td><td>Config/runtime toggle surface</td></tr>
+<tr><td><strong>P1</strong></td><td>Validation pre-push discipline</td><td>vulkan-validator skill</td></tr>
+<tr><td><strong>P1</strong></td><td>Frame pass profiler (CPU scopes + GPU timestamps)</td><td><code>frame/profiling/*</code>, <code>FrameTimingSnapshot</code> in <code>gpu_pub_lib.h</code>; F3 HUD; <code>enable_frame_profiler</code> on engine</td></tr>
+<tr><td><strong>P1</strong></td><td>VnV bench on profiler snapshots</td><td><code>vnv/bench/</code> — median/p95 baselines via <code>run_vnv.ps1 -Bench</code> (opt-in, not in <code>-All</code>)</td></tr>
+<tr><td><strong>Done (P2)</strong></td><td>Pipeline/descriptor/barrier modularization</td><td><code>PipelineType</code>, <code>descriptor.cpp</code>, <code>cmd_image_barrier</code>, MeshArena shared PSOs</td></tr>
+<tr><td><strong>Done (P2)</strong></td><td>Split <code>GraphicsSystem</code> orchestration</td><td><code>frame_loop</code>, <code>async_sobel_submit</code>, <code>gpu_frame_publish</code>, <code>selection_state</code></td></tr>
+<tr><td><strong>P2</strong></td><td>Always-on tip Sobel perf budget</td><td>Soft median regression from bench; kill-switch escape hatch — <strong>data-driven via profiler</strong></td></tr>
+<tr><td><strong>P1 (V1 landed)</strong></td><td>Visual regression harness</td><td><code>vnv/int/tests/visual/</code> + <code>run_vnv.ps1 -Int</code> (GPU readback + golden); more cases optional</td></tr>
+<tr><td><strong>P3</strong></td><td>Full PIMPL of <code>GraphicsSystem</code></td><td>Only if external includes force it</td></tr>
+</table>
+<h3>Frame profiler (quick ref)</h3>
+<table>
+<tr><th>Piece</th><th>Role</th></tr>
+<tr><td><code>TimestampQueryPool</code></td><td>Per in-flight <code>VK_QUERY_TYPE_TIMESTAMP</code> pools; <code>timestampPeriod</code> → ms</td></tr>
+<tr><td><code>FrameProfiler</code></td><td>Named CPU RAII scopes + GPU begin/end; rolling ring; bound class</td></tr>
+<tr><td>Scopes</td><td>CPU: <code>Prepare</code>, <code>PublishUpload</code>, <code>MeshArenaUpload</code>, <code>RecordMain</code>, <code>SubmitPresent</code>, <code>OverlayUi</code>; GPU: DAG names + <code>Cubes</code> / <code>DebugMesh</code> / <code>ImGui</code></td></tr>
+<tr><td>Public API</td><td><code>IEngine::enable_frame_profiler</code> / <code>copy_frame_timing_snapshot</code> (Vulkan-free)</td></tr>
+<tr><td>HUD</td><td>F3 toggles sampling + ImGui table</td></tr>
+</table>
+<h2>Interfaces</h2>
+<p><strong>Implements:</strong> <code>IGraphicsSystem</code> (configure, lifecycle, submit/publish frame, pick, selection, UI snapshot, scene/camera/frame source wiring).</p>
+<p><strong>Consumes:</strong></p>
+<ul>
+<li><code>IFrameSource*</code> (app presenter)</li>
+<li><code>CameraController*</code>, <code>BlockScene*</code> (selection detail / refill coordination — coupling documented as v1)</li>
+<li><code>IUiOverlay*</code> (not owned)</li>
+</ul>
+<p><strong>Publishes:</strong> GPU frames; pick results; runs overlay on render thread.</p>
+<h2>Related</h2>
+<ul>
+<li><a href="index.html">layers/README.md</a></li>
+<li><a href="engine.html">engine.md</a> — facade contracts</li>
+<li><a href="app.html">app.md</a> — visual meaning of highlights</li>
+<li><a href="../build-performance.md">build-performance.md</a></li>
+<li>Historical: <a href="../graphics-modularization-design.md">graphics-modularization-design.md</a>, <a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> (Sobel multi-draw section)</li>
+</ul>
+  <footer>Edit <code>docs/layers/graphics.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

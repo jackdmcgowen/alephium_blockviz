@@ -113,6 +113,8 @@ int main()
         overlay->set_filter_multi_tx(true);
     if (prefs.filter_min_alph > 0.0)
         overlay->set_filter_min_alph(prefs.filter_min_alph);
+    if (prefs.filter_unconfirmed_only)
+        overlay->set_filter_unconfirmed_only(true);
     scene_presenter = new ScenePresenter(scene);
     overlay->set_block_scene(&scene);
     engine->set_scene(&scene);

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Layer architecture</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+  </div>
+</nav>
+<main>
+  <h1>Layer architecture</h1>
+  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="README.md"><code>README.md</code></a>.</p>
+<p>Living docs for <strong>alephium_blockviz</strong> after modularization. Prefer these over July 2026 design drafts when deciding where code belongs.</p>
+<p>Versions (see <code>src/app/app_identity.hpp</code>, <code>src/engine/engine_identity.hpp</code>, <code>AGENTS.md</code>):</p>
+<table>
+<tr><th>Component</th><th>Identity</th><th>Tag pattern</th></tr>
+<tr><td>Host app</td><td>Alephium BlockFlow</td><td><code>app-vMAJOR.MINOR.PATCH</code></td></tr>
+<tr><td>Product engine</td><td>BlockvizEngine</td><td><code>engine-vMAJOR.MINOR.PATCH</code></td></tr>
+</table>
+<p>Current identities: <strong>app 1.3.0 / engine 1.3.0</strong>. Tagged <code>main</code> may lag until release push (<code>AGENTS.md</code>).</p>
+<hr />
+<h2>Map</h2>
+<pre><code>main / app/platform/*  / config.json
+        │
+        ▼
+   app (overlay, ScenePresenter, camera)
+        │  IEngine
+        ▼
+   engine (BlockVizEngine, ISystem registry)
+     ├── network (poll, adapter, confirm) ──► domain BlockScene
+     │     └── network/platform/*  (cache root, process memory)
+     └── graphics (render thread, Vulkan)
+           ├── graphics/platform/*  (surface, ImGui host, screenshot)
+           └── IFrameSource::prepare (app ScenePresenter)</code></pre>
+<p>Platform TUs: <a href="../platform.md">docs/platform.md</a>.</p>
+<p><strong>Tests:</strong> unit / integration / system map to <code>src/</code> via <a href="../../vnv/TESTING.md">vnv/TESTING.md</a> (VnV; not product modularization).</p>
+<table>
+<tr><th>Layer</th><th>Project</th><th>Doc</th></tr>
+<tr><td><strong>App</strong></td><td><code>alephium_visualizer</code></td><td><a href="app.html">app.md</a></td></tr>
+<tr><td><strong>Engine</strong></td><td><code>blockviz_engine</code></td><td><a href="engine.html">engine.md</a></td></tr>
+<tr><td><strong>Graphics</strong></td><td><code>graphics</code></td><td><a href="graphics.html">graphics.md</a></td></tr>
+<tr><td><strong>Network</strong></td><td><code>network</code></td><td><a href="network.html">network.md</a></td></tr>
+<tr><td><strong>Domain</strong></td><td>(sources in app + detail store in network)</td><td><a href="domain.html">domain.md</a></td></tr>
+</table>
+<h3>Domain (shared data plane)</h3>
+<p>See <strong><a href="domain.html">domain.md</a></strong>. Summary: <code>BlockScene</code> / <code>BlockGraph</code> / layout under <code>src/domain/</code>; network writes, app presenter reads.</p>
+<hr />
+<h2>Confirmation responsibilities</h2>
+<table>
+<tr><th>Concern</th><th>Layer</th></tr>
+<tr><td>API <code>is_main</code>, seed queue, <code>H_c</code> advance, <code>mark_confirmed</code> dual-write</td><td><a href="network.html">network</a></td></tr>
+<tr><td>Solid / green / cyan / orange / gold / red presentation</td><td><a href="app.html">app</a></td></tr>
+<tr><td>Domain-agnostic Sobel (app-fed outline colors, edge×color)</td><td><a href="graphics.html">graphics</a></td></tr>
+</table>
+<hr />
+<h2>Related docs</h2>
+<table>
+<tr><th>Doc</th><th>Status</th></tr>
+<tr><td><a href="../ROADMAP.md">ROADMAP.md</a></td><td><strong>Active</strong> — ordered priority backlog (“what else”)</td></tr>
+<tr><td><a href="../build-performance.md">build-performance.md</a></td><td><strong>Active</strong> — PCH, <code>/MP</code>, shaders, new systems</td></tr>
+<tr><td><a href="../graphics-modularization-design.md">graphics-modularization-design.md</a></td><td><strong>Historical (landed)</strong></td></tr>
+<tr><td><a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a></td><td><strong>Historical (landed &amp; evolved)</strong></td></tr>
+<tr><td><a href="../../AGENTS.md">AGENTS.md</a></td><td>Version tags on <code>main</code> push</td></tr>
+<tr><td><a href="../../.grok/skills/vulkan-validator/SKILL.md">.grok/skills/vulkan-validator</a></td><td>Pre-push graphics validation</td></tr>
+</table>
+<hr />
+<h2>Smoke checklist</h2>
+<p>After meaningful changes:</p>
+<ol>
+<li>Launch → discrete GPU name / engine identity logged</li>
+<li>Cubes within one poll interval (or Debug simulator when shipped)</li>
+<li>Select block → inspector has hash / deps / txns (or refill)</li>
+<li>Esc / close → clean shutdown (systems stop before HWND destroy)</li>
+<li>Resize window (swapchain recreate)</li>
+<li>Mainnet ↔ Testnet switch from Network panel</li>
+<li>Debug build: no new Vulkan VUIDs on the path you touched</li>
+</ol>
+<hr />
+<h2>Build (short)</h2>
+<pre><code>install_deps.bat
+# Open sln/alephium_visualizer.sln — Debug|x64 or Release|x64
+# Run from repo root so config.json and resource/ resolve</code></pre>
+<p>Deps: vcpkg manifest (<code>curl</code>, <code>cjson</code>, <code>glm</code>); Vulkan SDK; MSVC.</p>
+  <footer>Edit <code>docs/layers/README.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
+</main>
+</body>
+</html>

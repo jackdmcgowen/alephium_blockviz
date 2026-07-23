@@ -8,9 +8,9 @@
 
 #include <cstdio>
 
-// Linked via graphics.lib. Do not include gfx_platform.hpp (pulls Vulkan headers;
+// Linked via graphics.lib. Do not include gpu_platform.hpp (pulls Vulkan headers;
 // app project has no VULKAN_SDK include path).
-void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
+void gpu_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
 
 // ImGui Win32 WndProc forward (implemented in imgui_impl_win32.cpp).
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -164,7 +164,7 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
         g_running = true;
         g_hwnd = nullptr;
         g_hinstance = GetModuleHandle(nullptr);
-        gfx_platform_configure_headless(true, w, h);
+        gpu_platform_configure_headless(true, w, h);
         create_info->platform_instance = g_hinstance;
         create_info->window = &g_headless_token;
         create_info->width = w;
@@ -175,7 +175,7 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
     }
 
     g_headless = false;
-    gfx_platform_configure_headless(false, 0, 0);
+    gpu_platform_configure_headless(false, 0, 0);
 
     g_hinstance = GetModuleHandle(nullptr);
     g_running = true;

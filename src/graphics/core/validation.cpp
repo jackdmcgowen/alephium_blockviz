@@ -1,6 +1,6 @@
 #include "graphics/pch.h"
 #include "gpu_prv_lib.h"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 #include <cstdio>
 
@@ -28,7 +28,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback
         fprintf(validationFile, "%s\n", pCallbackData->pMessage);
         fflush(validationFile); // survive hard kill during /vulkan-validator re-verify
     }
-    gfx_platform_debug_log(pCallbackData->pMessage);
+    gpu_platform_debug_log(pCallbackData->pMessage);
 
     return VK_FALSE; // Return VK_FALSE to not abort the call
 
@@ -42,7 +42,7 @@ void create_debug_messenger(VkInstance instance)
 
     if (kCompileTimeValidationLogging) {
         // CWD is repo root (LocalDebuggerWorkingDirectory); keep logs out of source tree.
-        gfx_platform_ensure_directory("build");
+        gpu_platform_ensure_directory("build");
         validationFile = fopen("build/debug.log", "a+");
 
         if (!validationFile)

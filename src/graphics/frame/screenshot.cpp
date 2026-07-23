@@ -1,6 +1,6 @@
 #include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 #include "graphics/gpu_prv_lib.h"
 #include "common/time_util.hpp"
 #include "common/env_util.hpp"
@@ -13,8 +13,8 @@ namespace
 {
 std::string make_default_path()
 {
-    gfx_platform_ensure_directory("docs");
-    gfx_platform_ensure_directory("docs/images");
+    gpu_platform_ensure_directory("docs");
+    gpu_platform_ensure_directory("docs/images");
 
     const std::time_t t = std::time(nullptr);
     std::tm tm_local{};
@@ -34,7 +34,7 @@ void ensure_parent_dirs(const std::string& path)
     {
         const std::string dir = path.substr(0, slash);
         if (!dir.empty())
-            gfx_platform_ensure_directory(dir.c_str());
+            gpu_platform_ensure_directory(dir.c_str());
     }
 }
 } // namespace
@@ -164,7 +164,7 @@ void GraphicsSystem::finish_screenshot_after_submit_()
             VK_SUCCESS &&
         mapped)
     {
-        ok = gfx_platform_write_png_rgba(
+        ok = gpu_platform_write_png_rgba(
             path.c_str(), static_cast<int>(screenshot_extent_w_),
             static_cast<int>(screenshot_extent_h_),
             static_cast<const unsigned char*>(mapped));
@@ -180,14 +180,14 @@ void GraphicsSystem::finish_screenshot_after_submit_()
 
     std::printf("[gfx] screenshot: GPU readback failed\n");
     const bool allow_blit = blockviz::env_flag("BLOCKVIZ_SCREENSHOT_WINDOW_BLIT", false);
-    if (!allow_blit || gfx_platform_is_headless() || !hwnd)
+    if (!allow_blit || gpu_platform_is_headless() || !hwnd)
     {
         std::printf("[gfx] screenshot failed: %s (set BLOCKVIZ_SCREENSHOT_WINDOW_BLIT=1 for "
                     "legacy window blit)\n",
                     path.c_str());
         return;
     }
-    if (gfx_platform_save_window_png(hwnd, path.c_str()))
+    if (gpu_platform_save_window_png(hwnd, path.c_str()))
         std::printf("[gfx] screenshot (window blit) saved: %s\n", path.c_str());
     else
         std::printf("[gfx] screenshot failed: %s\n", path.c_str());

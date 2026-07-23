@@ -1,0 +1,144 @@
+/* Shared chrome for static docs/*.html (open from repo; no build step). */
+:root {
+  --bg: #0b0b0c;
+  --panel: #16161a;
+  --text: #e8e8ec;
+  --muted: #9a9aa8;
+  --cyan: #4dd0ff;
+  --gray: #8c8e98;
+  --green: #3ddc84;
+  --red: #ff3b30;
+  --orange: #ff8a1f;
+  --gold: #f0c24b;
+  --border: #2a2a32;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(11, 11, 12, 0.92);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.site-nav-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0.55rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  align-items: center;
+  font-size: 0.88rem;
+}
+.site-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.site-nav a:hover { color: var(--cyan); }
+.site-nav a.current { color: var(--cyan); font-weight: 600; }
+.site-nav .brand {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+h1 { font-size: 1.75rem; font-weight: 600; margin: 0 0 0.35rem; }
+h2 {
+  font-size: 1.2rem;
+  margin: 2rem 0 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: var(--muted); }
+p, li { color: var(--text); }
+.muted { color: var(--muted); }
+a { color: var(--cyan); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  margin: 0.75rem 0 1.25rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: var(--panel); color: var(--muted); font-weight: 600; }
+.swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: -0.1rem;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.swatch.cyan { background: rgba(77, 208, 255, 0.55); }
+.swatch.gray { background: rgba(140, 142, 152, 0.65); }
+.swatch.green { background: var(--green); }
+.swatch.red { background: var(--red); }
+.swatch.orange { background: var(--orange); }
+.swatch.gold { background: var(--gold); }
+figure {
+  margin: 1rem 0 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+figure img { display: block; width: 100%; height: auto; }
+figcaption { padding: 0.65rem 0.85rem; font-size: 0.9rem; color: var(--muted); }
+code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.88em;
+  background: #1e1e24;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.callout {
+  background: #1a1a22;
+  border-left: 3px solid var(--cyan);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  border-radius: 0 6px 6px 0;
+}
+ul { padding-left: 1.25rem; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 1.5rem;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+.card a { font-weight: 600; text-decoration: none; }
+.card a:hover { text-decoration: underline; }
+.card p { margin: 0.35rem 0 0; font-size: 0.9rem; color: var(--muted); }
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+footer { margin-top: 2rem; font-size: 0.85rem; color: var(--muted); }

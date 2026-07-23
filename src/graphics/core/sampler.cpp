@@ -1,5 +1,5 @@
 #include "graphics/pch.h"
-#include "graphics/sampler.hpp"
+#include "graphics/core/sampler.hpp"
 
 #include <stdexcept>
 

@@ -16,6 +16,7 @@ struct UserPrefs
     bool          filter_multi_tx = false;
     // Min block output ALPH (human); 0 = filter off.
     double        filter_min_alph = 0.0;
+    bool          filter_unconfirmed_only = false;
     // 0 = use code default lookback; >0 overrides seconds.
     int           lookback_seconds = 0;
 };
@@ -85,6 +86,11 @@ inline UserPrefs load_user_prefs(const char* path = kUserPrefsPath)
         if (cJSON_IsNumber(a) && a->valuedouble > 0.0)
             p.filter_min_alph = a->valuedouble;
     }
+    if (const cJSON* u = cJSON_GetObjectItem(root, "filter_unconfirmed_only"))
+    {
+        if (cJSON_IsBool(u))
+            p.filter_unconfirmed_only = cJSON_IsTrue(u);
+    }
     if (const cJSON* lb = cJSON_GetObjectItem(root, "lookback_seconds"))
     {
         if (cJSON_IsNumber(lb) && lb->valueint > 0)
@@ -103,6 +109,8 @@ inline bool save_user_prefs(const UserPrefs& p, const char* path = kUserPrefsPat
     cJSON_AddBoolToObject(root, "filter_multi_tx", p.filter_multi_tx ? 1 : 0);
     if (p.filter_min_alph > 0.0)
         cJSON_AddNumberToObject(root, "filter_min_alph", p.filter_min_alph);
+    cJSON_AddBoolToObject(root, "filter_unconfirmed_only",
+                          p.filter_unconfirmed_only ? 1 : 0);
     if (p.lookback_seconds > 0)
         cJSON_AddNumberToObject(root, "lookback_seconds", p.lookback_seconds);
 

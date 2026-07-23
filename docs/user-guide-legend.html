@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Visual legend</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+    <a href="user-guide-network-fill.html">Network fill</a>
+    <a class="current" href="user-guide-legend.html">Legend</a>
+    <a href="user-guide-controls.html">Controls</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+  </div>
+</nav>
+<main>
+  <h1>Visual legend</h1>
+  <p class="muted">Product cues in the 3D view. Outline colors are chosen in the app; graphics draws domain-agnostic Sobel edges × instance color.</p>
+
+  <table>
+    <tr><th>Cue</th><th>Meaning</th></tr>
+    <tr><td>Solid cubes (lane colors)</td><td>Blocks in the bag</td></tr>
+    <tr><td><span class="swatch green"></span>Green Sobel / tip arrows</td><td>Confirmed per-lane tip <code>H_c</code></td></tr>
+    <tr><td><span class="swatch red"></span>Red Sobel / red tip arrows</td><td>Unconfirmed tip surface</td></tr>
+    <tr><td><span class="swatch orange"></span>Orange outline</td><td>Missing dependencies</td></tr>
+    <tr><td><span class="swatch gold"></span>Gold</td><td>Selection + dependency BFS fan (exclusive when selected)</td></tr>
+    <tr><td><span class="swatch cyan"></span>Cyan translucent plane</td><td>Closed G-segment barrier (never open live tip)</td></tr>
+    <tr><td><span class="swatch gray"></span>Gray translucent volume</td><td>History 64s network fill <strong>in flight</strong></td></tr>
+    <tr><td>Dim / fading gray volume</td><td>Just admitted, or queued past the 4 full-α slots</td></tr>
+    <tr><td>Minimap green bin</td><td>Live G; gold caret = camera Z</td></tr>
+  </table>
+
+  <div class="callout">
+    Multiple non-selection roles (green / cyan / orange) can outline in <strong>one</strong> Sobel pass.
+    Selection gold still wins exclusively when a block is selected.
+  </div>
+
+  <p>Brand floats: <a href="brand/alephium_palette.md">docs/brand/alephium_palette.md</a></p>
+
+  <div class="pager">
+    <a href="user-guide-network-fill.html">← Network fill</a>
+    <a href="user-guide-controls.html">Controls →</a>
+  </div>
+  <footer>Source of truth for agents: <code>docs/layers/app.md</code></footer>
+</main>
+</body>
+</html>

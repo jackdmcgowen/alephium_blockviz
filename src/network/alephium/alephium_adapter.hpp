@@ -221,7 +221,16 @@ private:
     int64_t live_open_subseg_from_(int64_t now_ms) const;
     bool history_subseg_allowed_(int64_t chunk_from, int64_t chunk_to,
                                  int64_t live_open_from) const;
-    // Triple-buffer ring of absolute lookback indices (≤ kSegmentRingSize).
+    // Camera Z → wall timestamp → genesis-aligned 64s subsegment from_ms.
+    int64_t camera_eye_ts_ms_() const;
+    int64_t camera_subseg_from_ms_() const;
+    // Enqueue one history subseg if hole + visible ring + under inflight cap.
+    bool try_enqueue_history_subseg_(int64_t chunk_from, int64_t live_open_from);
+    // True if subseg is a history hole (not fetched, not pending).
+    bool history_subseg_is_hole_(int64_t chunk_from) const;
+    // Fill incomplete 64s holes with sequential older crawl + resume cursor.
+    int  pump_history_from_camera_(int max_chunks, int64_t live_open_from);
+    // Load/admit ring of lookback k centered on cam_k (≤ kSegmentRingSize).
     void update_segment_ring_();
     bool is_active_segment_(int index) const;
     // Lookback k with prefetch hysteresis (start k+1/k+2 before full cross).
@@ -352,10 +361,11 @@ private:
         bool    polled = false;           // all chunks fetched once
         int     chunks_done = 0;
         int     chunks_total = 0;
-        // Newest-first fill cursor: exclusive end of next chunk to request.
+        // Fallback fill cursor (exclusive end of next chunk) when not using camera walk.
         // Advances only after successful admit (not enqueue).
         int64_t next_fill_to_ms = 0;
-        // In-flight chunk from_ms (0 = none); blocks cursor until admit/fail.
+        // Last enqueued from_ms for this window (debug / HUD); does NOT serialize inflight.
+        // Multi-subseg concurrency uses pending_history_from_ + HttpIoPool.
         int64_t pending_from_ms = 0;
         int     retry_count = 0;
         // Frozen upper bound for this fill epoch (live window especially).
@@ -381,7 +391,12 @@ private:
     // Load-once: chunk from_ms successfully admitted (not mere HTTP attempt).
     // Re-GET only after fail/prune invalidation, or live tip force_newest.
     std::unordered_set<int64_t> history_slots_fetched_;
-    // Priority variable-range patches (missing deps / eye) before bulk newest-first.
+    // History interval from_ms currently queued or in-flight (multi per G allowed).
+    std::unordered_set<int64_t> pending_history_from_;
+    // Sequential history crawl: next 64s candidate (genesis-aligned). 0 = unset.
+    // Older-first; newer pass only when older-in-ring has no holes.
+    int64_t history_crawl_from_ms_ = 0;
+    // Priority variable-range patches (missing deps / eye) after camera-subseg walk.
     std::vector<TimelineHole> timeline_holes_;
     // Sparse single-hash GETs — only after DepCritical ranges are idle.
     std::deque<std::string> single_block_q_;

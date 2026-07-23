@@ -1,7 +1,7 @@
 #include "app/platform/app_platform.hpp"
 
-// Linked via graphics. Avoid gfx_platform.hpp (Vulkan headers).
-void gfx_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
+// Linked via graphics. Avoid gpu_platform.hpp (Vulkan headers).
+void gpu_platform_configure_headless(bool enabled, uint32_t width, uint32_t height);
 
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
@@ -115,7 +115,7 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
         g_window = nullptr;
         g_win_w = static_cast<int>(w);
         g_win_h = static_cast<int>(h);
-        gfx_platform_configure_headless(true, w, h);
+        gpu_platform_configure_headless(true, w, h);
         create_info->platform_instance = nullptr;
         create_info->window = &g_headless_token;
         create_info->width = w;
@@ -126,7 +126,7 @@ bool app_platform_create_window(EngineCreateInfo* create_info,
     }
 
     g_headless = false;
-    gfx_platform_configure_headless(false, 0, 0);
+    gpu_platform_configure_headless(false, 0, 0);
 
     if (!glfwInit())
     {

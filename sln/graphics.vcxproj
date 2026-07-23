@@ -114,24 +114,24 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">graphics/pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">graphics/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="..\src\graphics\buffer.cpp" />
+    <ClCompile Include="..\src\graphics\core\buffer.cpp" />
     <ClCompile Include="..\src\graphics\buffer_manager.cpp" />
     <ClCompile Include="..\src\graphics\camera.cpp" />
     <ClCompile Include="..\src\graphics\debug\debug_drawer.cpp" />
     <ClCompile Include="..\src\graphics\mesh_arena.cpp" />
-    <ClCompile Include="..\src\graphics\device.cpp" />
-    <ClCompile Include="..\src\graphics\descriptor.cpp" />
+    <ClCompile Include="..\src\graphics\core\device.cpp" />
+    <ClCompile Include="..\src\graphics\core\descriptor.cpp" />
     <ClCompile Include="..\src\graphics\engine_requirements.cpp" />
-    <ClCompile Include="..\src\graphics\image.cpp" />
-    <ClCompile Include="..\src\graphics\instance.cpp" />
-    <ClCompile Include="..\src\graphics\pipeline.cpp" />
-    <ClCompile Include="..\src\graphics\shader.cpp" />
-    <ClCompile Include="..\src\graphics\sampler.cpp" />
-    <ClCompile Include="..\src\graphics\surface.cpp" />
-    <ClCompile Include="..\src\graphics\platform\gfx_platform_common.cpp" />
-    <ClCompile Include="..\src\graphics\platform\gfx_platform_win32.cpp" />
-    <ClCompile Include="..\src\graphics\swapchain.cpp" />
-    <ClCompile Include="..\src\graphics\validation.cpp" />
+    <ClCompile Include="..\src\graphics\core\image.cpp" />
+    <ClCompile Include="..\src\graphics\core\instance.cpp" />
+    <ClCompile Include="..\src\graphics\core\pipeline.cpp" />
+    <ClCompile Include="..\src\graphics\core\shader.cpp" />
+    <ClCompile Include="..\src\graphics\core\sampler.cpp" />
+    <ClCompile Include="..\src\graphics\core\surface.cpp" />
+    <ClCompile Include="..\src\graphics\platform\gpu_platform_common.cpp" />
+    <ClCompile Include="..\src\graphics\platform\gpu_platform_win32.cpp" />
+    <ClCompile Include="..\src\graphics\core\swapchain.cpp" />
+    <ClCompile Include="..\src\graphics\core\validation.cpp" />
     <ClCompile Include="..\src\graphics\graphics_system.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_sync.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_resources.cpp" />
@@ -161,8 +161,8 @@
     <ClInclude Include="..\src\graphics\camera.hpp" />
     <ClInclude Include="..\src\graphics\gpu_prv_lib.h" />
     <ClInclude Include="..\src\graphics\gpu_pub_lib.h" />
-    <ClInclude Include="..\src\graphics\platform\gfx_platform.hpp" />
-    <ClInclude Include="..\src\graphics\queue_types.hpp" />
+    <ClInclude Include="..\src\graphics\platform\gpu_platform.hpp" />
+    <ClInclude Include="..\src\graphics\core\queue_types.hpp" />
     <ClInclude Include="..\src\graphics\buffer_manager.hpp" />
     <ClInclude Include="..\src\graphics\engine_requirements.hpp" />
     <ClInclude Include="..\src\graphics\mesh_arena.h" />
@@ -184,7 +184,7 @@
     <ClInclude Include="..\src\graphics\frame\passes\sobel_compute_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\passes\edge_overlay_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\vertex_types.hpp" />
-    <ClInclude Include="..\src\graphics\sampler.hpp" />
+    <ClInclude Include="..\src\graphics\core\sampler.hpp" />
     <ClInclude Include="..\src\engine\engine.hpp" />
     <ClInclude Include="..\src\engine\engine_identity.hpp" />
     <ClInclude Include="..\src\engine\system.hpp" />

@@ -1,4 +1,4 @@
-#include "graphics/platform/gfx_platform.hpp"
+#include "graphics/platform/gpu_platform.hpp"
 
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
@@ -14,11 +14,11 @@
 #include <filesystem>
 #include <stdexcept>
 
-uint32_t gfx_platform_surface_extension_names(const char** names, uint32_t capacity)
+uint32_t gpu_platform_surface_extension_names(const char** names, uint32_t capacity)
 {
     if (!names || capacity == 0)
         return 0;
-    if (gfx_platform_is_headless())
+    if (gpu_platform_is_headless())
     {
         if (capacity < 2)
             return 0;
@@ -40,12 +40,12 @@ uint32_t gfx_platform_surface_extension_names(const char** names, uint32_t capac
     return count;
 }
 
-VkSurfaceKHR gfx_platform_create_surface(VkInstance instance,
+VkSurfaceKHR gpu_platform_create_surface(VkInstance instance,
                                          void* window,
                                          void* /*platform_instance*/)
 {
-    if (gfx_platform_is_headless())
-        return gfx_platform_create_headless_surface(instance);
+    if (gpu_platform_is_headless())
+        return gpu_platform_create_headless_surface(instance);
     if (!window)
         throw std::runtime_error("Failed to create window surface: null window");
     VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -56,19 +56,19 @@ VkSurfaceKHR gfx_platform_create_surface(VkInstance instance,
     return surface;
 }
 
-void gfx_platform_destroy_surface(VkInstance instance, VkSurfaceKHR surface)
+void gpu_platform_destroy_surface(VkInstance instance, VkSurfaceKHR surface)
 {
     vkDestroySurfaceKHR(instance, surface, nullptr);
 }
 
-void gfx_platform_get_window_size(void* window, uint32_t* out_w, uint32_t* out_h)
+void gpu_platform_get_window_size(void* window, uint32_t* out_w, uint32_t* out_h)
 {
-    if (gfx_platform_is_headless())
+    if (gpu_platform_is_headless())
     {
         if (out_w)
-            *out_w = gfx_platform_headless_width();
+            *out_w = gpu_platform_headless_width();
         if (out_h)
-            *out_h = gfx_platform_headless_height();
+            *out_h = gpu_platform_headless_height();
         return;
     }
     int w = 0, h = 0;
@@ -80,27 +80,27 @@ void gfx_platform_get_window_size(void* window, uint32_t* out_w, uint32_t* out_h
         *out_h = h > 0 ? static_cast<uint32_t>(h) : 0;
 }
 
-void gfx_platform_imgui_init(void* window)
+void gpu_platform_imgui_init(void* window)
 {
-    if (gfx_platform_is_headless())
+    if (gpu_platform_is_headless())
         return;
     ImGui_ImplGlfw_InitForVulkan(static_cast<GLFWwindow*>(window), true);
 }
 
-void gfx_platform_imgui_shutdown()
+void gpu_platform_imgui_shutdown()
 {
-    if (gfx_platform_is_headless())
+    if (gpu_platform_is_headless())
         return;
     ImGui_ImplGlfw_Shutdown();
 }
 
-void gfx_platform_imgui_new_frame()
+void gpu_platform_imgui_new_frame()
 {
-    if (gfx_platform_is_headless())
+    if (gpu_platform_is_headless())
     {
         ImGuiIO& io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(static_cast<float>(gfx_platform_headless_width()),
-                                static_cast<float>(gfx_platform_headless_height()));
+        io.DisplaySize = ImVec2(static_cast<float>(gpu_platform_headless_width()),
+                                static_cast<float>(gpu_platform_headless_height()));
         if (io.DeltaTime <= 0.f)
             io.DeltaTime = 1.f / 60.f;
         return;
@@ -108,7 +108,7 @@ void gfx_platform_imgui_new_frame()
     ImGui_ImplGlfw_NewFrame();
 }
 
-void gfx_platform_debug_log(const char* msg)
+void gpu_platform_debug_log(const char* msg)
 {
     if (msg)
     {
@@ -117,7 +117,7 @@ void gfx_platform_debug_log(const char* msg)
     }
 }
 
-bool gfx_platform_ensure_directory(const char* path_utf8)
+bool gpu_platform_ensure_directory(const char* path_utf8)
 {
     if (!path_utf8 || !path_utf8[0])
         return false;
@@ -126,7 +126,7 @@ bool gfx_platform_ensure_directory(const char* path_utf8)
     return !ec || std::filesystem::is_directory(path_utf8);
 }
 
-bool gfx_platform_save_window_png(void* /*window*/, const char* path_utf8)
+bool gpu_platform_save_window_png(void* /*window*/, const char* path_utf8)
 {
     // Fallback only — preferred path is GPU swapchain readback.
     if (!path_utf8 || !path_utf8[0])
@@ -141,5 +141,5 @@ bool gfx_platform_save_window_png(void* /*window*/, const char* path_utf8)
         rgba[i * 4 + 3] = 255;
     }
     std::printf("[gfx] screenshot: window-blit fallback stub on Linux: %s\n", path_utf8);
-    return gfx_platform_write_png_rgba(path_utf8, w, h, rgba);
+    return gpu_platform_write_png_rgba(path_utf8, w, h, rgba);
 }

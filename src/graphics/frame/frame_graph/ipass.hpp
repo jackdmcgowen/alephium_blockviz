@@ -9,8 +9,8 @@
 
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
 #include "graphics/frame/profiling/frame_profiler.hpp"
-#include "graphics/queue_types.hpp"
-#include "graphics/sampler.hpp"
+#include "graphics/core/queue_types.hpp"
+#include "graphics/core/sampler.hpp"
 
 #include <vulkan/vulkan.h>
 
