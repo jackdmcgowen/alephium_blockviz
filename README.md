@@ -13,6 +13,8 @@ Cross-platform **Vulkan + ImGui** visualizer for **Alephium BlockFlow** — sixt
 
 Release tags on `main`: `app-vMAJOR.MINOR.PATCH` + `engine-v…` — see [AGENTS.md](AGENTS.md).
 
+**Timeline & fill guide (HTML):** [docs/user-guide-timeline.html](docs/user-guide-timeline.html) — 64s grid, rings, concurrent loads, color legend.
+
 ## Platform support
 
 | Platform | Host | Build | GUI product | Headless | Mod VnV | Int visual | CI |
@@ -25,11 +27,29 @@ Release tags on `main`: `app-vMAJOR.MINOR.PATCH` + `engine-v…` — see [AGENTS
 
 ## Features (short)
 
-- Network panel: domain switch, loading/cache HUD, feed
-- 3D BlockFlow cubes + tip/selection **Sobel** outlines (app-fed colors)
-- Selection + dependency BFS fan, camera End / Side / Live (keys **1** / **2** / **3**)
-- Timeline minimap (segment jump)
-- **F3** frame profiler HUD · **F12** GPU screenshot (readback while swapchain image is still acquired) · **F11** fullscreen
+- Network panel: domain switch, **Stable** / History / Bootstrapping status, disk cache HUD, feed
+- 3D BlockFlow cubes + tip/selection **Sobel** outlines
+- Selection + dependency BFS fan; camera **End** / **Side** / **Live** (keys **1** / **2** / **3**)
+- Timeline **64s subsegments** · **640s G-segments** · Z-proportional minimap
+- Visible-ring history fill (≤**4** concurrent interval GETs); live tip open **64s** cell first
+- Gray translucent volumes = history fills in flight (fade when admitted)
+- **F3** profiler · **F12** GPU screenshot (final swapchain after scene+UI, before present) · **F11** fullscreen
+
+## Visual legend
+
+| Cue | Meaning |
+|-----|---------|
+| Solid cubes (lane colors) | Blocks in the bag |
+| **Green** Sobel / tip arrows | Confirmed per-lane tip `H_c` |
+| **Red** Sobel / red tip arrows | Unconfirmed tip surface |
+| **Orange** outline | Missing dependencies |
+| **Gold** | Selection + dep BFS fan |
+| **Cyan translucent plane** | Closed G-segment barrier (never open live tip) |
+| **Gray translucent volume** | History **64s** network interval **in flight** (not live tip open cell) |
+| Gray volume (dim / fading) | Interval just admitted, or extra queued beyond the 4 in-flight cap |
+| Minimap **green** bin | Live G; gold caret = camera Z |
+
+**Concurrent network subsegment GETs:** at most **4** (`HttpIoPool`). Seeing more gray boxes usually means some are **fading** or **dim queued** — not 12 simultaneous HTTP calls.
 
 ## Architecture
 
@@ -43,6 +63,7 @@ Layered libraries — living goals and plans:
 | Graphics | [docs/layers/graphics.md](docs/layers/graphics.md) |
 | Network | [docs/layers/network.md](docs/layers/network.md) |
 | Platform | [docs/platform.md](docs/platform.md) · [docs/linux.md](docs/linux.md) |
+| Timeline guide | [docs/user-guide-timeline.html](docs/user-guide-timeline.html) |
 
 **Roadmap / priorities:** [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -98,3 +119,9 @@ FakeChain (Debug) product UI — Network + Block rails, tip cubes, timeline mini
 ![](docs/images/screenshot_2.png)
 
 ![](docs/images/screenshot_3.png)
+
+Testnet with history fill volumes + segment barriers (F12 GPU readback of final frame):
+
+![](docs/images/capture_20260722_191524.png)
+
+See [color legend](#visual-legend) and [user guide](docs/user-guide-timeline.html) for how to read cyan planes and gray volumes.

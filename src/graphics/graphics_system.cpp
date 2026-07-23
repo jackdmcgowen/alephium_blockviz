@@ -680,14 +680,12 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     }
 
     // Async Sobel path adds depth barriers and ends the CB in SobelAsyncPass::submit.
+    // F12: always copy the presentable swapchain image (resolve target when MSAA), never the
+    // multi-sample color attachment — post scene+ImGui, pre-present.
     if (!defer_present)
     {
         if (capture_screenshot)
-        {
-            const VkImage present_img =
-                msaa ? swapchainImages[imageIndex] : rp.color_image;
-            record_screenshot_before_present_(buffer, present_img);
-        }
+            record_screenshot_before_present_(buffer, swapchainImages[imageIndex]);
         main_scene_pass_.end_command_buffer(buffer);
     }
 

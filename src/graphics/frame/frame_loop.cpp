@@ -426,8 +426,8 @@ void GraphicsSystem::render()
         outline_pass_.ready() && sobel_compute_pass_.ready() && edge_overlay_pass_.ready() &&
         frame_resources_.outline_count() > 0;
 
-    // F12 path: claim pending path; copy is recorded into the acquired swapchain image CB
-    // before present (post-present transfer is illegal and can hang).
+    // F12: claim path; GPU copy runs after final color (scene + UI [+ sobel]), still
+    // acquired, before present. Post-present transfer is illegal and can hang.
     const bool capture_shot = begin_screenshot_frame_();
 
     VkCommandBuffer commandBuffer = inFlightFrames[currentFrame].commandBuffer;

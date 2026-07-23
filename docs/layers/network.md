@@ -79,7 +79,7 @@ Additional policy themes (see header comments on `AlephiumAdapter`): **anchor + 
 | **Render** | **7** (app) | Draw corridor only; see app rule book |
 | **Live poll** | **64s** open tip subseg | Genesis-aligned open slot; history never overlaps it |
 
-Fetch priority: live 8s edge → load-ring disk → load-ring network. History dep-hole ranges are **history-only** (not live tip path). Minimap labels genesis segment numbers (`#G_seg`).
+Fetch priority: **live open 64s cell first** → disk admit for visible ring → network holes in visible 7 G (≤**4** concurrent interval GETs). History never overlaps the open tip cell. Minimap labels genesis segment numbers (`#G_seg`).
 
 **History mode:** when `cam_k ≥ 1` (live outside the sliding window), HUD **Status = History**; **halt** live tip growth, live force-poll, and new tip is_main seeds. Continue history ring ensure/pump + higher interval admit budget.
 

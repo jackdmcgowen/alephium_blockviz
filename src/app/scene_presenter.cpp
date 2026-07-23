@@ -35,7 +35,13 @@ inline glm::vec4 kHoverArrowColor()
     c.a *= 0.45f;
     return c;
 }
-const glm::vec4 kBarrierPlaneColor(0.35f, 0.75f, 0.95f, 0.10f);
+// Closed G barriers (not open live tip). Stronger α so F12/PNG and on-screen match.
+const glm::vec4 kBarrierPlaneColor(0.30f, 0.82f, 1.00f, 0.16f);
+const glm::vec4 kBarrierPlaneDim(0.30f, 0.78f, 0.98f, 0.12f);
+// History network fill volumes (64s subseg). In-flight vs fading must read differently.
+const glm::vec4 kFillVolumeInflight(0.55f, 0.56f, 0.60f, 0.16f);
+const glm::vec4 kFillVolumeFading(0.50f, 0.52f, 0.56f, 0.07f);
+constexpr int kMaxFullAlphaFillVolumes = 4; // matches HttpIoPool interval inflight
 
 // BFS confirm rays: muted brand family (not high-chroma rainbow).
 glm::vec4 bfs_thread_color(int thread_id)
@@ -1843,7 +1849,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                 // Steady α for load-only planes; render-ring planes can use cube fade.
                 const float in_render = fade_for_k(k);
                 const float fa = (in_render > 0.02f) ? in_render : 0.07f;
-                glm::vec4 col = bold ? kBarrierPlaneColor : glm::vec4(0.35f, 0.75f, 0.95f, 0.06f);
+                glm::vec4 col = bold ? kBarrierPlaneColor : kBarrierPlaneDim;
                 col.a *= fa;
                 // Frustum cull barrier planes (mesh only; pad reduces edge strobe).
                 if (in.frustum)
@@ -1903,24 +1909,40 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             }
 
             const float slab_half = kLayoutBaseRadius * 6.5f;
-            const glm::vec4 base_col(0.48f, 0.48f, 0.52f, 0.11f);
+            // Draw newest in-flight first; cap full-α to HTTP inflight so stacked fades
+            // do not read as "12 subsegments loading."
+            std::vector<const FillSlabAnim*> ordered;
+            ordered.reserve(fill_slab_anims_.size());
             for (const auto& kv : fill_slab_anims_)
+                ordered.push_back(&kv.second);
+            std::sort(ordered.begin(), ordered.end(),
+                      [](const FillSlabAnim* a, const FillSlabAnim* b) {
+                          return a->from_ms > b->from_ms;
+                      });
+            int full_alpha_drawn = 0;
+            for (const FillSlabAnim* ap : ordered)
             {
-                const FillSlabAnim& a = kv.second;
-                float alpha = base_col.a;
-                if (a.fade_start_sec >= 0.f)
+                const FillSlabAnim& a = *ap;
+                const bool fading = a.fade_start_sec >= 0.f;
+                glm::vec4 col = fading ? kFillVolumeFading : kFillVolumeInflight;
+                if (fading)
                 {
                     const float t =
                         std::clamp((now - a.fade_start_sec) / kFillSlabFadeSec, 0.f, 1.f);
-                    // Smoothstep for less pop at end of fade.
                     const float u = t * t * (3.f - 2.f * t);
-                    alpha *= (1.f - u);
+                    col.a *= (1.f - u);
                 }
-                if (alpha < 0.008f)
+                else
+                {
+                    if (full_alpha_drawn >= kMaxFullAlphaFillVolumes)
+                        col.a *= 0.35f; // extra queued: dim, not "another full load"
+                    else
+                        ++full_alpha_drawn;
+                }
+                if (col.a < 0.008f)
                     continue;
                 const float z0 = ts_to_z(a.from_ms, timeline_origin_ms, meters_per_second);
                 const float z1 = ts_to_z(a.to_ms, timeline_origin_ms, meters_per_second);
-                // Frustum cull with pad so edge of screen does not strobe.
                 if (in.frustum)
                 {
                     const float z_lo = std::min(z0, z1);
@@ -1932,8 +1954,6 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     if (!in.frustum->intersects_aabb(center, half))
                         continue;
                 }
-                glm::vec4 col = base_col;
-                col.a = alpha;
                 debug->add_z_slab(z0, z1, slab_half, col);
             }
         }
