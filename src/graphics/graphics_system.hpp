@@ -33,6 +33,7 @@
 #include "graphics/frame/frame_resources.hpp"
 #include "graphics/frame/frame_sync.hpp"
 #include "graphics/frame/passes/main_scene_pass.hpp"
+#include "graphics/frame/passes/instance_cull_pass.hpp"
 #include "graphics/frame/passes/picker_pass.hpp"
 #include "graphics/frame/passes/sobel_resources.hpp"
 #include "graphics/frame/passes/outline_pass.hpp"
@@ -44,6 +45,7 @@
 #include "graphics/frame/vertex_types.hpp"
 #include "graphics/frame/profiling/frame_profiler.hpp"
 #include "graphics/buffer_manager.hpp"
+#include "graphics/engine_requirements.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
 #include "graphics/core/queue_types.hpp"
@@ -109,6 +111,17 @@ public:
     // Render-thread access for record/Sobel instrumentation.
     FrameProfiler* frame_profiler() { return &frame_profiler_; }
 
+    // Optional device capabilities (mesh shaders, etc.). Queried at init.
+    const DeviceOptionalFeatures& device_optional_features() const
+    {
+        return device_optional_features_;
+    }
+    // True when VK_EXT_mesh_shader was enabled on the logical device (PR3 cube path).
+    bool mesh_shaders_enabled() const { return mesh_shaders_enabled_; }
+    // Prefer mesh cube draw when available (default on). Classic path always kept as fallback.
+    void set_prefer_mesh_cube(bool prefer) { prefer_mesh_cube_ = prefer; }
+    bool prefer_mesh_cube() const { return prefer_mesh_cube_; }
+
 private:
     void resize_internal();
     void Resize(); // Win32 client-rect path
@@ -126,6 +139,9 @@ private:
     VkPhysicalDevice physicalDevice;
     VkPhysicalDeviceProperties deviceProps;
     VkPhysicalDeviceMemoryProperties deviceMemProps;
+    DeviceOptionalFeatures device_optional_features_{};
+    bool mesh_shaders_enabled_ = false;
+    bool prefer_mesh_cube_ = true; // PR3: use mesh path when device + PSO ready
     VkDevice device;
     DeviceQueues queues_{}; // indexed by QueueType {_3D, TX, CMP}
     BufferManager buffer_manager_;
@@ -140,6 +156,7 @@ private:
 
     SamplerTable sampler_table_;
     frame_graph::MainScenePass main_scene_pass_;
+    frame_graph::InstanceCullPass instance_cull_pass_;
     frame_graph::PickerPass picker_pass_;
     FrameResources frame_resources_;
     frame_graph::SobelResources sobel_resources_;

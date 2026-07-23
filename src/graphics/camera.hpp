@@ -15,6 +15,9 @@ struct Frustum
     bool intersects_sphere(const glm::vec3& center, float radius) const;
 };
 
+// Extract normalized frustum planes from M = proj * view (same math as Camera::frustum).
+Frustum frustum_from_matrix(const glm::mat4& view_proj);
+
 struct Camera
 {
     static constexpr float kDefaultFovYRad = 0.785398163f; // 45 deg

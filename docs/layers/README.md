@@ -11,7 +11,7 @@ Versions (see `src/app/app_identity.hpp`, `src/engine/engine_identity.hpp`, `AGE
 | Host app | Alephium BlockFlow | `app-vMAJOR.MINOR.PATCH` |
 | Product engine | BlockvizEngine | `engine-vMAJOR.MINOR.PATCH` |
 
-Current identities: **app 1.3.0 / engine 1.3.0**. Tagged `main` may lag until release push (`AGENTS.md`).
+Current identities: **app 1.4.0 / engine 1.4.0**. Tagged `main` may lag until release push (`AGENTS.md`).
 
 ---
 

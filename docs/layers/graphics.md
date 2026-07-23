@@ -26,11 +26,12 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, `SceneViewFilters`, pick types |
 | `gpu_prv_lib.h` | Vulkan free-function surface (private) — implemented under `core/` |
 | `core/` | Instance/device/swapchain, buffer/image/sampler, shader/pipeline/descriptor (Vulkan lifetime primitives) |
+| `engine_requirements.*` | Required features + optional query (`DeviceOptionalFeatures`: mesh shaders); `create_device` enables `VK_EXT_mesh_shader` when usable |
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `sampler.*` | `SamplerTable` by `SamplerFilter` index (shared; not pass-private) |
 | `frame/` | Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes |
 | `frame/frame_graph/` | `IPass`, `FrameTaskGraph` (DAG nodes + image barrier edges) |
-| `frame/passes/` | Concrete `IPass`: `MainScenePass`, `PickerPass`, `OutlinePass`, `SobelComputePass`, `EdgeOverlayPass` + `SobelResources` |
+| `frame/passes/` | Concrete `IPass`: `MainScenePass`, `InstanceCullPass` (GPU frustum → compact + indirect), `PickerPass`, `OutlinePass`, `SobelComputePass`, `EdgeOverlayPass` + `SobelResources` |
 | `frame/profiling/` | `TimestampQueryPool` + `FrameProfiler` (CPU scopes + GPU timestamps; F3 HUD) |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
 | `frame/sobel_async_pass.*` | Multi-queue executor (_3D outline → CMP → _3D overlay) + fence; not a PSO owner |
@@ -52,14 +53,45 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 ```text
 render thread (frame_loop.cpp):
   apply published GpuFrameSlot (gpu_frame_publish.cpp)
+    · upload instances + UBO
+    · build outline InstanceData (app indices → pos/scale/color; CPU frustum drop)
   IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
   publish_frame / upload
-  MainScenePass: cubes → debug mesh → ImGui
-  optional PickerPass (same graphics CB; policy stays on GS)
+  InstanceCullPass (compute in graphics CB): frustum cull → compact SSBO + indirect args
+  MainScenePass cubes:
+    mesh path (if VK_EXT_mesh_shader enabled): DrawMeshTasksEXT from instance SSBO
+    classic path: VBO/IBO DrawIndexed / DrawIndexedIndirect after cull
+  optional PickerPass (**pre-cull** instance buffer; policy stays on GS)
   optional SobelAsyncPass executor:
     OutlinePass → CMP SobelComputePass → EdgeOverlayPass → present
   present (non-Sobel path)
 ```
+
+### Cube draw paths (PR1–PR4)
+
+| Path | When | Draw |
+|------|------|------|
+| **Classic + GPU cull** | Always available | `InstanceCullPass` → `vkCmdDrawIndexedIndirect` on compact SSBO |
+| **Classic no cull** | Cull pass not ready / zero instances | `vkCmdDrawIndexed` on host instance buffer |
+| **Mesh + GPU cull** | `VK_EXT_mesh_shader` enabled, `prefer_mesh_cube` (default on) | Cull → `vkCmdDrawMeshTasksEXT`; mesh shader clamps by `draw.instanceCount` |
+| **Mesh no cull** | Mesh ready, cull skipped | `DrawMeshTasksEXT(host_count)` over full instance SSBO |
+
+Toggle: `GraphicsSystem::set_prefer_mesh_cube(bool)` (fallback classic kept forever).
+
+### Buffer roles (pick / outline vs main cull)
+
+| Buffer | Consumer | Notes |
+|--------|----------|--------|
+| Host `instance` SSBO/VBO | Upload, **Picker**, cull input | Slot `i` = `pick_map[i]` |
+| `visible_instances` (device) | Main cube mesh/classic after cull | Compact **reorders**; no pick IDs |
+| `cull_draw_args` | Classic indirect + mesh count clamp | Host resets `instanceCount=0` each frame |
+| Outline `InstanceData[]` | OutlinePass / Sobel | App subset; **CPU frustum** at upload (PR4) |
+
+**Picker stays pre-cull:** object id is `gl_InstanceIndex` → `pick_map`. Using the compact SSBO would require storing original indices in the cull output (not done).
+
+**Outline is not main-cull:** list is already tiny (selection + tips). Off-screen tips are dropped with the same frustum planes as the GPU cull (`frustum_from_matrix` / `camera.cpp`).
+
+Profiler scopes: `InstanceCullCMP`, `CubesMesh` / `CubesClassic`, `Picker`, `SelectionDepth`, `SobelAsyncCMP`, `EdgeOverlay`. See [perf-bottlenecks.md](../perf-bottlenecks.md).
 
 ### IPass + task graph
 
@@ -121,7 +153,7 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 |-------|------|
 | `TimestampQueryPool` | Per in-flight `VK_QUERY_TYPE_TIMESTAMP` pools; `timestampPeriod` → ms |
 | `FrameProfiler` | Named CPU RAII scopes + GPU begin/end; rolling ring; bound class |
-| Scopes | CPU: `Prepare`, `PublishUpload`, `MeshArenaUpload`, `RecordMain`, `SubmitPresent`, `OverlayUi`; GPU: DAG names + `Cubes` / `DebugMesh` / `ImGui` |
+| Scopes | CPU: `Prepare`, `PublishUpload`, `MeshArenaUpload`, `RecordMain`, `SubmitPresent`, `OverlayUi`; GPU: DAG names + `InstanceCullCMP` / `CubesMesh` / `CubesClassic` / `DebugMesh` / `ImGui` |
 | Public API | `IEngine::enable_frame_profiler` / `copy_frame_timing_snapshot` (Vulkan-free) |
 | HUD | F3 toggles sampling + ImGui table |
 

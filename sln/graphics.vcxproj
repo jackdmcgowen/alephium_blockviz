@@ -139,6 +139,7 @@
     <ClCompile Include="..\src\graphics\frame\frame_presenter.cpp" />
     <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp" />
     <ClCompile Include="..\src\graphics\frame\passes\main_scene_pass.cpp" />
+    <ClCompile Include="..\src\graphics\frame\passes\instance_cull_pass.cpp" />
     <ClCompile Include="..\src\graphics\frame\passes\picker_pass.cpp" />
     <ClCompile Include="..\src\graphics\frame\passes\sobel_resources.cpp" />
     <ClCompile Include="..\src\graphics\frame\passes\outline_pass.cpp" />
@@ -178,6 +179,7 @@
     <ClInclude Include="..\src\graphics\frame\sobel_async_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\sobel_types.hpp" />
     <ClInclude Include="..\src\graphics\frame\passes\main_scene_pass.hpp" />
+    <ClInclude Include="..\src\graphics\frame\passes\instance_cull_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\passes\picker_pass.hpp" />
     <ClInclude Include="..\src\graphics\frame\passes\sobel_resources.hpp" />
     <ClInclude Include="..\src\graphics\frame\passes\outline_pass.hpp" />

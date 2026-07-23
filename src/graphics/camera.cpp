@@ -84,11 +84,16 @@ glm::mat4 Camera::view_proj() const
     return proj_matrix() * view_matrix();
 }
 
-Frustum Camera::frustum() const
+Frustum frustum_from_matrix(const glm::mat4& view_proj)
 {
     Frustum f{};
-    extract_planes(view_proj(), f.planes);
+    extract_planes(view_proj, f.planes);
     return f;
+}
+
+Frustum Camera::frustum() const
+{
+    return frustum_from_matrix(view_proj());
 }
 
 CameraUBO Camera::to_ubo() const

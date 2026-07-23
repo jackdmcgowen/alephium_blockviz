@@ -1,4 +1,4 @@
-﻿#include "graphics/pch.h"
+#include "graphics/pch.h"
 #include "graphics/frame/frame_resources.hpp"
 
 #include <algorithm>
@@ -38,10 +38,26 @@ void FrameResources::create(const FrameResourcesCreateInfo& info)
 
     const VkDeviceSize inst_size =
         static_cast<VkDeviceSize>(sizeof(InstanceData)) * max_instances_;
+    // Host upload + compute SSBO read for frustum cull.
     instance_ = buffers_->create(BufferDesc{
-        inst_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, host, "cube.instances"});
+        inst_size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        host, "cube.instances"});
     mapped_instances_ = instance_.map(info.device);
     instance_count_ = 0;
+
+    // Compact visible instances (compute write + vertex bind for indirect draw).
+    visible_instances_ = buffers_->create(BufferDesc{
+        inst_size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "cube.visible"});
+
+    cull_draw_args_ = buffers_->create(BufferDesc{
+        sizeof(VkDrawIndexedIndirectCommand),
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        host, "cube.draw_indirect"});
+    mapped_draw_args_ = cull_draw_args_.map(info.device);
+    reset_cull_draw_args(36);
 
     // Cap outline pass; same layout as main instances (Sobel single-pass).
     const uint32_t outline_max = (std::min)(max_instances_, 4096u);
@@ -71,15 +87,35 @@ void FrameResources::destroy(VkDevice device)
         outline_.unmap(device);
         mapped_outline_ = nullptr;
     }
+    if (mapped_draw_args_ && cull_draw_args_.valid())
+    {
+        cull_draw_args_.unmap(device);
+        mapped_draw_args_ = nullptr;
+    }
     buffers_->destroy(vertex_);
     buffers_->destroy(index_);
     buffers_->destroy(instance_);
+    buffers_->destroy(visible_instances_);
+    buffers_->destroy(cull_draw_args_);
     buffers_->destroy(outline_);
     buffers_->destroy(uniform_);
     instance_count_ = 0;
     outline_count_ = 0;
     max_instances_ = 0;
     buffers_ = nullptr;
+}
+
+void FrameResources::reset_cull_draw_args(uint32_t index_count)
+{
+    if (!mapped_draw_args_)
+        return;
+    VkDrawIndexedIndirectCommand cmd{};
+    cmd.indexCount = index_count;
+    cmd.instanceCount = 0;
+    cmd.firstIndex = 0;
+    cmd.vertexOffset = 0;
+    cmd.firstInstance = 0;
+    std::memcpy(mapped_draw_args_, &cmd, sizeof(cmd));
 }
 
 size_t FrameResources::upload_instances(const GpuInstance* instances, size_t count)

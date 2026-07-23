@@ -43,6 +43,11 @@ struct PassCreateInfo
     VkDescriptorSetLayout frame_ubo_layout = VK_NULL_HANDLE;
     uint32_t graphics_family = 0;
     uint32_t compute_family = 0;
+    // PR3: create mesh cube PSO when device has mesh shaders enabled.
+    bool enable_mesh_cube = false;
+    // UBO buffer handle for mesh path descriptor write (same frame UBO as classic).
+    VkBuffer frame_ubo_buffer = VK_NULL_HANDLE;
+    VkDeviceSize frame_ubo_range = 0;
 };
 
 // Extended per-frame recording inputs (filled by GraphicsSystem / frame_loop).
@@ -52,10 +57,16 @@ struct PassRecordParams
     PassContext base{};
     VkDescriptorSet frame_ubo_set = VK_NULL_HANDLE;
     VkBuffer vertex_buffer = VK_NULL_HANDLE;
-    VkBuffer instance_buffer = VK_NULL_HANDLE;
+    VkBuffer instance_buffer = VK_NULL_HANDLE; // pre-cull or direct draw
     VkBuffer index_buffer = VK_NULL_HANDLE;
-    uint32_t instance_count = 0;
+    uint32_t instance_count = 0; // host-side upload count (pre-cull)
     uint32_t index_count = 36;
+    // GPU frustum cull → compact instances + indirect draw (optional).
+    bool use_gpu_instance_cull = false;
+    VkBuffer visible_instance_buffer = VK_NULL_HANDLE;
+    VkBuffer cull_draw_args_buffer = VK_NULL_HANDLE;
+    // PR3: mesh cube path (DrawMeshTasksEXT); false → classic VBO/IBO.
+    bool use_mesh_cube_path = false;
 
     VkImage color_image = VK_NULL_HANDLE;
     VkImageView color_view = VK_NULL_HANDLE;

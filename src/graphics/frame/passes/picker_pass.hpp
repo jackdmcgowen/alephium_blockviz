@@ -2,6 +2,10 @@
 
 // GPU pick pass: R32_UINT object id + private 1× depth. Owns picker PSO privately (IPass).
 // Pick policy (when to pick, hash maps, selection) stays on GraphicsSystem.
+//
+// PR4: always bind the **pre-cull** host instance buffer. `gl_InstanceIndex` must equal
+// pick_map / GpuInstance upload index. Main-scene GPU compact list reorders slots and
+// would break hash resolve unless we stored original indices in the compact SSBO.
 #include "graphics/frame/frame_graph/ipass.hpp"
 #include "graphics/frame/vertex_types.hpp"
 #include "graphics/buffer_manager.hpp"

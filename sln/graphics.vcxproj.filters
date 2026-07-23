@@ -99,6 +99,7 @@
     <ClCompile Include="..\src\graphics\frame\frame_graph\frame_task_graph.cpp"><Filter>Source Files\graphics\frame\frame_graph</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\passes\edge_overlay_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\passes\main_scene_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
+    <ClCompile Include="..\src\graphics\frame\passes\instance_cull_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\passes\outline_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\passes\picker_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
     <ClCompile Include="..\src\graphics\frame\passes\sobel_compute_pass.cpp"><Filter>Source Files\graphics\frame\passes</Filter></ClCompile>
@@ -133,6 +134,7 @@
     <ClInclude Include="..\src\graphics\frame\frame_graph\ipass.hpp"><Filter>Header Files\graphics\frame\frame_graph</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\passes\edge_overlay_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\passes\main_scene_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
+    <ClInclude Include="..\src\graphics\frame\passes\instance_cull_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\passes\outline_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\passes\picker_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>
     <ClInclude Include="..\src\graphics\frame\passes\sobel_compute_pass.hpp"><Filter>Header Files\graphics\frame\passes</Filter></ClInclude>

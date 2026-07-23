@@ -43,12 +43,16 @@ static VkPipeline create_graphics_pipeline_impl(VkDevice device,
         info.stage_count == 0)
         throw std::runtime_error("create_graphics_pipeline: invalid args");
 
+    // Mesh shading pipelines omit vertex input + input assembly (EXT_mesh_shader).
     VkPipelineVertexInputStateCreateInfo vertex_input{
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
-    vertex_input.vertexBindingDescriptionCount = info.binding_count;
-    vertex_input.pVertexBindingDescriptions = info.bindings;
-    vertex_input.vertexAttributeDescriptionCount = info.attribute_count;
-    vertex_input.pVertexAttributeDescriptions = info.attributes;
+    if (!info.mesh_shading)
+    {
+        vertex_input.vertexBindingDescriptionCount = info.binding_count;
+        vertex_input.pVertexBindingDescriptions = info.bindings;
+        vertex_input.vertexAttributeDescriptionCount = info.attribute_count;
+        vertex_input.pVertexAttributeDescriptions = info.attributes;
+    }
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
@@ -144,7 +148,8 @@ static VkPipeline create_graphics_pipeline_impl(VkDevice device,
 
     std::array<VkDynamicState, 3> dyn_states{};
     uint32_t dyn_count = 0;
-    if (info.dynamic_primitive_topology)
+    // Mesh pipelines do not use primitive topology dynamic state.
+    if (info.dynamic_primitive_topology && !info.mesh_shading)
         dyn_states[dyn_count++] = VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
     if (info.dynamic_viewport_scissor)
     {
@@ -169,8 +174,8 @@ static VkPipeline create_graphics_pipeline_impl(VkDevice device,
     pipeline_info.pNext = &rendering;
     pipeline_info.stageCount = info.stage_count;
     pipeline_info.pStages = info.stages;
-    pipeline_info.pVertexInputState = &vertex_input;
-    pipeline_info.pInputAssemblyState = &input_assembly;
+    pipeline_info.pVertexInputState = info.mesh_shading ? nullptr : &vertex_input;
+    pipeline_info.pInputAssemblyState = info.mesh_shading ? nullptr : &input_assembly;
     pipeline_info.pViewportState = &viewport_state;
     pipeline_info.pRasterizationState = &rasterizer;
     pipeline_info.pMultisampleState = &multisampling;

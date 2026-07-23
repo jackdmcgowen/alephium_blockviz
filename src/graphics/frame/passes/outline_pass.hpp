@@ -2,6 +2,8 @@
 
 // Selection outline depth+color redraw (all requested cubes). Owns outline PSO (IPass).
 // Images live on SobelResources; multi-queue submit stays in SobelAsyncPass.
+// Host outline list is app-compact + CPU frustum-filtered at upload (PR4); not the
+// main-scene GPU compact SSBO (pick_map indices would not apply after reordering).
 #include "graphics/frame/frame_graph/ipass.hpp"
 #include "graphics/frame/passes/sobel_resources.hpp"
 

@@ -1,5 +1,6 @@
 #include "graphics/pch.h"
 #include "graphics/graphics_system.hpp"
+#include "graphics/camera.hpp"
 #include "graphics/frame/frame_shared_state.hpp"
 #include "graphics/frame/vertex_types.hpp"
 
@@ -63,7 +64,12 @@ bool GraphicsSystem::apply_published_frame()
         slot.instances.size());
     frame_resources_.upload_camera(slot.camera, &g_viewProj);
 
-    // Compact outline buffer: pos/scale from published instances, color from app.
+    // Outline list is already app-compact (selection/tips only). PR4: CPU frustum
+    // filter so off-screen tips skip Sobel depth/compute (same plane math as main
+    // GPU cull / camera.cpp). Not the main-scene compact SSBO — pick_map indices
+    // are only used here to look up pos/scale before drop.
+    const Frustum outline_frustum = frustum_from_matrix(g_viewProj);
+    constexpr float kOutlineHalf = 1.05f; // match InstanceCullPass / presenter
     std::vector<InstanceData> outline_gpu;
     outline_gpu.reserve(slot.sobel_outlines.size());
     for (const SobelOutlineInstance& o : slot.sobel_outlines)
@@ -73,6 +79,9 @@ bool GraphicsSystem::apply_published_frame()
         if (outline_gpu.size() >= frame_graph::kMaxSobelInstances)
             break;
         const GpuInstance& src = slot.instances[o.instance_index];
+        const float s = (src.scale > 1e-4f) ? src.scale : 1e-4f;
+        if (!outline_frustum.intersects_aabb(src.pos, glm::vec3(kOutlineHalf * s)))
+            continue;
         InstanceData d{};
         d.pos = src.pos;
         d.scale = src.scale;

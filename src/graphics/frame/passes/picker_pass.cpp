@@ -340,6 +340,7 @@ void PickerPass::record(const PassRecordParams& p)
         VK_SHADER_STAGE_FRAGMENT_BIT,
         0, sizeof(PickerPushConstants), &pc);
 
+    // Pre-cull instance buffer only (see picker_pass.hpp). Never visible_instance_buffer.
     VkBuffer buffers[] = { p.vertex_buffer, p.instance_buffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(cmd, 0, 2, buffers, offsets);
