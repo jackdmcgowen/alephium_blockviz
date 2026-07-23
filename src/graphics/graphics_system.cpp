@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <string>
 #include "graphics/graphics_system.hpp"
+#include "graphics/camera.hpp"
 #include "domain/alph_block.hpp"
 #include "engine/engine_identity.hpp"
 #include "graphics/frame/frame_graph/frame_task_graph.hpp"
@@ -204,7 +205,7 @@ void GraphicsSystem::init()
     log_engine_startup(deviceProps, engine_id);
     query_optional_device_features(physicalDevice, device_optional_features_);
     log_optional_device_features(device_optional_features_);
-    // PR1: classic path only. Mesh/cull enable comes in later PRs when usable.
+    // Classic cube path + GPU frustum cull (PR2). Mesh path remains PR3+.
     create_device(instance, physicalDevice, surface, &device, &queues_);
     buffer_manager_.reset(device, &deviceMemProps);
     sampler_table_.create(device);
@@ -236,6 +237,7 @@ void GraphicsSystem::init()
         pci.graphics_family = queues_.family_index(QueueType::_3D);
         pci.compute_family = queues_.family_index(QueueType::CMP);
         main_scene_pass_.create(pci);
+        instance_cull_pass_.create(pci);
         // Picker is 1×; selection pick uses cleared depth (independent of MSAA scene depth).
         picker_pass_.create(pci);
         sobel_resources_.create(pci);
@@ -629,6 +631,7 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.instance_buffer = frame_resources_.instance_buffer();
     rp.index_buffer = frame_resources_.index_buffer();
     rp.instance_count = static_cast<uint32_t>(instanceCount);
+    rp.index_count = 36;
     rp.mesh_arena = g_meshArena;
     rp.debug_drawer = &g_debugDrawer;
     rp.view_proj = &g_viewProj;
@@ -636,6 +639,32 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     // Screenshot needs COLOR_ATTACHMENT after draws so we can TRANSFER before PRESENT.
     rp.transition_color_to_present = !defer_present && !capture_screenshot;
     rp.profiler = prof;
+
+    // PR2: GPU frustum cull → compact SSBO + DrawIndexedIndirect (classic mesh still).
+    // Picker keeps pre-cull instance_buffer + host instance_count for stable IDs.
+    const bool use_cull =
+        instance_cull_pass_.ready() && frame_resources_.cull_buffers_ready() &&
+        instanceCount > 0;
+    if (use_cull)
+    {
+        frame_resources_.reset_cull_draw_args(rp.index_count);
+        const Frustum fr = frustum_from_matrix(g_viewProj);
+        frame_graph::InstanceCullRecordParams cull{};
+        cull.cmd = buffer;
+        cull.in_instances = frame_resources_.instance_buffer();
+        cull.out_instances = frame_resources_.visible_instance_buffer();
+        cull.draw_args = frame_resources_.cull_draw_args_buffer();
+        cull.instance_count = static_cast<uint32_t>(instanceCount);
+        cull.max_instances = frame_resources_.max_instances();
+        for (int i = 0; i < 6; ++i)
+            cull.planes[i] = fr.planes[i];
+        cull.half_extent = 1.05f;
+        cull.profiler = prof;
+        instance_cull_pass_.record_cull(cull);
+        rp.use_gpu_instance_cull = true;
+        rp.visible_instance_buffer = frame_resources_.visible_instance_buffer();
+        rp.cull_draw_args_buffer = frame_resources_.cull_draw_args_buffer();
+    }
 
     main_scene_pass_.record(rp);
 
@@ -758,6 +787,7 @@ void GraphicsSystem::cleanup()
     }
 
     picker_pass_.destroy(device);
+    instance_cull_pass_.destroy(device);
     main_scene_pass_.destroy(device);
     destroy_screenshot_staging_();
     sampler_table_.destroy(device);

@@ -52,10 +52,14 @@ struct PassRecordParams
     PassContext base{};
     VkDescriptorSet frame_ubo_set = VK_NULL_HANDLE;
     VkBuffer vertex_buffer = VK_NULL_HANDLE;
-    VkBuffer instance_buffer = VK_NULL_HANDLE;
+    VkBuffer instance_buffer = VK_NULL_HANDLE; // pre-cull or direct draw
     VkBuffer index_buffer = VK_NULL_HANDLE;
-    uint32_t instance_count = 0;
+    uint32_t instance_count = 0; // host-side upload count (pre-cull)
     uint32_t index_count = 36;
+    // GPU frustum cull → compact instances + indirect draw (optional).
+    bool use_gpu_instance_cull = false;
+    VkBuffer visible_instance_buffer = VK_NULL_HANDLE;
+    VkBuffer cull_draw_args_buffer = VK_NULL_HANDLE;
 
     VkImage color_image = VK_NULL_HANDLE;
     VkImageView color_view = VK_NULL_HANDLE;

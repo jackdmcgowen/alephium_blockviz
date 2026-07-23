@@ -182,6 +182,7 @@ add_library(graphics STATIC
   src/graphics/frame/frame_presenter.cpp
   src/graphics/frame/frame_graph/frame_task_graph.cpp
   src/graphics/frame/passes/main_scene_pass.cpp
+  src/graphics/frame/passes/instance_cull_pass.cpp
   src/graphics/frame/passes/picker_pass.cpp
   src/graphics/frame/passes/sobel_resources.cpp
   src/graphics/frame/passes/outline_pass.cpp

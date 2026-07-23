@@ -281,14 +281,26 @@ void MainScenePass::record(const PassRecordParams& p)
                 VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 
-            VkBuffer buffers[] = { p.vertex_buffer, p.instance_buffer };
+            const bool cull = p.use_gpu_instance_cull && p.visible_instance_buffer &&
+                              p.cull_draw_args_buffer && p.instance_count > 0;
+            VkBuffer inst_vb =
+                cull ? p.visible_instance_buffer : p.instance_buffer;
+            VkBuffer buffers[] = { p.vertex_buffer, inst_vb };
             VkDeviceSize offsets[] = { 0, 0 };
             vkCmdBindVertexBuffers(cmd, 0, 2, buffers, offsets);
             VkDescriptorSet set = p.frame_ubo_set;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cube_layout_, 0, 1,
                                     &set, 0, nullptr);
             vkCmdBindIndexBuffer(cmd, p.index_buffer, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdDrawIndexed(cmd, p.index_count, p.instance_count, 0, 0, 0);
+            if (cull)
+            {
+                vkCmdDrawIndexedIndirect(cmd, p.cull_draw_args_buffer, 0, 1,
+                                         sizeof(VkDrawIndexedIndirectCommand));
+            }
+            else if (p.instance_count > 0)
+            {
+                vkCmdDrawIndexed(cmd, p.index_count, p.instance_count, 0, 0, 0);
+            }
         }
 
         if (p.mesh_arena && p.debug_drawer && p.view_proj)

@@ -26,12 +26,12 @@ Graphics bootstraps instance/device/swapchain, records frames (cubes, debug draw
 | `gpu_pub_lib.h` | `EngineCreateInfo`, `GpuInstance`, `CameraUBO`, `FrameSubmit`, `SceneViewFilters`, pick types |
 | `gpu_prv_lib.h` | Vulkan free-function surface (private) — implemented under `core/` |
 | `core/` | Instance/device/swapchain, buffer/image/sampler, shader/pipeline/descriptor (Vulkan lifetime primitives) |
-| `engine_requirements.*` | Required features + optional query (`DeviceOptionalFeatures`: mesh shaders log-only until cull/mesh PR) |
+| `engine_requirements.*` | Required features + optional query (`DeviceOptionalFeatures`: mesh shaders log-only until mesh PR) |
 | `pipeline.cpp` / `descriptor.cpp` / `image.cpp` | Shared `PipelineType` PSOs, descriptor layout/pool/write, `cmd_image_barrier` |
 | `sampler.*` | `SamplerTable` by `SamplerFilter` index (shared; not pass-private) |
 | `frame/` | Sync, resources, presenter, descriptors, swapchain targets, task graph, IPass nodes |
 | `frame/frame_graph/` | `IPass`, `FrameTaskGraph` (DAG nodes + image barrier edges) |
-| `frame/passes/` | Concrete `IPass`: `MainScenePass`, `PickerPass`, `OutlinePass`, `SobelComputePass`, `EdgeOverlayPass` + `SobelResources` |
+| `frame/passes/` | Concrete `IPass`: `MainScenePass`, `InstanceCullPass` (GPU frustum → compact + indirect), `PickerPass`, `OutlinePass`, `SobelComputePass`, `EdgeOverlayPass` + `SobelResources` |
 | `frame/profiling/` | `TimestampQueryPool` + `FrameProfiler` (CPU scopes + GPU timestamps; F3 HUD) |
 | `frame/frame_loop.cpp` | `render_loop` / `render` (prepare → record → submit/present) |
 | `frame/sobel_async_pass.*` | Multi-queue executor (_3D outline → CMP → _3D overlay) + fence; not a PSO owner |
@@ -55,8 +55,9 @@ render thread (frame_loop.cpp):
   apply published GpuFrameSlot (gpu_frame_publish.cpp)
   IFrameSource::prepare → cubes, sobel_outlines, debug (arrows + segment planes)
   publish_frame / upload
-  MainScenePass: cubes → debug mesh → ImGui
-  optional PickerPass (same graphics CB; policy stays on GS)
+  InstanceCullPass (compute in graphics CB): frustum cull → compact SSBO + indirect args
+  MainScenePass: cubes (DrawIndexedIndirect when cull ready) → debug mesh → ImGui
+  optional PickerPass (pre-cull instance buffer; policy stays on GS)
   optional SobelAsyncPass executor:
     OutlinePass → CMP SobelComputePass → EdgeOverlayPass → present
   present (non-Sobel path)

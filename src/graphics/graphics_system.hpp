@@ -33,6 +33,7 @@
 #include "graphics/frame/frame_resources.hpp"
 #include "graphics/frame/frame_sync.hpp"
 #include "graphics/frame/passes/main_scene_pass.hpp"
+#include "graphics/frame/passes/instance_cull_pass.hpp"
 #include "graphics/frame/passes/picker_pass.hpp"
 #include "graphics/frame/passes/sobel_resources.hpp"
 #include "graphics/frame/passes/outline_pass.hpp"
@@ -148,6 +149,7 @@ private:
 
     SamplerTable sampler_table_;
     frame_graph::MainScenePass main_scene_pass_;
+    frame_graph::InstanceCullPass instance_cull_pass_;
     frame_graph::PickerPass picker_pass_;
     FrameResources frame_resources_;
     frame_graph::SobelResources sobel_resources_;
