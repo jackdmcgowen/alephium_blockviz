@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+// std::atomic used for bootstrap_heights_override_
 
 class FakeChainSimulator
 {
@@ -25,11 +26,17 @@ public:
 
     bool running() const { return running_.load(); }
 
+    // Bench/tests only: denser history before start(). 0 = use default kBootstrapHeights.
+    // Call before NetworkSystem/FakeChain start (before engine->start()).
+    static void set_bootstrap_heights_override(int heights);
+    static int  bootstrap_heights_override();
+
 private:
     void thread_main_();
     void bootstrap_();
     void tick_grow_();
     void publish_hud_(int status);
+    int  bootstrap_heights_() const;
 
     static std::string make_hash_(uint32_t lane, int height, uint32_t salt = 0);
     static AlphBlock make_block_(uint32_t lane, int height, int64_t ts_ms,
@@ -49,4 +56,5 @@ private:
 
     static constexpr int kBootstrapHeights = 8;
     static constexpr int kTickMs           = 500;
+    static std::atomic<int> bootstrap_heights_override_;
 };

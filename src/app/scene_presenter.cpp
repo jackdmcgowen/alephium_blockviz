@@ -209,6 +209,55 @@ int ScenePresenter::chain_idx_for_hash_(const std::string& hash) const
     return 255; // unknown → sort last
 }
 
+void ScenePresenter::sort_instances_front_to_back_opaque_(std::vector<GpuInstance>& instances,
+                                                          std::vector<std::string>& pick_map,
+                                                          const glm::vec3& camera_eye)
+{
+    const size_t n = instances.size();
+    if (n == 0 || pick_map.size() != n)
+        return;
+
+    constexpr float kOpaqueAlpha = 0.99f;
+    struct Entry
+    {
+        uint32_t idx = 0;
+        float    key = 0.f; // distance² to eye
+        bool     opaque = false;
+    };
+    std::vector<Entry> order;
+    order.reserve(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        Entry e{};
+        e.idx = static_cast<uint32_t>(i);
+        e.opaque = instances[i].alpha >= kOpaqueAlpha;
+        const glm::vec3 d = instances[i].pos - camera_eye;
+        e.key = glm::dot(d, d);
+        order.push_back(e);
+    }
+
+    // Opaques first (near→far), then translucent (stable relative order by original idx).
+    std::stable_sort(order.begin(), order.end(), [](const Entry& a, const Entry& b) {
+        if (a.opaque != b.opaque)
+            return a.opaque && !b.opaque;
+        if (a.opaque && b.opaque && a.key != b.key)
+            return a.key < b.key;
+        return a.idx < b.idx;
+    });
+
+    std::vector<GpuInstance> inst_out;
+    std::vector<std::string> pick_out;
+    inst_out.reserve(n);
+    pick_out.reserve(n);
+    for (const Entry& e : order)
+    {
+        inst_out.push_back(instances[e.idx]);
+        pick_out.push_back(std::move(pick_map[e.idx]));
+    }
+    instances.swap(inst_out);
+    pick_map.swap(pick_out);
+}
+
 std::vector<std::string> ScenePresenter::sorted_deps_(const std::string& node_hash) const
 {
     std::vector<std::string> out;
@@ -1442,6 +1491,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             GpuInstance{ db.pos, scale, glm::vec3(1.f, 0.12f, 0.1f), alpha });
         out.pick_map.push_back(db.hash);
     }
+
+    // Early-Z friendly draw order: opaque near→far, then translucent (pick_map locked).
+    // Sobel indices are rebuilt from the reordered pick_map below.
+    if (in.has_camera_eye && !out.instances.empty())
+        sort_instances_front_to_back_opaque_(out.instances, out.pick_map, in.camera_eye);
 
     // Sobel outlines: app assigns colors; graphics draws all in one pass.
     // Selection gold is exclusive; else orange then cyan then green (mutually de-duped).

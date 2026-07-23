@@ -152,6 +152,12 @@ private:
     // Deps of node sorted by chain_idx then hash (stable gold order).
     std::vector<std::string> sorted_deps_(const std::string& node_hash) const;
 
+    // Front-to-back: opaque (α≥threshold) near→far for early-Z; translucent after.
+    // Call after all instance/pick_map pushes, before Sobel index map.
+    static void sort_instances_front_to_back_opaque_(std::vector<GpuInstance>& instances,
+                                                     std::vector<std::string>& pick_map,
+                                                     const glm::vec3& camera_eye);
+
     BlockScene& scene_;
     PolarShardLayout layout_;
 

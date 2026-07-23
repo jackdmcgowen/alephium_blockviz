@@ -23,6 +23,7 @@ Living notes from IPass-scoped profiling (`FrameProfiler` / F3 HUD) and system �
 | **ImGui** | Overlay chrome | CPU layout + many widgets | Clip inactive windows; reduce HUD rate |
 | **Picker** | 1×1 id buffer over **full pre-cull** list | VS cost scales with upload count | Kept pre-cull for `pick_map` IDs; compact would need original-index field |
 | **SelectionDepth + SobelAsyncCMP + EdgeOverlay** | Outline → CMP → composite | Multi-queue fence; tip count | Skip when `outline_count==0`; PR4 CPU frustum drops off-screen tips |
+| **Prepare** | Host layout + filters + **opaque F2B sort** | Dense visible N log N sort | Sort is intentional for early-Z; keep ring filters first |
 | **PublishUpload** | Triple-buffer instance copy | Large instance buffers | Keep latest-wins; avoid full memcpy when unchanged |
 | **PresentSync** (bound class) | Frame wall ≫ work | Swapchain wait / vsync | Expected at 60 Hz; not a GPU algorithm issue |
 
@@ -41,9 +42,7 @@ Confidence \(C \in [0,1]\): weighted scores with **40%** soft band over budget.
 
 Baselines under `vnv/bench/baselines/` remain for stricter device-local median checks via `run_vnv.ps1 -Bench`.
 
-## Mesh + GPU cull notes (integration/graphics_improvements)
-
-Landed on branch as PR1–PR4 (query → cull+indirect → mesh path → outline/pick policy):
+## Mesh + GPU cull + F2B sort
 
 | Decision | Rationale |
 |----------|-----------|
@@ -51,16 +50,17 @@ Landed on branch as PR1–PR4 (query → cull+indirect → mesh path → outline
 | Mesh path default when extension enabled | Same `frag.spv`; classic remains fallback (`prefer_mesh_cube`) |
 | Picker **not** on compact SSBO | `gl_InstanceIndex` must match `pick_map` without original-index payload |
 | Outline CPU frustum at upload | Tiny list; skip off-screen tips before Sobel chain |
+| **Opaque front-to-back sort** (host) | `alpha ≥ 0.99` near→far before upload; translucent after; improves early-Z without depth prepass |
 
-**How to compare paths:** F3 → compare `CubesMesh` vs `CubesClassic` and `InstanceCullCMP` while orbiting a dense ring. Toggle mesh via code `set_prefer_mesh_cube(false)` if needed.
+**How to compare paths:** F3 → `CubesMesh` / `CubesClassic` / `InstanceCullCMP` while looking **End** (down +Z) on a dense ring. Bench cases: `fake_overdraw_end_z`, `fake_overdraw_end_z_move`, `fake_bfs_end_z`.
 
 ## Actionable backlog
 
 1. **Mesh dispatch** — `DrawMeshTasksIndirectEXT` from cull count (drop empty mesh WGs).  
-2. **Picker scale** — optional original-index in cull output if full-list pick VS becomes hot.  
-3. **Debug drawer** — avoid per-frame full upload when arrows stable.  
-4. **Sobel chain** — ensure zero-outline path never submits CMP (verify after outline changes).  
-5. **Disk/network admit** — lazy disk admit (schedule 15, RAM admit ring) reduces hitch during boot/scroll.  
-6. **Timeline chunks** — 64s subsegments / 640s G; live-first then **camera-subseg → next unfilled** within visible 7-G ring; interval inflight cap **4**.
+2. **Opaque blend-off / dual draw** — if F2B alone is not enough under dense end-Z benches.  
+3. **Picker scale** — optional original-index in cull output if full-list pick VS becomes hot.  
+4. **Debug drawer** — avoid per-frame full upload when arrows stable.  
+5. **Sobel chain** — ensure zero-outline path never submits CMP (verify after outline changes).  
+6. **Disk/network admit** — lazy disk admit (schedule 15, RAM admit ring) reduces hitch during boot/scroll.
 
 Update this table after major graphics changes with fresh bench JSON.

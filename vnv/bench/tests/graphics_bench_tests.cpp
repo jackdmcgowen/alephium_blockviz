@@ -15,10 +15,12 @@
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
 #include "graphics/gpu_pub_lib.h"
+#include "network/fake/fake_chain_simulator.hpp"
 #include "network/network_domain.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -75,7 +77,72 @@ static void print_usage()
         "  --sample-ms N     Wall time between snapshot polls (default 16)\n"
         "  --width N --height N\n"
         "  --headless        VK_EXT_headless_surface (no DISPLAY/window)\n"
-        "  --list\n");
+        "  --list\n"
+        "\n"
+        "Cases:\n"
+        "  fake_steady_frame          fixed camera, default FakeChain density\n"
+        "  fake_stress_instances      looser soft budgets (same scene)\n"
+        "  fake_overdraw_end_z        dense bootstrap, End look down +Z\n"
+        "  fake_overdraw_end_z_move   dense + scroll Z during sample\n"
+        "  fake_bfs_end_z             dense + selection tip (dep walk / Sobel)\n");
+}
+
+static bool is_known_case(const std::string& id)
+{
+    return id == "fake_steady_frame" || id == "fake_stress_instances" ||
+           id == "fake_overdraw_end_z" || id == "fake_overdraw_end_z_move" ||
+           id == "fake_bfs_end_z";
+}
+
+static bool is_dense_case(const std::string& id)
+{
+    return id == "fake_overdraw_end_z" || id == "fake_overdraw_end_z_move" ||
+           id == "fake_bfs_end_z";
+}
+
+// End preset: look along +Z into polar ring (timeline depth overdraw).
+static void apply_end_camera_down_z(CameraController& camera, float scroll_z)
+{
+    camera.set_view_preset(CameraController::ViewPreset::End);
+    for (int i = 0; i < 45; ++i)
+        camera.tick(1.f / 30.f);
+    camera.set_scroll_z(scroll_z);
+    for (int i = 0; i < 20; ++i)
+        camera.tick(1.f / 30.f);
+}
+
+static std::string pick_selection_hash(BlockScene& scene)
+{
+    for (uint32_t lane = 0; lane < static_cast<uint32_t>(BlockScene::kLaneCount); ++lane)
+    {
+        if (!scene.frontier_valid(lane))
+            continue;
+        const NodeId tip = scene.confirmed_tip_hash(lane);
+        if (!tip.empty())
+            return tip;
+    }
+    const std::vector<NodeId> tips = scene.tip_ids();
+    if (!tips.empty() && !tips.front().empty())
+        return tips.front();
+    const auto nodes = scene.nodes_snapshot_unsorted();
+    for (const auto& n : nodes)
+    {
+        if (!n.id.empty())
+            return n.id;
+    }
+    return {};
+}
+
+static void wait_min_blocks(BlockScene& scene, int min_blocks, int timeout_ms)
+{
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (app_platform_is_running() && std::chrono::steady_clock::now() < end)
+    {
+        if (scene.total_blocks() >= min_blocks)
+            return;
+        app_platform_poll_events();
+        app_platform_sleep_ms(20);
+    }
 }
 
 int main(int argc, char** argv)
@@ -127,22 +194,36 @@ int main(int argc, char** argv)
     {
         std::printf("fake_steady_frame\n");
         std::printf("fake_stress_instances\n");
+        std::printf("fake_overdraw_end_z\n");
+        std::printf("fake_overdraw_end_z_move\n");
+        std::printf("fake_bfs_end_z\n");
         return 0;
     }
 
     if (out_path.empty())
         out_path = "vnv/bench/tests/out/" + case_id + "/actual.json";
 
-    if (case_id != "fake_steady_frame" && case_id != "fake_stress_instances")
+    if (!is_known_case(case_id))
     {
         std::printf("[bench] unsupported case '%s'\n", case_id.c_str());
         return 2;
     }
-    // Stress: longer sample for stable medians under load.
-    if (case_id == "fake_stress_instances" && samples < 120)
+    const bool dense = is_dense_case(case_id);
+    const bool moving = (case_id == "fake_overdraw_end_z_move");
+    const bool bfs = (case_id == "fake_bfs_end_z");
+    // Only raise defaults when caller left stock sample count (120).
+    if ((case_id == "fake_stress_instances" || dense) && samples == 120)
         samples = 160;
+    if (dense && warmup_ms == 2000)
+        warmup_ms = 3500;
     if (samples < 8)
         samples = 8;
+
+    constexpr int kDenseBootstrapHeights = 48;
+    if (dense)
+        FakeChainSimulator::set_bootstrap_heights_override(kDenseBootstrapHeights);
+    else
+        FakeChainSimulator::set_bootstrap_heights_override(0);
 
     {
         fs::path p(out_path);
@@ -163,6 +244,7 @@ int main(int argc, char** argv)
                                     static_cast<uint32_t>(height)))
     {
         std::printf("[bench] create window failed\n");
+        FakeChainSimulator::set_bootstrap_heights_override(0);
         return 1;
     }
     create_info.width = static_cast<uint32_t>(width);
@@ -175,10 +257,15 @@ int main(int argc, char** argv)
     BlockScene scene;
     CameraController camera;
     camera.set_aspect(static_cast<float>(width) / static_cast<float>(height > 0 ? height : 1));
-    camera.set_scroll_z(-48.f);
-    camera.add_look_delta(0.f, 180.f);
-    for (int i = 0; i < 30; ++i)
-        camera.tick(1.f / 30.f);
+    if (dense)
+        apply_end_camera_down_z(camera, -48.f);
+    else
+    {
+        camera.set_scroll_z(-48.f);
+        camera.add_look_delta(0.f, 180.f);
+        for (int i = 0; i < 30; ++i)
+            camera.tick(1.f / 30.f);
+    }
 
     IEngine* engine = create_engine();
     g_engine = engine;
@@ -210,14 +297,38 @@ int main(int argc, char** argv)
 
     app_platform_show_window(create_info.window);
 
-    std::printf("[bench] case=%s warmup_ms=%d samples=%d out=%s\n",
-                case_id.c_str(), warmup_ms, samples, out_path.c_str());
+    std::printf("[bench] case=%s warmup_ms=%d samples=%d out=%s dense=%d\n",
+                case_id.c_str(), warmup_ms, samples, out_path.c_str(), dense ? 1 : 0);
+    if (dense)
+    {
+        const int want = kDenseBootstrapHeights * BlockScene::kLaneCount;
+        wait_min_blocks(scene, want / 2, warmup_ms);
+        std::printf("[bench] total_blocks=%d (want~%d)\n", scene.total_blocks(), want);
+    }
     pump_for_ms(warmup_ms);
 
-    camera.set_scroll_z(-48.f);
-    for (int i = 0; i < 10; ++i)
-        camera.tick(1.f / 30.f);
-    pump_for_ms(300);
+    if (dense)
+        apply_end_camera_down_z(camera, -48.f);
+    else
+    {
+        camera.set_scroll_z(-48.f);
+        for (int i = 0; i < 10; ++i)
+            camera.tick(1.f / 30.f);
+    }
+    pump_for_ms(400);
+
+    if (bfs)
+    {
+        const std::string sel = pick_selection_hash(scene);
+        if (!sel.empty())
+        {
+            std::printf("[bench] bfs selection=%.20s…\n", sel.c_str());
+            engine->set_selection(sel);
+            pump_for_ms(600);
+        }
+        else
+            std::printf("[bench] WARN: no selection hash for fake_bfs_end_z\n");
+    }
 
     std::vector<float> frame_ms;
     std::vector<float> cpu_ms;
@@ -238,8 +349,16 @@ int main(int argc, char** argv)
     int got = 0;
     int spins = 0;
     const int max_spins = samples * 8 + 200;
+    float move_scroll = -48.f;
     while (got < samples && spins < max_spins && app_platform_is_running())
     {
+        if (moving)
+        {
+            // Oscillate along timeline Z to re-sort opaques each frame.
+            move_scroll = -48.f + 40.f * std::sin(static_cast<float>(got) * 0.08f);
+            camera.set_scroll_z(move_scroll);
+            camera.tick(1.f / 60.f);
+        }
         pump_for_ms(sample_ms);
         ++spins;
 
@@ -284,6 +403,7 @@ int main(int argc, char** argv)
     g_engine = nullptr;
     delete presenter;
     app_platform_destroy_window(create_info.window);
+    FakeChainSimulator::set_bootstrap_heights_override(0);
 
     if (got < 8)
     {
@@ -318,11 +438,35 @@ int main(int argc, char** argv)
             return 0.f;
         return 1.f - over;
     };
-    // Budgets: steady is tighter; stress allows higher frame time.
-    const bool stress = (case_id == "fake_stress_instances");
-    const float budget_frame = stress ? 12.0f : 8.0f;
-    const float budget_cpu = stress ? 6.0f : 4.0f;
-    const float budget_gpu = stress ? 8.0f : 5.0f;
+    // Budgets: steady tighter; stress/dense allow higher frame time.
+    float budget_frame = 8.0f;
+    float budget_cpu = 4.0f;
+    float budget_gpu = 5.0f;
+    if (case_id == "fake_stress_instances")
+    {
+        budget_frame = 12.0f;
+        budget_cpu = 6.0f;
+        budget_gpu = 8.0f;
+    }
+    else if (case_id == "fake_overdraw_end_z")
+    {
+        // Dense Prepare (F2B sort + layout) dominates CPU on discrete GPUs.
+        budget_frame = 28.0f;
+        budget_cpu = 26.0f;
+        budget_gpu = 2.0f;
+    }
+    else if (case_id == "fake_overdraw_end_z_move")
+    {
+        budget_frame = 30.0f;
+        budget_cpu = 28.0f;
+        budget_gpu = 2.0f;
+    }
+    else if (case_id == "fake_bfs_end_z")
+    {
+        budget_frame = 30.0f;
+        budget_cpu = 28.0f;
+        budget_gpu = 3.0f;
+    }
     const float s_frame = metric_score(frame_med, budget_frame);
     const float s_cpu = metric_score(cpu_med, budget_cpu);
     const float s_gpu = metric_score(gpu_med, budget_gpu);

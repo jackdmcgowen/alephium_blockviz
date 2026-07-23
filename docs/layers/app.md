@@ -26,7 +26,7 @@ The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platf
 | `src/app/platform/*` | OS host: Win32 or GLFW (see [platform.md](../platform.md)) |
 | `src/app/window_fullscreen.hpp` | Borderless fullscreen enter/exit (Win32 style + placement) |
 | `src/app/blockflow_overlay.*` | `IUiOverlay`: domain combo, loading HUD, feed, inspector |
-| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances, arrows, colored `sobel_outlines`, `UiSnapshot` |
+| `src/app/scene_presenter.*` | `IFrameSource::prepare` — instances (opaque F2B sort), arrows, colored `sobel_outlines`, `UiSnapshot` |
 | `src/app/camera_controller.hpp` | Z-track attach/detach, LMB look, RMB pan, selection look-aim |
 | Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`, **640s** G); **Z-proportional** bins (match cubes/planes); optional **64s** ticks on hover/camera cell; **click** bin → teleport; Live / key **3** → tip. **Must update whenever timeline constants change** (see `Agents.md`) |
 | Camera view presets | **End** (1) / **Side** (2) / **V** toggle with pose memory. **3** = live tip. **L/R** = Z. Short **RMB** = deselect only (no reattach); RMB drag = pan |

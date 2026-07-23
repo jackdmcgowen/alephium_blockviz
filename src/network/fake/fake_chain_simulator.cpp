@@ -6,6 +6,24 @@
 #include <cstdio>
 #include <cstring>
 
+std::atomic<int> FakeChainSimulator::bootstrap_heights_override_{ 0 };
+
+void FakeChainSimulator::set_bootstrap_heights_override(int heights)
+{
+    bootstrap_heights_override_.store(heights > 0 ? heights : 0);
+}
+
+int FakeChainSimulator::bootstrap_heights_override()
+{
+    return bootstrap_heights_override_.load();
+}
+
+int FakeChainSimulator::bootstrap_heights_() const
+{
+    const int o = bootstrap_heights_override_.load();
+    return o > 0 ? o : kBootstrapHeights;
+}
+
 FakeChainSimulator::FakeChainSimulator(BlockScene& scene)
     : scene_(scene)
 {
@@ -113,16 +131,17 @@ void FakeChainSimulator::publish_hud_(int status)
 
 void FakeChainSimulator::bootstrap_()
 {
+    const int heights = bootstrap_heights_();
     genesis_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::system_clock::now().time_since_epoch())
                       .count() -
-                  static_cast<int64_t>(kBootstrapHeights) * ALPH_TARGET_BLOCK_SECONDS * 1000;
+                  static_cast<int64_t>(heights) * ALPH_TARGET_BLOCK_SECONDS * 1000;
     scene_.set_genesis_ms(genesis_ms_);
     scene_.set_timeline_origin_ms(genesis_ms_);
 
     publish_hud_(static_cast<int>(NetworkStatus::Bootstrapping));
 
-    for (int h = 0; h < kBootstrapHeights; ++h)
+    for (int h = 0; h < heights; ++h)
     {
         if (stop_.load())
             return;
@@ -140,8 +159,12 @@ void FakeChainSimulator::bootstrap_()
         }
     }
 
+    // Dense benches: raise soft node cap so prune does not wipe bootstrap immediately.
+    if (heights > kBootstrapHeights)
+        scene_.prune(0, /*max_nodes=*/static_cast<size_t>(heights) * BlockScene::kLaneCount + 256);
+
     publish_hud_(static_cast<int>(NetworkStatus::Steady));
-    std::printf("[fake] bootstrap complete: %d heights x 16 lanes\n", kBootstrapHeights);
+    std::printf("[fake] bootstrap complete: %d heights x 16 lanes\n", heights);
 }
 
 void FakeChainSimulator::tick_grow_()
