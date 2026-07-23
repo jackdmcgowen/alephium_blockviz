@@ -649,8 +649,9 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.profiler = prof;
 
     // PR2: GPU frustum cull → compact SSBO + classic DrawIndexedIndirect / mesh clamp.
-    // Picker keeps pre-cull instance_buffer + host instance_count for stable IDs.
     // PR3: mesh cube path when device enabled + prefer flag + PSO ready.
+    // PR4: picker always uses pre-cull instance_buffer (pick_map IDs); outline is
+    //      filtered at upload (cpu frustum), not via main compact SSBO.
     rp.use_mesh_cube_path =
         prefer_mesh_cube_ && mesh_shaders_enabled_ && main_scene_pass_.mesh_cube_ready();
     if (frame_resources_.cull_buffers_ready())

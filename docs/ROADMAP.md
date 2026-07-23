@@ -4,7 +4,7 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).  
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
-**Last updated:** 2026-07-22 (timeline 64s grid, camera-subseg fill, HTML guides)  
+**Last updated:** 2026-07-23 (mesh/cull graphics path on integration branch)  
 **Versions:** app **1.3.0** · engine **1.3.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
@@ -50,13 +50,22 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | **Camera-subseg history interval walk** (eye → next unfilled) | Adapter `pump_history_from_camera_` |
 | **Domain-agnostic single-pass Sobel** | App colors × white edge |
 
+### On branch (not yet squash-merged to main)
+
+| Item | Notes |
+|------|--------|
+| **GPU frustum cull + classic indirect** | `InstanceCullPass` · PR2 on `integration/graphics_improvements/01` |
+| **Mesh cube path (`VK_EXT_mesh_shader`)** | `cube.mesh.glsl` · classic fallback · PR3 |
+| **Outline CPU frustum + pick/cull policy docs** | PR4 · [graphics](layers/graphics.md) · [perf](perf-bottlenecks.md) |
+
 ---
 
 ## P0 — Next (recommended order)
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gpu_platform.hpp` — app can include without Vulkan |
+| 1 | **Merge graphics improvements** (mesh/cull stack) | graphics | Land PR1–PR4 from `integration/graphics_improvements/01` when validated |
+| 2 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gpu_platform.hpp` — app can include without Vulkan |
 
 ---
 
@@ -64,9 +73,10 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 2 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
-| 3 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
-| 4 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
+| 3 | Richer **dep-viz modes** (LOD / filters) | [app](layers/app.md) | Selection BFS shipped; avoid edge soup |
+| 4 | **Confirm polish** (feed badges, green vs shard eye-check) | [app](layers/app.md) | Post-MVP from confirmed-tips design |
+| 5 | **WebSocket** tip stream | [network](layers/network.md) | Lower latency; focused feature |
+| 6 | **DrawMeshTasksIndirect** from cull count | graphics | Drop empty mesh workgroups after GPU cull |
 
 ---
 
