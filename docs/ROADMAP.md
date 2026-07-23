@@ -4,8 +4,8 @@ Ordered “what else” for **alephium_blockviz**. Living layer goals: [layers/R
 Historical designs are archives, not the backlog: [modularization](graphics-modularization-design.md), [confirmed tips](blockflow-confirmed-tips-design.md).  
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
-**Last updated:** 2026-07-23 (mesh/cull graphics path on integration branch)  
-**Versions:** app **1.3.0** · engine **1.3.0** (see identity headers / tags on `main`)
+**Last updated:** 2026-07-23 (mesh/cull graphics path shipped 1.4.0)  
+**Versions:** app **1.4.0** · engine **1.4.0** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|
@@ -49,14 +49,9 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 | **64s / 640s timeline grid** + fill volumes + live open cell | [network](layers/network.md) · [user guide](index.html) |
 | **Camera-subseg history interval walk** (eye → next unfilled) | Adapter `pump_history_from_camera_` |
 | **Domain-agnostic single-pass Sobel** | App colors × white edge |
-
-### On branch (not yet squash-merged to main)
-
-| Item | Notes |
-|------|--------|
-| **GPU frustum cull + classic indirect** | `InstanceCullPass` · PR2 on `integration/graphics_improvements/01` |
-| **Mesh cube path (`VK_EXT_mesh_shader`)** | `cube.mesh.glsl` · classic fallback · PR3 |
-| **Outline CPU frustum + pick/cull policy docs** | PR4 · [graphics](layers/graphics.md) · [perf](perf-bottlenecks.md) |
+| **GPU frustum cull + classic indirect** | `InstanceCullPass` · 1.4.0 |
+| **Mesh cube path (`VK_EXT_mesh_shader`)** | `cube.mesh.glsl` · classic fallback · 1.4.0 |
+| **Outline CPU frustum + pick/cull policy** | Picker pre-cull; outline filtered at upload · 1.4.0 |
 
 ---
 
@@ -64,8 +59,7 @@ Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 | # | Item | Layer | Why |
 |---|------|-------|-----|
-| 1 | **Merge graphics improvements** (mesh/cull stack) | graphics | Land PR1–PR4 from `integration/graphics_improvements/01` when validated |
-| 2 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gpu_platform.hpp` — app can include without Vulkan |
+| 1 | **Vulkan-free host hooks header** | graphics · app | Split `configure_headless` (etc.) out of `gpu_platform.hpp` — app can include without Vulkan |
 
 ---
 
