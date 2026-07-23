@@ -202,6 +202,9 @@ void GraphicsSystem::init()
     surface = create_platform_surface(instance, hwnd_, hInst);
     physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
     log_engine_startup(deviceProps, engine_id);
+    query_optional_device_features(physicalDevice, device_optional_features_);
+    log_optional_device_features(device_optional_features_);
+    // PR1: classic path only. Mesh/cull enable comes in later PRs when usable.
     create_device(instance, physicalDevice, surface, &device, &queues_);
     buffer_manager_.reset(device, &deviceMemProps);
     sampler_table_.create(device);

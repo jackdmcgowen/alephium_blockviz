@@ -44,6 +44,7 @@
 #include "graphics/frame/vertex_types.hpp"
 #include "graphics/frame/profiling/frame_profiler.hpp"
 #include "graphics/buffer_manager.hpp"
+#include "graphics/engine_requirements.hpp"
 #include "graphics/gpu_pub_lib.h"
 #include "graphics/gpu_prv_lib.h"
 #include "graphics/core/queue_types.hpp"
@@ -109,6 +110,12 @@ public:
     // Render-thread access for record/Sobel instrumentation.
     FrameProfiler* frame_profiler() { return &frame_profiler_; }
 
+    // Optional device capabilities (mesh shaders, etc.). Queried at init; not enabled yet.
+    const DeviceOptionalFeatures& device_optional_features() const
+    {
+        return device_optional_features_;
+    }
+
 private:
     void resize_internal();
     void Resize(); // Win32 client-rect path
@@ -126,6 +133,7 @@ private:
     VkPhysicalDevice physicalDevice;
     VkPhysicalDeviceProperties deviceProps;
     VkPhysicalDeviceMemoryProperties deviceMemProps;
+    DeviceOptionalFeatures device_optional_features_{};
     VkDevice device;
     DeviceQueues queues_{}; // indexed by QueueType {_3D, TX, CMP}
     BufferManager buffer_manager_;

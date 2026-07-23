@@ -82,6 +82,40 @@ bool physical_device_meets_requirements(VkPhysicalDevice pd,
     return true;
 }
 
+void query_optional_device_features(VkPhysicalDevice pd, DeviceOptionalFeatures& out)
+{
+    out = DeviceOptionalFeatures{};
+    if (pd == VK_NULL_HANDLE)
+        return;
+
+    out.mesh_shader_ext = device_has_extension(pd, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    if (!out.mesh_shader_ext)
+        return;
+
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh_f{};
+    mesh_f.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &mesh_f;
+    vkGetPhysicalDeviceFeatures2(pd, &features2);
+
+    out.mesh_shader = mesh_f.meshShader == VK_TRUE;
+    out.task_shader = mesh_f.taskShader == VK_TRUE;
+
+    VkPhysicalDeviceMeshShaderPropertiesEXT mesh_p{};
+    mesh_p.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
+
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &mesh_p;
+    vkGetPhysicalDeviceProperties2(pd, &props2);
+
+    out.max_mesh_output_vertices = mesh_p.maxMeshOutputVertices;
+    out.max_mesh_output_primitives = mesh_p.maxMeshOutputPrimitives;
+    out.max_mesh_work_group_invocations = mesh_p.maxMeshWorkGroupInvocations;
+}
+
 void log_engine_startup(const VkPhysicalDeviceProperties& props,
                         const SoftwareIdentity& engine)
 {
@@ -98,4 +132,21 @@ void log_engine_startup(const VkPhysicalDeviceProperties& props,
                 VK_VERSION_PATCH(props.apiVersion),
                 props.driverVersion);
     std::printf("[engine] required: timelineSemaphore, dynamicRendering, synchronization2, swapchain\n");
+}
+
+void log_optional_device_features(const DeviceOptionalFeatures& opt)
+{
+    // Product draw still uses classic instanced path until mesh PR lands.
+    std::printf("[engine] mesh_shaders=%s (ext=%s meshFeature=%s taskFeature=%s)\n",
+                opt.mesh_path_usable() ? "available" : "off",
+                opt.mesh_shader_ext ? "yes" : "no",
+                opt.mesh_shader ? "yes" : "no",
+                opt.task_shader ? "yes" : "no");
+    if (opt.mesh_shader_ext)
+    {
+        std::printf("[engine] mesh limits: maxOutVerts=%u maxOutPrims=%u maxWorkGroupInvoc=%u\n",
+                    opt.max_mesh_output_vertices,
+                    opt.max_mesh_output_primitives,
+                    opt.max_mesh_work_group_invocations);
+    }
 }
