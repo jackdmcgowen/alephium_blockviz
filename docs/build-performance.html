@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Build performance (MSVC / sln)</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="ROADMAP.html">Roadmap</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="build-performance.md"><code>build-performance.md</code></a></p>
+<h1>Build performance (MSVC / sln)</h1>
+<p><strong>Status: active.</strong> Layer map: <a href="layers/README.md">docs/layers/README.md</a>. Graphics rebuild notes also linked from <a href="layers/graphics.md">layers/graphics.md</a>.</p>
+<h2>Goals</h2>
+<ul>
+<li>Faster <strong>cold</strong> Debug|x64 rebuilds (target ~2× vs pre-PCH baseline).</li>
+<li>Faster <strong>incremental</strong> rebuilds as systems grow.</li>
+<li>Shared flags so new systems inherit <code>/MP</code> + PCH patterns.</li>
+</ul>
+<h2>Sample numbers (this machine, Debug|x64)</h2>
+<table>
+<tr><th>Label</th><th>clean_rebuild</th><th>incr <code>graphics_system</code></th><th>incr adapter</th><th>incr <code>main</code></th></tr>
+<tr><td>after PCH + <code>/MP</code> (shaders always rebuild)</td><td>~13.9 s</td><td>~4.6 s</td><td>~2.8 s</td><td>~3.3 s</td></tr>
+<tr><td>+ incremental shaders</td><td>~13.0 s</td><td>~3.2 s</td><td>~2.2 s</td><td>~1.9 s</td></tr>
+</table>
+<p>Pre-change full solution rebuilds in this repo commonly landed in the <strong>~25–30 s</strong> range (with full shader wipe each graphics build). After PCH + <code>/MP</code> + shader stamp, clean rebuild is roughly <strong>~2×</strong> faster; incremental <code>main.cpp</code> is ~<strong>1.5–2×</strong> faster than the PCH-only intermediate.</p>
+<h2>Benchmark</h2>
+<pre><code>powershell -ExecutionPolicy Bypass -File scripts/bench_build.ps1 -Label &quot;my_label&quot;</code></pre>
+<p>Results append to <code>build/bench/build_times.csv</code> (clean rebuild + touch three hot files).</p>
+<h2>Shared props</h2>
+<p><code>sln/Directory.Build.props</code> (auto-imported for projects under <code>sln/</code>):</p>
+<ul>
+<li><code>MultiProcessorCompilation</code> (<code>/MP</code>)</li>
+<li>C++17, conformance mode</li>
+<li><code>RepoRoot</code> / default OutDir-IntDir helpers</li>
+</ul>
+<p>Project-specific include paths and PCH file names stay in each <code>.vcxproj</code>.</p>
+<h2>Precompiled headers</h2>
+<table>
+<tr><th>Project</th><th>Create TU</th><th>Header</th><th>Notes</th></tr>
+<tr><td>graphics</td><td><code>src/graphics/pch.cpp</code></td><td><code>graphics/pch.h</code></td><td>STL + glm + Vulkan</td></tr>
+<tr><td>network</td><td><code>src/network/pch.cpp</code></td><td><code>network/pch.h</code></td><td>STL + curl + cJSON</td></tr>
+<tr><td>blockviz_engine</td><td><code>src/engine/pch.cpp</code></td><td><code>engine/pch.h</code></td><td>STL + glm</td></tr>
+<tr><td>alephium_visualizer</td><td><code>src/app/pch.cpp</code></td><td><code>app/pch.h</code></td><td>STL + windows + glm</td></tr>
+</table>
+<p><strong>Rules</strong></p>
+<ul>
+<li>First line of product <code>.cpp</code>: <code>#include &quot;&lt;project&gt;/pch.h&quot;</code> (qualified so projects do not pick the wrong <code>pch.h</code>).</li>
+<li>Same rule for <strong>platform</strong> TUs (<code>src/<em>/platform/</em>_win32.cpp</code>) — see <a href="platform.md">platform.md</a>. Audit: <code>python scripts/check_pch.py</code>.</li>
+<li>PCH = <strong>third-party + STL only</strong> — not product headers that change often. Do <strong>not</strong> put <code>windows.h</code> in app PCH (OS lives in platform TUs).</li>
+<li><code>.c</code> files and ImGui third-party TUs: <code>PrecompiledHeader=NotUsing</code>.</li>
+</ul>
+<h2>IWYU (include what you use)</h2>
+<p>Policy:</p>
+<p>1. Headers: forward-declare types used only as pointers/refs; include only what the interface needs.</p>
+<p>2. Sources: <code>pch.h</code> → matching <code>.hpp</code> → only what the <code>.cpp</code> uses.</p>
+<p>3. Public <code>gpu_pub_lib.h</code> stays <strong>Vulkan-free</strong>.</p>
+<p>4. Prefer not including <code>graphics_system.hpp</code> outside graphics (factory returns <code>IGraphicsSystem*</code>).</p>
+<p>Audit helper:</p>
+<pre><code>powershell -ExecutionPolicy Bypass -File scripts/include_audit.ps1</code></pre>
+<h2>PIMPL / system boundaries</h2>
+<ul>
+<li>Prefer <strong>public system headers without Vulkan/curl/imgui</strong>.</li>
+<li><code>GraphicsSystem</code> concrete type lives for the graphics lib only; host uses <code>create_graphics_system()</code> / <code>IGraphicsSystem</code>.</li>
+<li>Future systems: <code>src/&lt;name&gt;/</code> + <code>sln/&lt;name&gt;.vcxproj</code> from <code>sln/_template_system.vcxproj.example</code>, own <code>pch.h</code> / <code>pch.cpp</code>.</li>
+</ul>
+<h2>Adding a new system lib</h2>
+<p>1. Copy <code>sln/_template_system.vcxproj.example</code> → <code>sln/mysystem.vcxproj</code>.</p>
+<p>2. Create <code>src/mysystem/pch.h</code>, <code>pch.cpp</code>, sources.</p>
+<p>3. Register in <code>vnv/manifest/libraries.json</code> (id, path, guid, depends_on, <code>in_product_sln</code> / <code>in_vnv_sln</code>).</p>
+<p>4. Run <code>.\scripts\sync_solutions.ps1</code> (updates <code>alephium_visualizer.sln</code> + <code>blockviz_vnv.sln</code>).</p>
+<p>5. Add <code>ProjectReference</code> from the app and/or engine; link in <code>AdditionalDependencies</code> as needed.</p>
+<p>6. <code>.\scripts\run_vnv.ps1 -All</code> then run bench once to confirm no large compile regression.</p>
+<p>See <code>vnv/README.md</code> for the full VnV layout (mod / int / bench).</p>
+<h2>Related</h2>
+<ul>
+<li>Vulkan validation gate: <code>.grok/skills/vulkan-validator/SKILL.md</code></li>
+<li>Main version tags: <code>AGENTS.md</code></li>
+</ul>
+</main>
+</body>
+</html>

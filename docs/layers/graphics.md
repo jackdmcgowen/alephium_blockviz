@@ -179,4 +179,4 @@ Validation: follow `.grok/skills/vulkan-validator` before commit/push of graphic
 - [engine.md](engine.md) — facade contracts
 - [app.md](app.md) — visual meaning of highlights
 - [build-performance.md](../build-performance.md)
-- Historical: [graphics-modularization-design.md](../graphics-modularization-design.md), [blockflow-confirmed-tips-design.md](../blockflow-confirmed-tips-design.md) (Sobel multi-draw section)
+

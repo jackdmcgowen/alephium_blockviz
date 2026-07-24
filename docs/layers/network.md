@@ -222,5 +222,4 @@ Timeline `blocks-with-events` chunks are **enqueued** to the pool (inflight cap 
 - [graphics.md](graphics.md) — GPU path stays light; dense-N limit is host prepare
 - [perf-bottlenecks.md](../perf-bottlenecks.md) — Prepare vs Cubes measurements
 - [engine.md](engine.md) — `INetworkSystem` on facade
-- Historical: [blockflow-confirmed-tips-design.md](../blockflow-confirmed-tips-design.md) (dual-write matrix still conceptually valid; paths evolved to `src/network/alephium/`)
-- Historical: [graphics-modularization-design.md](../graphics-modularization-design.md) (adapter + detail store goals)
+

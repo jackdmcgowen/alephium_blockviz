@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Roadmap / priority backlog</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="ROADMAP.html">Roadmap</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="ROADMAP.md"><code>ROADMAP.md</code></a></p>
+<h1>Roadmap / priority backlog</h1>
+<p>Single ordered backlog for <strong>alephium_blockviz</strong>.</p>
+<p><strong>Code map:</strong> <a href="layers/README.md">layers/</a> · <strong>Platform:</strong> <a href="platform.md">platform.md</a> · <a href="linux.md">linux.md</a> · <strong>Product notes:</strong> <a href="planning/README.md">planning/</a></p>
+<p><strong>Last updated:</strong> 2026-07-23</p>
+<p><strong>Versions on <code>main</code>:</strong> app / engine <strong>1.4.x</strong> (see identity headers / tags). Integration tip may be ahead (motion + docs on <code>integration/planning/01</code>).</p>
+<table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td><strong>P0</strong></td><td>Do next</td></tr>
+<tr><td><strong>P1</strong></td><td>Soon</td></tr>
+<tr><td><strong>P2</strong></td><td>Later / optional</td></tr>
+<tr><td><strong>Out</strong></td><td>Explicit non-goal</td></tr>
+</table>
+<p>Shipped history lives in <strong>git tags</strong> and layer docs — not here.</p>
+<p>---</p>
+<h2>P0 — Next</h2>
+<table>
+<tr><th>#</th><th>Item</th><th>Layer</th><th>Why</th></tr>
+<tr><td>1</td><td><strong>Merge integration tip → <code>main</code></strong> (docs + motion) when ready</td><td>release</td><td>Motion/docs on planning branch not yet released</td></tr>
+<tr><td>2</td><td><strong>Prepare amortization</strong> / shorter critical section</td><td>app · domain</td><td>Dense N FPS limit is host prepare, not GPU — <a href="perf-bottlenecks.md">perf</a></td></tr>
+<tr><td>3</td><td><strong>Vulkan-free host hooks header</strong></td><td>graphics · app</td><td>App includes hooks without pulling Vulkan</td></tr>
+</table>
+<p>---</p>
+<h2>P1 — Soon</h2>
+<table>
+<tr><th>#</th><th>Item</th><th>Layer</th><th>Why</th></tr>
+<tr><td>4</td><td><strong>Default arrow budget</strong> + “show all deps”</td><td><a href="layers/app.md">app</a></td><td>Hierarchy; less edge soup</td></tr>
+<tr><td>5</td><td><strong>Cold-start coach</strong> (3-step: lanes / Z / green tip)</td><td>app</td><td>First 30s readability</td></tr>
+<tr><td>6</td><td><strong>Confirm polish</strong> (feed badges, green vs shard eye-check)</td><td><a href="layers/app.md">app</a></td><td>Trust at a glance</td></tr>
+<tr><td>7</td><td><strong>WebSocket</strong> tip stream</td><td><a href="layers/network.md">network</a></td><td>Lower latency</td></tr>
+<tr><td>8</td><td><strong>DrawMeshTasksIndirect</strong> from cull count</td><td>graphics</td><td>Drop empty mesh workgroups</td></tr>
+</table>
+<p>---</p>
+<h2>P2 — Later</h2>
+<table>
+<tr><th>#</th><th>Item</th><th>Layer</th><th>Why</th></tr>
+<tr><td>9</td><td>Materials / palette polish (tokens first)</td><td>app · graphics</td><td>Art without layout redesign</td></tr>
+<tr><td>10</td><td>“Why green?” inspector trust click</td><td>app</td><td>Height / bag / explorer</td></tr>
+<tr><td>11</td><td>Screenshot mode (hide rails)</td><td>app</td><td>Share</td></tr>
+<tr><td>12</td><td>History presentation LOD</td><td>app · network</td><td>Ring RAM OK; presentation open</td></tr>
+<tr><td>13</td><td>Second chain adapter</td><td>network</td><td>After multi-adapter wiring</td></tr>
+<tr><td>14</td><td>CMake-primary Windows; optional GLFW-only host</td><td>build · platform</td><td>One target graph</td></tr>
+<tr><td>15</td><td>Full IPass executor / multi-queue</td><td>graphics</td><td>Topology registered; still special-cased</td></tr>
+<tr><td>16</td><td>VnV path rename (<code>mod</code>→unit, etc.)</td><td>vnv</td><td>Docs already use taxonomy</td></tr>
+</table>
+<p>---</p>
+<h2>Out of scope</h2>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>Dual exclusive selection-gold vs tip-green <em>modes</em></td><td>Gold wins when selected; multi-role outlines intentional</td></tr>
+<tr><td>Green cube body fill / full main-chain paint</td><td>Outline + arrows product</td></tr>
+<tr><td>D3D / OpenGL / WebGPU rewrite</td><td>Stack non-goal</td></tr>
+<tr><td>Full ECS, plugins, scripting</td><td>Overkill</td></tr>
+<tr><td>Multi-chain marketplace UI</td><td>Product non-goal</td></tr>
+<tr><td>Production auth / multi-endpoint HA</td><td>REST poll enough for v1</td></tr>
+</table>
+<p>---</p>
+<h2>Portability (short)</h2>
+<pre><code>OS / WSI / paths / process / CRT  →  src/&lt;layer&gt;/platform/* or common/*
+Else                              →  domain / engine / network / app
+App must not include Vulkan / gpu_platform.hpp
+Platform change incomplete until MSVC product build is green</code></pre>
+<p>Details: <a href="platform.md">platform.md</a> · <a href="../AGENTS.md">AGENTS.md</a>.</p>
+<p>---</p>
+<h2>How to use</h2>
+<p>1. Take the next <strong>P0</strong> against the owning <a href="layers/README.md">layer doc</a>.</p>
+<p>2. Ship → drop from this file (don’t grow a “Done” museum).</p>
+<p>3. Product critique / branch policy: <a href="planning/README.md">planning/</a>.</p>
+</main>
+</body>
+</html>

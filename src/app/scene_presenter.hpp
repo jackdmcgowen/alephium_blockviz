@@ -11,6 +11,7 @@
 //   gold     — selection + first-order (1-hop) deps; Replay re-grows hop-1 only
 //   red      — removal death fade
 //   BFS rays — thin stylized lines per parallel confirm thread (N=2G-1)
+#include "app/ring_motion.hpp"
 #include "domain/block_scene.hpp"
 #include "domain/layout.hpp"
 #include "engine/engine.hpp"
@@ -164,6 +165,7 @@ private:
     std::chrono::steady_clock::time_point clock0_{ std::chrono::steady_clock::now() };
     std::unordered_map<std::string, DepArrowAnim> tip_dep_anims_;
     std::unordered_map<std::string, float>        ephemeral_birth_sec_;
+    RingMotion ring_motion_;
 
     std::unordered_set<std::string> prev_live_nodes_;
     std::unordered_map<std::string, glm::vec3> prev_positions_;

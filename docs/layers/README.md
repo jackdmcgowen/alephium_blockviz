@@ -61,14 +61,13 @@ See **[domain.md](domain.md)**. Summary: `BlockScene` / `BlockGraph` / layout un
 
 ## Related docs
 
-| Doc | Status |
-|-----|--------|
-| [ROADMAP.md](../ROADMAP.md) | **Active** — ordered priority backlog (“what else”) |
-| [build-performance.md](../build-performance.md) | **Active** — PCH, `/MP`, shaders, new systems |
-| [graphics-modularization-design.md](../graphics-modularization-design.md) | **Historical (landed)** |
-| [blockflow-confirmed-tips-design.md](../blockflow-confirmed-tips-design.md) | **Historical (landed & evolved)** |
+| Doc | Role |
+|-----|------|
+| [ROADMAP.md](../ROADMAP.md) | Priority backlog |
+| [planning/](../planning/README.md) | Branch policy + product critique |
+| [build-performance.md](../build-performance.md) | PCH, `/MP`, shaders |
 | [AGENTS.md](../../AGENTS.md) | Version tags on `main` push |
-| [.grok/skills/vulkan-validator](../../.grok/skills/vulkan-validator/SKILL.md) | Pre-push graphics validation |
+| [vulkan-validator skill](../../.grok/skills/vulkan-validator/SKILL.md) | Pre-push graphics validation |
 
 ---
 

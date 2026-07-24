@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Planning notes</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../ROADMAP.html">Roadmap</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="README.md"><code>README.md</code></a></p>
+<h1>Planning notes</h1>
+<p>Living product notes for <strong>alephium_blockviz</strong>. Backlog: <strong><a href="../ROADMAP.md">ROADMAP</a></strong> (single source).</p>
+<p>---</p>
+<h2>Branch policy</h2>
+<table>
+<tr><th>Branch</th><th>Use</th></tr>
+<tr><td><code>main</code></td><td>Releases only; tags <code>app-v<em></code> / <code>engine-v</em></code> (<a href="../../AGENTS.md">AGENTS.md</a>)</td></tr>
+<tr><td><code>integration/planning/01</code></td><td>Current integration tip (docs + motion squash) — <strong>not</strong> main until release</td></tr>
+</table>
+<p>Feature work → new <code>integration/&lt;theme&gt;/01</code> or this tip. Never land product features straight on <code>main</code>.</p>
+<p>---</p>
+<h2>Brutal honesty (still open)</h2>
+<table>
+<tr><th>Gap</th><th>Ask</th></tr>
+<tr><td>Perf</td><td>Prepare bottleneck @ dense N</td></tr>
+<tr><td>Cold start</td><td>3-step “what is this?”</td></tr>
+<tr><td>Hierarchy</td><td>Fewer default arrows</td></tr>
+<tr><td>Trust</td><td>“Why green?” one click</td></tr>
+<tr><td>Art</td><td>Materials after motion</td></tr>
+<tr><td>Share</td><td>Screenshot mode (hide rails)</td></tr>
+</table>
+<p><strong>Layout is good.</strong> Next: Prepare perf, hierarchy, cold start — not a new layout.</p>
+<p>---</p>
+<h2>Motion (shipped)</h2>
+<p>Drawn ring only. Tokens: <code>resource/style_blockflow.json</code>. Details: <a href="../user-guide-legend.html">legend</a>.</p>
+<table>
+<tr><th>Event</th><th>Motion</th></tr>
+<tr><td>Block admit</td><td>Scale pop ease-out-back (N-cap)</td></tr>
+<tr><td>History fill</td><td>Rare Y-wave (cooldown)</td></tr>
+<tr><td>Selection/hover arrows</td><td>Grow ease-out cubic</td></tr>
+<tr><td>Death</td><td>Scale + α ease-in</td></tr>
+</table>
+<p>Code: <code>ring_motion.hpp</code>, <code>motion_easing.hpp</code>.</p>
+<p>---</p>
+<h2>Related</h2>
+<ul>
+<li><a href="../ROADMAP.md">ROADMAP</a> · <a href="../layers/index.html">layers</a> · <a href="../index.html">docs hub</a></li>
+</ul>
+</main>
+</body>
+</html>

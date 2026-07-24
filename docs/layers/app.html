@@ -10,12 +10,16 @@
 <nav class="site-nav" aria-label="Docs">
   <div class="site-nav-inner">
     <a class="brand" href="../index.html">BlockViz docs</a>
-    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a class="current" href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../ROADMAP.html">Roadmap</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
   </div>
 </nav>
 <main>
-  <h1>App layer</h1>
-  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="app.md"><code>app.md</code></a>.</p>
+  <p class="muted">Source: <a href="app.md"><code>app.md</code></a></p>
+<h1>App layer</h1>
 <p>Host process and product presentation for <strong>Alephium BlockFlow</strong> (<code>alephium_visualizer</code>).</p>
 <h2>Overview</h2>
 <p>The app owns the <strong>host window</strong> (Win32 on Windows, GLFW on Linux via <code>app/platform/*</code>), <code>config.json</code> / <code>user_prefs.json</code> load, wiring of systems into <code>IEngine</code>, ImGui chrome (<code>BlockflowOverlay</code>), render-thread camera (<code>CameraController</code>), and the production visual model (<code>ScenePresenter</code> as <code>IFrameSource</code>). It does not open sockets or create Vulkan devices.</p>
@@ -37,18 +41,20 @@
 <tr><td><code>src/app/platform/*</code></td><td>OS host: Win32 or GLFW (see <a href="../platform.md">platform.md</a>)</td></tr>
 <tr><td><code>src/app/window_fullscreen.hpp</code></td><td>Borderless fullscreen enter/exit (Win32 style + placement)</td></tr>
 <tr><td><code>src/app/blockflow_overlay.*</code></td><td><code>IUiOverlay</code>: domain combo, loading HUD, feed, inspector</td></tr>
-<tr><td><code>src/app/scene_presenter.*</code></td><td><code>IFrameSource::prepare</code> — instances, arrows, colored <code>sobel_outlines</code>, <code>UiSnapshot</code></td></tr>
+<tr><td><code>src/app/scene_presenter.*</code></td><td><code>IFrameSource::prepare</code> — instances (opaque F2B sort), arrows, colored <code>sobel_outlines</code>, <code>UiSnapshot</code></td></tr>
 <tr><td><code>src/app/camera_controller.hpp</code></td><td>Z-track attach/detach, LMB look, RMB pan, selection look-aim</td></tr>
 <tr><td>Timeline minimap (overlay)</td><td><strong>High-level multi-segment overview</strong> (~24 newest <code>#G_seg</code>, <strong>640s</strong> G); <strong>Z-proportional</strong> bins (match cubes/planes); optional <strong>64s</strong> ticks on hover/camera cell; <strong>click</strong> bin → teleport; Live / key <strong>3</strong> → tip. <strong>Must update whenever timeline constants change</strong> (see <code>Agents.md</code>)</td></tr>
 <tr><td>Camera view presets</td><td><strong>End</strong> (1) / <strong>Side</strong> (2) / <strong>V</strong> toggle with pose memory. <strong>3</strong> = live tip. <strong>L/R</strong> = Z. Short <strong>RMB</strong> = deselect only (no reattach); RMB drag = pan</td></tr>
-<tr><td>Selection + dep walk</td><td><strong>Full BFS block-dep fan</strong> from selected root (caps ~4k nodes / 8k edges+arrows). Gold arrows; <strong>fast</strong> level-wave grow (≤~0.25s stagger + 0.08s grow). 1-hop ghosts for missing direct deps only. <strong>R</strong> / Replay deps. Sharded <strong>group</strong> walk deferred (other view).</td></tr>
-<tr><td>Style tokens</td><td><code>style_blockflow.hpp</code> + JSON — <code>walk_trace</code> ≠ gold; hop/sobel fade timings</td></tr>
+<tr><td>Selection + deps</td><td><strong>First-order (1-hop) only</strong> from selected root. Gold arrows <strong>instant on click</strong> (no grow). <strong>R</strong> / Replay deps re-grows hop-1 only. 1-hop ghosts for missing direct deps.</td></tr>
+<tr><td>Style tokens</td><td><code>style_blockflow.hpp</code> + JSON — <code>walk_trace</code> ≠ gold; hop/sobel fade; <code>block_pop_<em></code> / <code>wave_</em></code></td></tr>
+<tr><td>Motion</td><td><code>ring_motion.hpp</code> + <code>motion_easing.hpp</code> — admit pop-in; rare Y-wave on history fill; arrow ease-out; death scale+α</td></tr>
 <tr><td><code>src/app/ui_snapshot.hpp</code></td><td>Render-thread-safe UI bag (no live scene reads in overlay)</td></tr>
 <tr><td><code>src/app/config.c</code> / <code>config.h</code></td><td>Load URL array from <code>config.json</code></td></tr>
 <tr><td><code>src/app/app_identity.hpp</code></td><td>App name + semver → <code>EngineCreateInfo.application</code></td></tr>
 <tr><td><code>src/app/ui_chrome.hpp</code></td><td>Shared chrome helpers</td></tr>
 </table>
 <p><strong>Threading:</strong> Main thread = platform message pump + idle sleep. Overlay <code>draw()</code> and <code>ScenePresenter::prepare</code> run on the <strong>graphics render thread</strong>. Overlay must only read <code>UiSnapshot</code> / engine selection APIs, not live <code>BlockScene</code> without a published snapshot.</p>
+<p><strong>Dense N / FPS:</strong> <code>prepare</code> holds <code>BlockScene</code> mutex and may rebuild <strong>full polar layout</strong> when the graph generation changes (every network admit). That host work is the usual framerate limit with thousands of blocks — not GPU overdraw. Prefer shorter critical sections and amortized layout (see <a href="network.md#interaction-with-graphics--frame-rate">network.md</a>, <a href="../perf-bottlenecks.md">perf-bottlenecks.md</a>). Opaque instance front-to-back sort runs after build for early-Z only.</p>
 <h3>Visual model (production)</h3>
 <p>Documented in <code>scene_presenter.hpp</code> — keep layout spacing stable:</p>
 <table>
@@ -104,13 +110,11 @@
 <h3>Sobel colors (app → graphics)</h3>
 <p>Graphics is domain-agnostic: the presenter emits <code>std::vector&lt;SobelOutlineInstance&gt;</code> with <code>instance_index</code> + <code>rgba</code> (intensity in <strong>a</strong>). Product roles map to palette constants in <code>scene_presenter.cpp</code> (gold / tip green / frontier cyan / incomplete orange). Selection is exclusive (gold only); otherwise role outlines are co-visible in <strong>one</strong> GPU pass. Kill-switch arrives as <code>FrameSourceInput::enable_role_outlines</code>.</p>
 <h2>Goals</h2>
-<ol>
-<li>Readable BlockFlow frontier at a glance (table above).</li>
-<li>Network + Block panels without racing live scene (<code>UiSnapshot</code>).</li>
-<li>Hot-switch Mainnet / Testnet; honest UX for reserved <strong>Debug</strong> domain.</li>
-<li>Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.</li>
-<li>Side/front camera toggle with Side orbit; selection BFS dep fan; brand-sleek arrows/Sobel.</li>
-</ol>
+<p>1. Readable BlockFlow frontier at a glance (table above).</p>
+<p>2. Network + Block panels without racing live scene (<code>UiSnapshot</code>).</p>
+<p>3. Hot-switch Mainnet / Testnet; honest UX for reserved <strong>Debug</strong> domain.</p>
+<p>4. Camera timeline UX: auto-follow tip, detach on scroll, reattach, look-at selection.</p>
+<p>5. Side/front camera toggle with Side orbit; selection BFS dep fan; brand-sleek arrows/Sobel.</p>
 <h2>Non-goals (presentation)</h2>
 <table>
 <tr><th>Non-goal</th><th>Why</th></tr>
@@ -127,11 +131,9 @@
 <li>Optional override: <code>resource/style_blockflow.json</code> (loaded at presenter construct).</li>
 <li><strong>Do not</strong> grow this into a general config system.</li>
 </ul>
-<ol>
-<li>Keep product color / filter policy out of graphics Vulkan code.</li>
-<li>Ship host version via <code>app_identity</code> + <code>app-v*</code> tags on <code>main</code> (<code>AGENTS.md</code>).</li>
-<li><strong>Borderless fullscreen:</strong> F11 toggles; <strong>Esc exits fullscreen</strong> (windowed Esc still quits). Graphics only resizes.</li>
-</ol>
+<p>5. Keep product color / filter policy out of graphics Vulkan code.</p>
+<p>6. Ship host version via <code>app_identity</code> + <code>app-v*</code> tags on <code>main</code> (<code>AGENTS.md</code>).</p>
+<p>7. <strong>Borderless fullscreen:</strong> F11 toggles; <strong>Esc exits fullscreen</strong> (windowed Esc still quits). Graphics only resizes.</p>
 <h2>Non-goals</h2>
 <table>
 <tr><th>Item</th><th>Reason</th></tr>
@@ -176,13 +178,11 @@
 </ul>
 <h2>Related</h2>
 <ul>
-<li><a href="index.html">layers/README.md</a> — map</li>
-<li><a href="network.html">network.md</a> — marks and phases</li>
-<li><a href="graphics.html">graphics.md</a> — Sobel execution</li>
-<li><a href="engine.html">engine.md</a> — facade</li>
-<li>Historical: <a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> (landed &amp; evolved)</li>
+<li><a href="README.md">layers/README.md</a> — map</li>
+<li><a href="network.md">network.md</a> — marks and phases</li>
+<li><a href="graphics.md">graphics.md</a> — Sobel execution</li>
+<li><a href="engine.md">engine.md</a> — facade</li>
 </ul>
-  <footer>Edit <code>docs/layers/app.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
 </main>
 </body>
 </html>

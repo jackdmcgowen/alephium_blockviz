@@ -1,6 +1,7 @@
 ﻿#include "app/pch.h"
 #include "app/scene_presenter.hpp"
 #include "app/style_blockflow.hpp"
+#include "app/motion_easing.hpp"
 
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
@@ -123,7 +124,8 @@ float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_de
     if (age <= 0.f)
         return 0.f;
     const float g = grow_sec > 1e-4f ? grow_sec : kArrowGrowSec;
-    return std::clamp(age / g, 0.f, 1.f);
+    // Ease-out cubic: path length accelerates then settles (PR4).
+    return motion::ease_out_cubic(std::clamp(age / g, 0.f, 1.f));
 }
 
 void ScenePresenter::clear_selection_deps_()
@@ -1343,6 +1345,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
+    ring_motion_.begin_frame(now, sty(), live_nodes);
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -1360,6 +1364,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             if (lat2 > rmax * rmax)
                 return false;
         }
+        // Frustum uses base scale so tiny pop-in does not flicker cull.
         const glm::vec3 half = in.instance_half_extents * scale;
         if (!force && in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
             return false;
@@ -1382,7 +1387,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
-        out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
+
+        glm::vec3 pos        = placed.pos;
+        float     inst_scale = ring_motion_.pop_scale(placed.hash, scale);
+        ring_motion_.apply_wave(pos, inst_scale);
+        out.instances.push_back(GpuInstance{ pos, inst_scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
     };
@@ -1473,6 +1482,18 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     for (const std::string& h : incomplete_pool)
         try_force_hash(h, /*always=*/false);
 
+    // Rare Y-wave: start only if history fill fulfilled (queued in on_fill_fulfilled).
+    ring_motion_.after_drawn(
+        drawn,
+        [&](const std::string& h, float& y_out) -> bool {
+            auto it = layout_cache_.by_hash.find(h);
+            if (it == layout_cache_.by_hash.end() || it->second >= layout.placements.size())
+                return false;
+            y_out = layout.placements[it->second].pos.y;
+            return true;
+        },
+        kLayoutBaseRadius);
+
     // Dynamic near/far from visible segment Z span (+ lateral pad).
     {
         constexpr float kHardFarCap = 20000.f;
@@ -1513,9 +1534,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (out.instances.size() >= kMaxInstances)
             break;
         const float t = std::clamp((now - db.birth_sec) / kDeathSec, 0.f, 1.f);
-        const float alpha = (1.f - t) * 0.9f;
+        // Ease-in: hold then accelerate shrink + fade (PR4).
+        const float u = motion::ease_in_cubic(t);
+        const float alpha = (1.f - u) * 0.9f;
+        const float death_scale = scale * (1.f - u);
         out.instances.push_back(
-            GpuInstance{ db.pos, scale, glm::vec3(1.f, 0.12f, 0.1f), alpha });
+            GpuInstance{ db.pos, death_scale, glm::vec3(1.f, 0.12f, 0.1f), alpha });
         out.pick_map.push_back(db.hash);
     }
 
@@ -1977,13 +2001,19 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     // First sight at full α. If already fulfilled, start fade immediately.
                     a.fade_start_sec = (s.fulfilled != 0) ? now : -1.f;
                     fill_slab_anims_[s.from_ms] = a;
+                    // History land → rare ring wave (cooldown-gated in RingMotion).
+                    if (s.fulfilled != 0)
+                        ring_motion_.on_fill_fulfilled();
                 }
                 else
                 {
                     it->second.to_ms = s.to_ms;
                     // Only start fade when first told fulfilled; never un-fade while alive.
                     if (s.fulfilled != 0 && it->second.fade_start_sec < 0.f)
+                    {
                         it->second.fade_start_sec = now;
+                        ring_motion_.on_fill_fulfilled();
+                    }
                 }
             }
             // Left HUD entirely: begin fade if still solid.

@@ -65,9 +65,7 @@ Layered libraries — living goals and plans:
 | Platform | [docs/platform.md](docs/platform.md) · [docs/linux.md](docs/linux.md) |
 | Timeline guide | [docs/user-guide-timeline.html](docs/user-guide-timeline.html) |
 
-**Roadmap / priorities:** [docs/ROADMAP.md](docs/ROADMAP.md).
-
-Historical design archives (not live backlogs): [modularization](docs/graphics-modularization-design.md), [confirmed tips](docs/blockflow-confirmed-tips-design.md). Build speed: [docs/build-performance.md](docs/build-performance.md).
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) · **Build speed:** [docs/build-performance.md](docs/build-performance.md) · **Docs hub:** [docs/index.html](docs/index.html)
 
 ## Build & run
 

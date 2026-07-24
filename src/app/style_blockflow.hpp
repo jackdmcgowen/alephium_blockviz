@@ -27,6 +27,18 @@ struct StyleBlockflow
     float sobel_intensity = 1.18f;
     float bfs_alpha_scale = 0.55f;
 
+    // Block admit pop-in (visible ring only; see ring_motion.hpp / motion_easing.hpp).
+    float block_pop_sec = 0.28f;           // duration 0 → overshoot → 1
+    float block_pop_overshoot = 1.08f;     // peak scale multiplier
+    float block_pop_max_concurrent = 48.f; // cap simultaneous pops (cold start)
+
+    // Rare Y-staggered ring wave (history fill land only; cooldown-gated).
+    float wave_duration_sec = 0.65f; // front travel low Y → high Y (+ last pulse)
+    float wave_pulse_sec    = 0.28f; // per-block bump duration
+    float wave_amplitude    = 0.10f; // peak scale add (1 + amp * env)
+    float wave_lift         = 0.40f; // peak world-Y bounce (world units)
+    float wave_cooldown_sec = 10.f;  // min gap between waves (rare)
+
     // RGBA (a = shaft / outline base; Sobel multiplies intensity separately).
     glm::vec4 select_gold{ 0.94f, 0.76f, 0.29f, 0.88f };
     glm::vec4 walk_trace{ 0.72f, 0.42f, 0.95f, 0.90f }; // multi-hop (≠ gold)
@@ -140,6 +152,15 @@ private:
         read_f_(root, "arrow_shaft_scale", arrow_shaft_scale);
         read_f_(root, "sobel_intensity", sobel_intensity);
         read_f_(root, "bfs_alpha_scale", bfs_alpha_scale);
+        read_f_(root, "block_pop_sec", block_pop_sec);
+        read_f_(root, "block_pop_overshoot", block_pop_overshoot);
+        read_f_(root, "block_pop_max_concurrent", block_pop_max_concurrent);
+        read_f_(root, "wave_duration_sec", wave_duration_sec);
+        read_f_(root, "wave_pulse_sec", wave_pulse_sec);
+        read_f_(root, "wave_amplitude", wave_amplitude);
+        read_f_(root, "wave_lift", wave_lift);
+        read_f_(root, "wave_cooldown_sec", wave_cooldown_sec);
+        normalize_motion_();
 
         glm::vec4 v;
         if (read_vec4_(cJSON_GetObjectItem(root, "select_gold"), v))
@@ -167,5 +188,26 @@ private:
 
         cJSON_Delete(root);
         return true;
+    }
+
+    // Clamp motion tokens after JSON load so prepare/RingMotion need no fallbacks.
+    void normalize_motion_()
+    {
+        if (block_pop_sec < 1e-3f)
+            block_pop_sec = 1e-3f;
+        if (block_pop_overshoot < 1.001f)
+            block_pop_overshoot = 1.001f;
+        if (block_pop_max_concurrent < 0.f)
+            block_pop_max_concurrent = 0.f;
+        if (wave_duration_sec < 1e-3f)
+            wave_duration_sec = 1e-3f;
+        if (wave_pulse_sec < 1e-3f)
+            wave_pulse_sec = 1e-3f;
+        if (wave_amplitude < 0.f)
+            wave_amplitude = 0.f;
+        if (wave_lift < 0.f)
+            wave_lift = 0.f;
+        if (wave_cooldown_sec < 0.f)
+            wave_cooldown_sec = 0.f;
     }
 };

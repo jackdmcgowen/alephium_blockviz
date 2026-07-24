@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Alephium-aligned palette (BlockFlow viz)</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../ROADMAP.html">Roadmap</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="alephium_palette.md"><code>alephium_palette.md</code></a></p>
+<h1>Alephium-aligned palette (BlockFlow viz)</h1>
+<p>Grounded in the official <a href="https://github.com/alephium/alephium-brand-guide">Alephium Brand Guide</a>:</p>
+<ul>
+<li><strong>Default:</strong> white mark on <strong>black</strong> background</li>
+<li><strong>Type:</strong> Inter (target for ImGui; system default until font is bundled)</li>
+<li><strong>Hero accent:</strong> brand orange (token / CTA energy)</li>
+<li>Marketing site: dark UI + white type + orange CTAs</li>
+</ul>
+<p>Exact logo SVG geometry is in the brand guide; orange below matches common Alephium token/marketing orange (~<code>#FF5C00</code>). Re-sample the brand kit color board if marketing ships a stricter token set.</p>
+<p><strong>Runtime polish:</strong> optional <code>resource/style_blockflow.json</code> (loaded by <code>StyleBlockflow</code>) can override role RGBA and walk hop timings without recompiling. Not a full theme engine — see app layer non-goals.</p>
+<h2>Foundation</h2>
+<table>
+<tr><th>Token</th><th>Hex</th><th>RGB (0–1)</th><th>Use</th></tr>
+<tr><td><code>canvas</code></td><td><code>#0B0B0C</code></td><td>0.043, 0.043, 0.047</td><td>Vulkan clear</td></tr>
+<tr><td><code>panel</code></td><td><code>#1A1B1E</code></td><td>0.102, 0.106, 0.118</td><td>ImGui window</td></tr>
+<tr><td><code>panel_border</code></td><td><code>#2A2C31</code></td><td>0.165, 0.173, 0.192</td><td>Borders</td></tr>
+<tr><td><code>text</code></td><td><code>#F5F5F5</code></td><td>0.961, 0.961, 0.961</td><td>Primary text</td></tr>
+<tr><td><code>text_muted</code></td><td><code>#9A9A9E</code></td><td>0.604, 0.604, 0.620</td><td>Disabled</td></tr>
+<tr><td><code>brand_orange</code></td><td><code>#FF5C00</code></td><td>1.000, 0.361, 0.000</td><td>Accents, checkmarks, CTAs</td></tr>
+</table>
+<h2>Semantic roles (app product meaning)</h2>
+<table>
+<tr><th>Token</th><th>Hex / float</th><th>Use</th></tr>
+<tr><td><code>tip_green</code></td><td><code>#3DDC84</code></td><td>Frontier tip Sobel / green arrows</td></tr>
+<tr><td><code>unconfirmed_red</code></td><td><code>#FF1F1A</code></td><td>Unconfirmed tip / frontier-child (same hex as death; steady outline vs α fade)</td></tr>
+<tr><td><code>frontier_cyan</code></td><td>(legacy)</td><td>JSON key still accepted; product role is unconfirmed red</td></tr>
+<tr><td><code>incomplete_amber</code></td><td><code>#FF8A1F</code></td><td>Incomplete / orange Sobel (not brand CTA)</td></tr>
+<tr><td><code>select_gold</code></td><td><code>#F0C14A</code></td><td>Selection / gold Sobel</td></tr>
+<tr><td><code>uncle_violet</code></td><td><code>#B847F2</code></td><td>Ghost uncle tint</td></tr>
+<tr><td><code>death_red</code></td><td><code>#FF1F1A</code></td><td>Removal fade (α → 0)</td></tr>
+</table>
+<h2>Shard lanes (16)</h2>
+<p>Ordered family: <strong>cool slate → brand orange → warm sand</strong>, 4 groups × 4 chains so lanes stay distinct without rainbow primaries. Values live in <code>LanePalette::default_alephium()</code>.</p>
+<h2>Capture baseline</h2>
+<ul>
+<li>Before: <code>docs/images/capture_current.png</code> (light canvas, rainbow lanes)</li>
+<li>After palette: re-capture with <strong>F12</strong> or Network → Blockflow → <strong>Screenshot</strong></li>
+</ul>
+</main>
+</body>
+</html>

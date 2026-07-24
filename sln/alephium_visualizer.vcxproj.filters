@@ -54,6 +54,9 @@
     <ClInclude Include="..\src\app\ui_chrome.hpp"><Filter>Header Files\app</Filter></ClInclude>
     <ClInclude Include="..\src\app\ui_snapshot.hpp"><Filter>Header Files\app</Filter></ClInclude>
     <ClInclude Include="..\src\app\scene_presenter.hpp"><Filter>Header Files\app</Filter></ClInclude>
+    <ClInclude Include="..\src\app\motion_easing.hpp"><Filter>Header Files\app</Filter></ClInclude>
+    <ClInclude Include="..\src\app\ring_motion.hpp"><Filter>Header Files\app</Filter></ClInclude>
+    <ClInclude Include="..\src\app\style_blockflow.hpp"><Filter>Header Files\app</Filter></ClInclude>
     <ClInclude Include="..\src\domain\alph_block.hpp"><Filter>Header Files\domain</Filter></ClInclude>
     <ClInclude Include="..\src\domain\block_graph.hpp"><Filter>Header Files\domain</Filter></ClInclude>
     <ClInclude Include="..\src\domain\block_scene.hpp"><Filter>Header Files\domain</Filter></ClInclude>
