@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Linux build (CMake + GLFW)</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="linux.md"><code>linux.md</code></a></p>
+<h1>Linux build (CMake + GLFW)</h1>
+<p>Platform TUs: <a href="platform.md">platform.md</a>. Product still builds on Windows via <code>sln/</code>.</p>
+<h2>Prerequisites</h2>
+<ul>
+<li>C++17 compiler (GCC 11+ / Clang 14+)</li>
+<li>CMake ≥ 3.20, Ninja (recommended), Python 3</li>
+<li>Vulkan loader + ICD (Mesa or vendor driver)</li>
+<li><code>glslc</code> (Vulkan SDK or <code>glslang</code> from vcpkg / distro <code>glslang-tools</code>)</li>
+</ul>
+<h3>Distro packages (Ubuntu/Debian, needs sudo)</h3>
+<pre><code>sudo apt-get install -y build-essential cmake ninja-build python3 \
+  libvulkan-dev vulkan-tools glslang-tools libglfw3-dev \
+  libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev</code></pre>
+<h3>vcpkg (no root; works in this repo)</h3>
+<pre><code>git submodule update --init --recursive
+./install_deps.sh</code></pre>
+<p>Manifest (<code>vcpkg.json</code>) pulls: curl, cjson, glm, zlib, glfw3, vulkan-headers, glslang.</p>
+<h2>Configure &amp; build</h2>
+<p>From <strong>repo root</strong>:</p>
+<pre><code>cmake -S . -B build -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=&quot;$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake&quot; \
+  -DVCPKG_TARGET_TRIPLET=x64-linux \
+  -DCMAKE_BUILD_TYPE=Debug
+
+cmake --build build</code></pre>
+<p>Without vcpkg (system packages only):</p>
+<pre><code>cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build</code></pre>
+<h2>Run</h2>
+<p>CWD must be the <strong>repo root</strong> (<code>config.json</code>, <code>resource/</code>):</p>
+<pre><code>./build/bin/alephium_visualizer</code></pre>
+<p>Tips:</p>
+<ul>
+<li>Prefer <strong>FakeChain</strong>: Network panel → Debug (offline cubes).</li>
+<li>Validation layers: install <code>vulkan-validationlayers</code>; Debug builds write <code>build/debug.log</code>.</li>
+<li>Segment disk cache: <code>~/.cache/AlephiumBlockViz/cache/&lt;domain&gt;/</code>.</li>
+</ul>
+<h2>VnV</h2>
+<p>Same suites as Windows <code>.\scripts\run_vnv.ps1</code> where ported:</p>
+<pre><code>./scripts/run_vnv.sh                 # mod (default)
+./scripts/run_vnv.sh --skip-build
+./scripts/run_vnv.sh --ctest
+./scripts/run_vnv.sh --int           # needs DISPLAY + GPU; golden compare
+./scripts/run_vnv.sh --bench         # opt-in perf; needs DISPLAY + GPU
+./scripts/run_vnv.sh --all           # mod + int</code></pre>
+<table>
+<tr><th>Binary</th><th>Role</th></tr>
+<tr><td><code>build/bin/mod_domain</code></td><td>Domain / detail store</td></tr>
+<tr><td><code>build/bin/mod_network</code></td><td>HttpIoPool</td></tr>
+<tr><td><code>build/bin/int_visual</code></td><td>FakeChain PNG capture</td></tr>
+<tr><td><code>build/bin/bench_frame_profiler</code></td><td>Frame timing JSON</td></tr>
+</table>
+<p>Image compare (Linux): <code>vnv/int/tests/visual/compare_images.py</code> (needs Pillow).</p>
+<p><strong>CI:</strong> <code>.github/workflows/linux-ci.yml</code> — build, <strong>mod</strong>, <strong>headless int hard gate</strong> (lavapipe + <code>goldens/linux_headless/</code>).</p>
+<p><strong>Pre-merge smoke:</strong></p>
+<pre><code>./scripts/smoke_dual_track.sh           # PCH + mod + headless int
+./scripts/smoke_dual_track.sh --skip-build</code></pre>
+<h3>Headless (no DISPLAY)</h3>
+<p>Uses <strong><code>VK_EXT_headless_surface</code></strong> + GPU swapchain readback for PNGs:</p>
+<pre><code>./build/bin/int_visual --headless --case fake_overview \
+  --out vnv/int/tests/visual/out/fake_overview/actual.png
+./scripts/run_vnv.sh --int --headless
+# compares against vnv/int/tests/visual/goldens/linux_headless/fake_overview.png</code></pre>
+<p>Requires a Vulkan ICD (Mesa lavapipe is fine). Golden policy: <a href="../vnv/int/tests/visual/goldens/README.md">vnv/int/tests/visual/goldens/README.md</a>.</p>
+<h3>GPU drivers (local)</h3>
+<ul>
+<li>Mesa: <code>vulkan-tools</code> → <code>vulkaninfo</code> should list a device (RADV/ANV/lavapipe)</li>
+<li>NVIDIA: proprietary driver + Vulkan ICD</li>
+<li>Validation: <code>vulkan-validationlayers</code> for Debug logs in <code>build/debug.log</code></li>
+</ul>
+<h2>Platform sources linked on Linux</h2>
+<table>
+<tr><th>Target</th><th>TU</th></tr>
+<tr><td>app</td><td><code>src/app/platform/app_platform_linux.cpp</code> (GLFW)</td></tr>
+<tr><td>graphics</td><td><code>src/graphics/platform/gpu_platform_linux.cpp</code></td></tr>
+<tr><td>network</td><td><code>src/network/platform/net_platform_linux.cpp</code></td></tr>
+</table>
+<p>MSVC continues to compile only <code>*_win32.cpp</code>.</p>
+</main>
+</body>
+</html>

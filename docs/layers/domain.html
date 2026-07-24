@@ -10,12 +10,17 @@
 <nav class="site-nav" aria-label="Docs">
   <div class="site-nav-inner">
     <a class="brand" href="../index.html">BlockViz docs</a>
-    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a class="current" href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../architecture.html">Architecture</a>
+    <a href="../dev-roadmap.html">Roadmap</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
   </div>
 </nav>
 <main>
-  <h1>Domain layer</h1>
-  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="domain.md"><code>domain.md</code></a>.</p>
+  <p class="muted">Source: <a href="domain.md"><code>domain.md</code></a></p>
+<h1>Domain layer</h1>
 <p>Shared <strong>data plane</strong> for BlockFlow visualization (<code>src/domain/</code>). Not a static lib by itself — sources compile into the host app (<code>block_scene</code>, <code>block_graph</code>, <code>layout</code>) while <code>AlphDetailStore</code> lives under <code>network</code> but is owned through <code>BlockScene</code>.</p>
 <h2>Overview</h2>
 <p>Domain holds chain-agnostic graph metadata, the live scene (confirmed frontiers, uncles, feed, HUD bag), and polar layout. <strong>Network</strong> writes; <strong>app</strong> <code>ScenePresenter</code> reads under the scene mutex; <strong>graphics</strong> may hold a <code>BlockScene*</code> for selection detail only.</p>
@@ -50,13 +55,11 @@
 <li>Invoked from the network poller (~2× lookback, cap 12k) and FakeChain (soft cap).</li>
 </ul>
 <h2>Goals</h2>
-<ol>
-<li>Single source of truth for live block identity + layout inputs.</li>
-<li>Thread-safe scene mutex for network write / presenter read.</li>
-<li>Confirmation state without putting Alephium policy in the graph node type.</li>
-<li>Bounded memory via prune (not unbounded session growth).</li>
-<li>Layout parity for 16-shard polar presentation.</li>
-</ol>
+<p>1. Single source of truth for live block identity + layout inputs.</p>
+<p>2. Thread-safe scene mutex for network write / presenter read.</p>
+<p>3. Confirmation state without putting Alephium policy in the graph node type.</p>
+<p>4. Bounded memory via prune (not unbounded session growth).</p>
+<p>5. Layout parity for 16-shard polar presentation.</p>
 <h2>Non-goals</h2>
 <table>
 <tr><th>Item</th><th>Reason</th></tr>
@@ -80,11 +83,10 @@
 </ul>
 <h2>Related</h2>
 <ul>
-<li><a href="index.html">layers/README.md</a></li>
-<li><a href="network.html">network.md</a> · <a href="app.html">app.md</a></li>
+<li><a href="README.md">layers/README.md</a></li>
+<li><a href="network.md">network.md</a> · <a href="app.md">app.md</a></li>
 <li>VnV mod: <code>vnv/mod/tests/domain/&lt;test_id&gt;/test.cpp</code> · <code>.\scripts\run_vnv.ps1 -Mod</code></li>
 </ul>
-  <footer>Edit <code>docs/layers/domain.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
 </main>
 </body>
 </html>

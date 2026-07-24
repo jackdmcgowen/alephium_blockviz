@@ -10,12 +10,17 @@
 <nav class="site-nav" aria-label="Docs">
   <div class="site-nav-inner">
     <a class="brand" href="../index.html">BlockViz docs</a>
-    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a class="current" href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../architecture.html">Architecture</a>
+    <a href="../dev-roadmap.html">Roadmap</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
   </div>
 </nav>
 <main>
-  <h1>Network layer</h1>
-  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="network.md"><code>network.md</code></a>.</p>
+  <p class="muted">Source: <a href="network.md"><code>network.md</code></a></p>
+<h1>Network layer</h1>
 <p>Ingest and confirmation library <strong>network</strong> (<code>src/network/</code>). Implements <code>INetworkSystem</code>; Alephium policy in <code>alephium/</code>.</p>
 <h2>Overview</h2>
 <p>Network owns curl lifecycle, the poller thread, REST helpers (<code>commands.c</code>), and <code>AlephiumAdapter</code>: lookback poll, tip identify, per-lane confirm walk, steady poll, main-chain cache, fetch pool, and detail-store slim/refill. It writes graph + confirmation into <code>BlockScene</code>. It does <strong>not</strong> choose cube colors or run Vulkan.</p>
@@ -57,13 +62,11 @@
 <p>Additional policy themes (see header comments on <code>AlephiumAdapter</code>): <strong>anchor + forward novelty</strong> for live main, free-main dep fill, live vs historical fetch rules.</p>
 <p><strong>DAG missing fill:</strong> budgeted walk from confirmed tips collects broken edges (parent in graph, dep missing). <strong>≥2</strong> unique missing → inclusive time range <code>[min_parent_ts, max_parent_ts]</code> (+ slack, split at max patch) on the priority hole queue. <strong>Exactly 1</strong> missing → sparse <strong>single-hash queue</strong>, drained only after DepCritical ranges are idle (so ranges can resolve clusters first). Exit path: host hides the window (<code>SW_HIDE</code>) before engine stop for responsive close.</p>
 <p><strong>Live main-chain policy (simplified):</strong></p>
-<ol>
-<li><strong>Anchor:</strong> refresh network tip heights → tip hash per lane → mark Main and set green <code>H_c</code> (<code>mark_scene_anchor_</code>). Tip proof: hashes-at-height singleton and/or one <code>is_main</code> for the tip only.</li>
-<li><strong>Forward novelty:</strong> any admitted block whose <strong>all known deps are already Main</strong> is marked Main (<code>try_forward_promote_</code>) — <strong>no</strong> per-hop <code>is_main</code>.</li>
-<li><strong>Green tip steps:</strong> sequential <code>H_c+1</code> when that hash is Main; jump only via <strong>network tip</strong> anchor (not lagging bag).</li>
-<li><strong>Spoof / conflict:</strong> <code>is_main</code> / replace path only when tip is not main or duplicate competitor; not a safety-critical verifier (explorer remains deep truth).</li>
-<li><strong>Disk bootstrap:</strong> bag-only + <code>clear_sequential_frontiers</code>; live anchors re-establish green tips.</li>
-</ol>
+<p>1. <strong>Anchor:</strong> refresh network tip heights → tip hash per lane → mark Main and set green <code>H_c</code> (<code>mark_scene_anchor_</code>). Tip proof: hashes-at-height singleton and/or one <code>is_main</code> for the tip only.</p>
+<p>2. <strong>Forward novelty:</strong> any admitted block whose <strong>all known deps are already Main</strong> is marked Main (<code>try_forward_promote_</code>) — <strong>no</strong> per-hop <code>is_main</code>.</p>
+<p>3. <strong>Green tip steps:</strong> sequential <code>H_c+1</code> when that hash is Main; jump only via <strong>network tip</strong> anchor (not lagging bag).</p>
+<p>4. <strong>Spoof / conflict:</strong> <code>is_main</code> / replace path only when tip is not main or duplicate competitor; not a safety-critical verifier (explorer remains deep truth).</p>
+<p>5. <strong>Disk bootstrap:</strong> bag-only + <code>clear_sequential_frontiers</code>; live anchors re-establish green tips.</p>
 <p><strong>Live poll vs camera:</strong> while lookback index <code>k &gt; 0</code> (camera beyond the live segment), do <strong>not</strong> force-poll window 0 or start new live tip seeds; historical windows <code>1..k</code> still load. On return to <code>k == 0</code>, if <code>poll_interval</code> has elapsed since the last live window poll, force live tip-adjacent chunks and reseed tip verification (stay in Steady).</p>
 <p><strong>Chunked timeline:</strong> shared <strong>64s</strong> subsegment grid (disk + HTTP); G-segment = <strong>640s</strong> (exactly 10 subsegments). Live tip poll = full open genesis cell <code>[floor(now), next_boundary)</code>. History GETs stay <strong>strictly older</strong> (<code>to ≤ live_open_from</code>). Each pump: <strong>live first</strong>, then <strong>camera 64s subsegment → next unfilled older</strong> within the admit/render ring (<strong>7 G</strong>); disk before HTTP. <strong>Newer</strong> toward live only after older-in-ring has no holes (avoids forward jumps when the crawl hits the ring edge). Resume cursor keeps the older frontier across ring expansion. <strong>≤4</strong> concurrent interval GETs; multiple subsegs per G allowed. <strong>429/5xx</strong> → exponential backoff.</p>
 <p><strong>Soft RAM eviction:</strong> pressure prune outside the admit ring is <strong>soft</strong> (<code>BlockScene::prune(..., soft_evict=true)</code>). Presenter must <strong>not</strong> play red death VFX for those leaves (disk re-admit on return).</p>
@@ -102,22 +105,43 @@
 <li>Slim unpinned txn payloads; pin selection for full detail; refill via engine/adapter when inspector needs payloads again.</li>
 <li><code>txn_count</code> survives slim for billboards / multi-tx filter.</li>
 </ul>
+<h3>Interaction with graphics / frame rate</h3>
+<p>Network <strong>never</strong> touches Vulkan or records command buffers. FPS under “thousands of blocks” is still coupled through <strong>shared <code>BlockScene</code></strong>:</p>
+<pre><code>HttpIoPool (async GET)  →  poller drain / admit / mark_confirmed
+                              locks BlockScene::mu_
+                              bumps graph_generation
+Render thread prepare()  →  locks same mu_ for (today) the whole prepare
+                              if gen changed: snapshot ALL nodes + full layout rebuild
+                              ring filter → instances → publish_frame (GPU cheap)</code></pre>
+<table>
+<tr><th>Fact</th><th>Implication</th></tr>
+<tr><td>Dense benches: <strong>Prepare ~18–27 ms</strong>, Cubes GPU ≪ 0.1 ms</td><td>Hitch is <strong>host layout + lock</strong>, not mesh/overdraw</td></tr>
+<tr><td>Every admit bumps <code>graph_generation</code></td><td>Continuous live growth rebuilds layout <strong>most frames</strong></td></tr>
+<tr><td>Render ring (7 G) limits <strong>draw</strong> set only</td><td>Does <strong>not</strong> limit full-graph layout cost</td></tr>
+<tr><td>HTTP is already async (pool + ≤4 interval GETs)</td><td>Non-blocking network I/O; <strong>admit + prepare</strong> remain the coupling</td></tr>
+</table>
+<p><strong>Do not</strong> fix this with <strong>secondary command buffers per 64s subsegment</strong>: the product draw is one instanced/mesh pass over a <strong>per-frame</strong> <code>GpuInstance[]</code> (camera, frustum, fade, selection change every frame). Pre-recorded subseg CBs would go stale immediately and network never records Vulkan. Prefer simpler data-path work (see Plan).</p>
+<p><strong>Keep graphics non-blocking (direction):</strong></p>
+<p>1. Shrink prepare critical section (snapshot under lock → unlock → layout).</p>
+<p>2. Amortize / incremental layout so cost tracks ΔN not full N.</p>
+<p>3. Optional per-pump admit budget to soften mutex + gen churn.</p>
+<p>4. Keep existing rings, soft prune, disk-first, history mode (already reduce pressure).</p>
+<p>Measure: F3 <code>Prepare</code> vs <code>Cubes<em></code> while scrolling history; benches <code>fake_overdraw_end_z</em></code>. Details: <a href="../perf-bottlenecks.md">perf-bottlenecks.md</a>.</p>
 <h2>Goals</h2>
-<ol>
-<li>Reliable BlockFlow ingest from config/node URLs with <strong>success-only</strong> watermark advance.</li>
-<li>Proven main-chain confirmation in <code>BlockScene</code> (dual-write + poll re-admit).</li>
-<li>Hot Mainnet ↔ Testnet switch that resets scene/poller without process teardown.</li>
-<li>Inspector continuity (<code>AlphDetailStore</code> + refill).</li>
-<li>Keep REST/cJSON/curl out of graphics and app chrome TUs.</li>
-<li>HUD observability: status, lookback windows, frontier lanes, open walks (<code>publish_hud</code> → scene → snapshot).</li>
-</ol>
+<p>1. Reliable BlockFlow ingest from config/node URLs with <strong>success-only</strong> watermark advance.</p>
+<p>2. Proven main-chain confirmation in <code>BlockScene</code> (dual-write + poll re-admit).</p>
+<p>3. Hot Mainnet ↔ Testnet switch that resets scene/poller without process teardown.</p>
+<p>4. Inspector continuity (<code>AlphDetailStore</code> + refill).</p>
+<p>5. Keep REST/cJSON/curl out of graphics and app chrome TUs.</p>
+<p>6. HUD observability: status, lookback windows, frontier lanes, open walks (<code>publish_hud</code> → scene → snapshot).</p>
+<p>7. <strong>Minimize render-thread stalls</strong>: short scene-lock holds; avoid full-graph host work on every admit (layout amortize / unlock snapshot — plan items below).</p>
 <h2>Non-goals</h2>
 <table>
 <tr><th>Item</th><th>Reason</th></tr>
 <tr><td>Auth / retry / multi-endpoint HA platform</td><td>Modularization non-goal; REST poll is v1</td></tr>
 <tr><td>WebSocket as prerequisite</td><td>Optional later; REST default</td></tr>
 <tr><td>Product visual semantics</td><td><strong>App</strong></td></tr>
-<tr><td>Vulkan / render thread</td><td><strong>Graphics</strong></td></tr>
+<tr><td>Vulkan / render thread / secondary CBs for subsegs</td><td><strong>Graphics</strong> host path; wrong fix for Prepare cost</td></tr>
 <tr><td>Second real chain in the same breath as FakeChain</td><td>Prove multi-adapter with Debug first</td></tr>
 <tr><td>Changing uncle/orphan product policy in docs</td><td>Code policy stays until an explicit product change</td></tr>
 <tr><td>Structured logging framework</td><td>printf + HUD OK</td></tr>
@@ -132,8 +156,12 @@
 <tr><td><strong>Done</strong></td><td>Camera-subseg history walk</td><td>inflight starts at eye 64s cell → next unfilled</td></tr>
 <tr><td><strong>Done</strong></td><td>Three-ring segments</td><td>load <strong>15</strong> / admit+render <strong>7</strong> / live open <strong>64s</strong></td></tr>
 <tr><td><strong>Done</strong></td><td>HttpIoPool + async interval GETs</td><td>Workers overlap timeline RTT; <code>mod_network</code></td></tr>
-<tr><td><strong>P1</strong></td><td>Async is_main / hashes via pool</td><td>Confirm path not RTT-serialized</td></tr>
 <tr><td><strong>Done</strong></td><td>Retention / prune (branch)</td><td>Poller min_ts + soft node cap</td></tr>
+<tr><td><strong>P0</strong></td><td>Doc: network ↔ prepare FPS coupling</td><td>This section + perf-bottlenecks</td></tr>
+<tr><td><strong>P1</strong></td><td>Snapshot under lock → unlock → layout</td><td>App prepare; network admits during layout</td></tr>
+<tr><td><strong>P1</strong></td><td>Amortize / incremental layout</td><td>Cap Prepare under continuous admit</td></tr>
+<tr><td><strong>P1</strong></td><td>Async is_main / hashes via pool</td><td>Confirm path not RTT-serialized</td></tr>
+<tr><td><strong>P2</strong></td><td>Per-pump admit budget</td><td>Soften mutex burst + gen churn</td></tr>
 <tr><td><strong>Standing</strong></td><td>Keep phases, dual-write, thread contract accurate</td><td>Hygiene when adapter policy shifts</td></tr>
 <tr><td><strong>P1</strong></td><td>Config / URL resolution notes</td><td><code>config.json</code> array + <code>network_domain_resolve_url</code></td></tr>
 <tr><td><strong>P2</strong></td><td>Optional websocket tip stream</td><td>Focused feature, not a networking rewrite</td></tr>
@@ -157,21 +185,23 @@
 </ul>
 <h3>Threading</h3>
 <table>
-<tr><th>Thread</th><th>Work</th></tr>
-<tr><td>Network / poller</td><td>Policy: poll schedule, drain results, admit, confirm, cache, scene writes</td></tr>
-<tr><td><strong>HttpIoPool workers</strong> (default 6)</td><td>REST GETs only (interval chunks, block-by-hash, …); private curl / transport</td></tr>
-<tr><td>UI / render</td><td>Must not call into <code>MainChainCache</code>; domain switch may <strong>block</strong> until poller restarted</td></tr>
+<tr><th>Thread</th><th>Work</th><th>Contends with render when…</th></tr>
+<tr><td>Network / poller</td><td>Policy: poll schedule, drain results, <strong>admit</strong>, confirm, cache, scene writes</td><td>Holds <code>BlockScene</code> mutex</td></tr>
+<tr><td><strong>HttpIoPool workers</strong> (default 6)</td><td>REST GETs only (interval chunks, block-by-hash, …); private curl / transport</td><td><strong>Never</strong> (until poller drain)</td></tr>
+<tr><td><strong>Render</strong> (<code>prepare</code> + GPU record)</td><td><code>ScenePresenter::prepare</code> under same mutex; then publish + draw</td><td>Long prepare <strong>stalls admits</strong>; waits on mutex if poller holds it</td></tr>
+<tr><td>UI (main / overlay)</td><td>Must not call into <code>MainChainCache</code>; domain switch may <strong>block</strong> until poller restarted</td><td>Domain switch only</td></tr>
 </table>
 <p>Timeline <code>blocks-with-events</code> chunks are <strong>enqueued</strong> to the pool (inflight cap ~4) so bootstrap/history RTT overlaps; poller <strong>admits</strong> on drain. VnV: <code>vnv/mod/tests/network/</code> (<code>mod_network</code>).</p>
 <h2>Related</h2>
 <ul>
-<li><a href="index.html">layers/README.md</a> — confirmation split table</li>
-<li><a href="app.html">app.md</a> — presentation of confirmed state</li>
-<li><a href="engine.html">engine.md</a> — <code>INetworkSystem</code> on facade</li>
+<li><a href="README.md">layers/README.md</a> — confirmation split table</li>
+<li><a href="app.md">app.md</a> — presentation of confirmed state; prepare on render thread</li>
+<li><a href="graphics.md">graphics.md</a> — GPU path stays light; dense-N limit is host prepare</li>
+<li><a href="../perf-bottlenecks.md">perf-bottlenecks.md</a> — Prepare vs Cubes measurements</li>
+<li><a href="engine.md">engine.md</a> — <code>INetworkSystem</code> on facade</li>
 <li>Historical: <a href="../blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> (dual-write matrix still conceptually valid; paths evolved to <code>src/network/alephium/</code>)</li>
 <li>Historical: <a href="../graphics-modularization-design.md">graphics-modularization-design.md</a> (adapter + detail store goals)</li>
 </ul>
-  <footer>Edit <code>docs/layers/network.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
 </main>
 </body>
 </html>

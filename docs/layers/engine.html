@@ -10,12 +10,17 @@
 <nav class="site-nav" aria-label="Docs">
   <div class="site-nav-inner">
     <a class="brand" href="../index.html">BlockViz docs</a>
-    <a href="../index.html">Hub</a> <a class="current" href="index.html">Layers</a> <a href="app.html">App</a> <a href="domain.html">Domain</a> <a class="current" href="engine.html">Engine</a> <a href="graphics.html">Graphics</a> <a href="network.html">Network</a> <a href="../user-guide-timeline.html">Timeline</a> <a href="../architecture.html">Architecture</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../architecture.html">Architecture</a>
+    <a href="../dev-roadmap.html">Roadmap</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
   </div>
 </nav>
 <main>
-  <h1>Engine layer</h1>
-  <p class="muted">Living layer doc (HTML view). Canonical for agents: <a href="engine.md"><code>engine.md</code></a>.</p>
+  <p class="muted">Source: <a href="engine.md"><code>engine.md</code></a></p>
+<h1>Engine layer</h1>
 <p>Product shell library <strong>blockviz_engine</strong> (<code>src/engine/</code>). Vulkan-free facade between the host app and registered systems.</p>
 <h2>Overview</h2>
 <p><code>BlockVizEngine</code> (<code>IEngine</code>) owns an <code>ISystem</code> registry, forwards product APIs to <code>IGraphicsSystem</code>, and exposes convenience hooks for network domain switch. Frame contracts (<code>IFrameSource</code>, <code>FrameSourceInput</code> / <code>FrameSourceOutput</code>) live here so graphics and app share one header surface without pulling Vulkan.</p>
@@ -56,13 +61,11 @@ destroy_engine()</code></pre>
 <li>Render thread is owned by <strong>graphics</strong>, not by a client-driven <code>render_frame</code> loop.</li>
 </ul>
 <h2>Goals</h2>
-<ol>
-<li>Stable, Vulkan-free product API for the host.</li>
-<li>Uniform system lifecycle: configure → init → start / stop → free.</li>
-<li>Coherent frame publish (instances + pick map + highlights paired).</li>
-<li>Single host entry to product backend (<code>IEngine</code> only from <code>main</code> / overlay).</li>
-<li><code>engine-v*</code> tags match <code>engine_identity.hpp</code> on every <code>main</code> release (<code>AGENTS.md</code>).</li>
-</ol>
+<p>1. Stable, Vulkan-free product API for the host.</p>
+<p>2. Uniform system lifecycle: configure → init → start / stop → free.</p>
+<p>3. Coherent frame publish (instances + pick map + highlights paired).</p>
+<p>4. Single host entry to product backend (<code>IEngine</code> only from <code>main</code> / overlay).</p>
+<p>5. <code>engine-v*</code> tags match <code>engine_identity.hpp</code> on every <code>main</code> release (<code>AGENTS.md</code>).</p>
 <h2>Non-goals</h2>
 <table>
 <tr><th>Item</th><th>Reason</th></tr>
@@ -77,6 +80,7 @@ destroy_engine()</code></pre>
 <table>
 <tr><th>Priority</th><th>Item</th><th>Notes</th></tr>
 <tr><td><strong>P0</strong></td><td>Keep facade surface documented against <code>engine.hpp</code></td><td>Update when signatures change</td></tr>
+<tr><td><strong>Done</strong></td><td>Pack scene filters into <code>SceneViewFilters</code></td><td>One setter on IGraphicsSystem / IEngine</td></tr>
 <tr><td><strong>P1</strong></td><td>Include hygiene</td><td>Forward-declare; avoid pulling <code>engine.hpp</code> into pure graphics private TUs unnecessarily</td></tr>
 <tr><td><strong>P1</strong></td><td>Document accepted domain leakage on facade</td><td><code>AlphBlock</code> / <code>BlockScene*</code> — when to slim</td></tr>
 <tr><td><strong>P2</strong></td><td>Optional headless / <code>render_frame</code> test seam</td><td>Only if automated GPU or integration tests need it</td></tr>
@@ -101,11 +105,10 @@ destroy_engine()</code></pre>
 </ul>
 <h2>Related</h2>
 <ul>
-<li><a href="index.html">layers/README.md</a></li>
-<li><a href="app.html">app.md</a>, <a href="graphics.html">graphics.md</a>, <a href="network.html">network.md</a></li>
+<li><a href="README.md">layers/README.md</a></li>
+<li><a href="app.md">app.md</a>, <a href="graphics.md">graphics.md</a>, <a href="network.md">network.md</a></li>
 <li>Historical modularization: <a href="../graphics-modularization-design.md">graphics-modularization-design.md</a> (landed)</li>
 </ul>
-  <footer>Edit <code>docs/layers/engine.md</code> first, then regenerate HTML if needed. Hub: <a href="../index.html">docs/index.html</a></footer>
 </main>
 </body>
 </html>

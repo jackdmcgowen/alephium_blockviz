@@ -11,111 +11,122 @@
   <div class="site-nav-inner">
     <a class="brand current" href="index.html">BlockViz docs</a>
     <a href="user-guide-timeline.html">Timeline</a>
-    <a href="user-guide-network-fill.html">Network fill</a>
     <a href="user-guide-legend.html">Legend</a>
     <a href="user-guide-controls.html">Controls</a>
-    <a href="architecture.html">Architecture</a>
     <a href="layers/index.html">Layers</a>
-    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="ROADMAP.html">Roadmap</a>
   </div>
 </nav>
 <main>
   <h1>Alephium BlockViz documentation</h1>
   <p class="muted">
-    Static guides for operators and contributors. Open these files in a browser from the repo
-    (<code>docs/index.html</code>). App / engine identities: see
-    <code>src/app/app_identity.hpp</code> and <code>src/engine/engine_identity.hpp</code>.
+    Open this file in a browser from the repo (<code>docs/index.html</code>).
+    <strong>Rule:</strong> every <code>docs/**/*.md</code> has a sibling <code>.html</code>
+    (regenerate with <code>python scripts/md_to_docs_html.py</code>; check with
+    <code>python scripts/check_docs_html_parity.py</code>).
   </p>
+
+  <div class="callout">
+    <strong>Start here:</strong>
+    <a href="user-guide-legend.html">What colors mean</a> ·
+    <a href="user-guide-timeline.html">Timeline &amp; fill</a> ·
+    <a href="layers/index.html">Who owns what code</a> ·
+    <a href="planning/index.html">Where the product is going</a>
+  </div>
 
   <h2>User guides</h2>
   <div class="card-grid">
     <div class="card">
       <a href="user-guide-timeline.html">Timeline &amp; fill</a>
-      <p>64s / 640s grid, rings, gray volumes, status strings, F12.</p>
+      <p>64s / 640s grid, rings, gray volumes, status, F12.</p>
     </div>
     <div class="card">
       <a href="user-guide-network-fill.html">Network fill policy</a>
-      <p>Live tip first, camera-subseg walk, inflight ≤4, disk vs HTTP.</p>
+      <p>Live tip first, camera-subseg walk, inflight ≤4.</p>
     </div>
     <div class="card">
       <a href="user-guide-legend.html">Visual legend</a>
-      <p>Green / red tips, cyan planes, gold selection, gray fills.</p>
+      <p>Green / red tips, gold selection, gray fills.</p>
     </div>
     <div class="card">
       <a href="user-guide-controls.html">Controls</a>
-      <p>Camera keys, F3 / F11 / F12, mouse, fullscreen Esc.</p>
+      <p>Camera, F3 / F11 / F12, mouse, fullscreen.</p>
     </div>
   </div>
 
-  <h2>Layer architecture (HTML)</h2>
+  <h2>Story &amp; architecture</h2>
   <div class="card-grid">
+    <div class="card">
+      <a href="architecture.html">Architecture</a>
+      <p>App → engine → network / graphics → domain.</p>
+    </div>
     <div class="card">
       <a href="layers/index.html">Layers hub</a>
-      <p>Map, confirmation split, smoke checklist.</p>
+      <p>Ownership map and confirmation split.</p>
     </div>
     <div class="card">
-      <a href="layers/app.html">App</a>
-      <p>Presenter, chrome, visual model, camera.</p>
-    </div>
-    <div class="card">
-      <a href="layers/domain.html">Domain</a>
-      <p>BlockScene, graph, layout, prune.</p>
-    </div>
-    <div class="card">
-      <a href="layers/engine.html">Engine</a>
-      <p>IEngine facade, frame types, lifecycle.</p>
-    </div>
-    <div class="card">
-      <a href="layers/graphics.html">Graphics</a>
-      <p>Vulkan, IPass, Sobel, publish.</p>
-    </div>
-    <div class="card">
-      <a href="layers/network.html">Network</a>
-      <p>Adapter phases, rings, fill, cache.</p>
+      <a href="planning/index.html">Planning</a>
+      <p>Branch policy, enthusiast critique, motion plan.</p>
     </div>
   </div>
 
-  <h2>Architecture &amp; backlog</h2>
+  <h2>Layers</h2>
+  <div class="card-grid">
+    <div class="card"><a href="layers/app.html">App</a><p>Presenter, chrome, camera.</p></div>
+    <div class="card"><a href="layers/domain.html">Domain</a><p>BlockScene, graph, layout.</p></div>
+    <div class="card"><a href="layers/engine.html">Engine</a><p>IEngine, frame types.</p></div>
+    <div class="card"><a href="layers/graphics.html">Graphics</a><p>Vulkan, mesh/task, Sobel.</p></div>
+    <div class="card"><a href="layers/network.html">Network</a><p>Adapter, rings, cache.</p></div>
+    <div class="card"><a href="layers/README.html">Layers README</a><p>Markdown twin of layers hub.</p></div>
+  </div>
+
+  <h2>Platform, perf, brand</h2>
+  <div class="card-grid">
+    <div class="card"><a href="platform.html">Platform</a><p>Win32 / Linux seams.</p></div>
+    <div class="card"><a href="linux.html">Linux</a><p>CMake, headless, CI.</p></div>
+    <div class="card"><a href="perf-bottlenecks.html">Perf bottlenecks</a><p>Prepare vs GPU, F3 scopes.</p></div>
+    <div class="card"><a href="build-performance.html">Build performance</a><p>PCH, /MP, shaders.</p></div>
+    <div class="card"><a href="segment-disk-cache.html">Segment disk cache</a><p>Gzip segments, bootstrap.</p></div>
+    <div class="card"><a href="brand/alephium_palette.html">Brand palette</a><p>Alephium tokens &amp; roles.</p></div>
+  </div>
+
+  <h2>Roadmap &amp; backlog</h2>
   <div class="card-grid">
     <div class="card">
-      <a href="architecture.html">Architecture summary</a>
-      <p>Ownership diagram + links into layer HTML.</p>
+      <a href="ROADMAP.html">ROADMAP</a>
+      <p>Full backlog (from <code>ROADMAP.md</code>).</p>
     </div>
     <div class="card">
-      <a href="dev-roadmap.html">Roadmap (HTML)</a>
-      <p>Short summary; full backlog stays in Markdown.</p>
+      <a href="dev-roadmap.html">Dev roadmap (short HTML)</a>
+      <p>Alternate short summary page.</p>
     </div>
   </div>
 
-  <h2>Living Markdown (agents / design)</h2>
+  <h2>Historical designs (landed)</h2>
   <ul>
-    <li><a href="layers/README.md">docs/layers/README.md</a> — layer map + confirmation table
-        (browser: <a href="layers/index.html">layers/index.html</a>)</li>
-    <li><a href="layers/network.md">network.md</a> · <a href="layers/app.md">app.md</a> ·
-        <a href="layers/graphics.md">graphics.md</a> · <a href="layers/domain.md">domain.md</a> ·
-        <a href="layers/engine.md">engine.md</a></li>
-    <li><a href="segment-disk-cache.md">segment-disk-cache.md</a> ·
-        <a href="ROADMAP.md">ROADMAP.md</a> ·
-        <a href="platform.md">platform.md</a> ·
-        <a href="perf-bottlenecks.md">perf-bottlenecks.md</a></li>
-    <li><a href="../AGENTS.md">AGENTS.md</a> — version tags, timeline geometry gate, VnV</li>
-    <li><a href="../README.md">README.md</a> — build matrix &amp; short legend</li>
+    <li><a href="graphics-modularization-design.html">Graphics modularization</a>
+      · <a href="graphics-modularization-design.md">.md</a></li>
+    <li><a href="blockflow-confirmed-tips-design.html">Confirmed tips design</a>
+      · <a href="blockflow-confirmed-tips-design.md">.md</a></li>
+  </ul>
+
+  <h2>Repo root (outside docs/)</h2>
+  <ul>
+    <li><a href="../README.md">README.md</a> — build matrix</li>
+    <li><a href="../AGENTS.md">AGENTS.md</a> — tags, timeline gate, VnV</li>
   </ul>
 
   <div class="callout">
-    <strong>Source of truth:</strong> layer contracts and adapter policy live in
-    <code>docs/layers/*.md</code>. HTML guides are for reading in a browser and must stay
-    consistent when user-facing numbers change (see <code>AGENTS.md</code>).
+    <strong>Source of truth:</strong> Markdown under <code>docs/</code>.
+    HTML is for browser reading; re-run <code>md_to_docs_html.py</code> after MD edits
+    (or edit HTML by hand for guides that have no MD twin).
   </div>
 
-  <h2>Historical designs</h2>
-  <ul>
-    <li><a href="graphics-modularization-design.md">graphics-modularization-design.md</a> — landed</li>
-    <li><a href="blockflow-confirmed-tips-design.md">blockflow-confirmed-tips-design.md</a> — landed &amp; evolved</li>
-  </ul>
-
   <footer>
-    Part of alephium_blockviz · hub entry <code>docs/index.html</code>
+    alephium_blockviz · <code>docs/index.html</code> ·
+    work lands on <code>integration/*</code> before <code>main</code>
   </footer>
 </main>
 </body>

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Graphics performance bottlenecks</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="perf-bottlenecks.md"><code>perf-bottlenecks.md</code></a></p>
+<h1>Graphics performance bottlenecks</h1>
+<p>Living notes from IPass-scoped profiling (<code>FrameProfiler</code> / F3 HUD) and system · bench harnesses.</p>
+<p><strong>How to measure</strong></p>
+<pre><code># F3 in product → frame table (scope names = IPass::name() + subscopes)
+.\scripts\run_vnv.ps1 -Bench
+# JSON: vnv/bench/tests/out/&lt;case&gt;/actual.json  (includes confidence 0–1)
+# Dense overdraw / prepare stress:
+#   bench_frame_profiler --case fake_overdraw_end_z</code></pre>
+<p><strong>Pass scopes</strong> (stable names): <code>MainColorDepth</code>, <code>Picker</code>, <code>SelectionDepth</code>, <code>SobelAsyncCMP</code>, <code>EdgeOverlay</code>, plus <code>InstanceCullCMP</code>, <code>CubesMesh</code> / <code>CubesClassic</code>, <code>DebugMesh</code>, <code>ImGui</code>, host <code>Prepare</code> / <code>PublishUpload</code> / <code>RecordMain</code> / <code>SubmitPresent</code>.</p>
+<h2>Dense N truth (thousands of blocks)</h2>
+<p>Measured on discrete GPU, dense FakeChain (<code>fake_overdraw_end_z</code>, ~400–700 blocks in RAM):</p>
+<table>
+<tr><th>Scope</th><th>Order of magnitude</th><th>Role</th></tr>
+<tr><td><strong>Prepare</strong></td><td><strong>~18–27 ms median</strong></td><td>Host layout + scene lock + ring filter + F2B sort</td></tr>
+<tr><td>CubesMesh / MainColorDepth GPU</td><td><strong>≪ 0.1 ms</strong></td><td>Mesh + cull after 1.4.x</td></tr>
+<tr><td>PublishUpload</td><td>~0.01 ms</td><td>Instance memcpy</td></tr>
+</table>
+<p><strong>Framerate under heavy load is host-bound on the render thread</strong>, not GPU fill/overdraw and not HTTP RTT. Network I/O is already async (<code>HttpIoPool</code>); the hitch is <strong>admit → <code>graph_generation</code> → full layout rebuild inside <code>prepare</code></strong>, plus <strong>shared <code>BlockScene</code> mutex</strong> with the poller.</p>
+<p>See <a href="layers/network.md#interaction-with-graphics--frame-rate">network.md § Interaction with graphics / frame rate</a>.</p>
+<h2>Network → Prepare coupling</h2>
+<pre><code>poller: add_block / mark_confirmed  ──lock──►  graph_gen++
+render: prepare()                   ──lock──►  if gen dirty: layout.build(ALL nodes)
+                                               else: reuse layout_cache
+                                               ring instances → publish (GPU cheap)</code></pre>
+<table>
+<tr><th>Lever</th><th>Status</th></tr>
+<tr><td>Render ring 7 G (draw only)</td><td>Done — does not cap layout cost</td></tr>
+<tr><td>GPU frustum cull + mesh path</td><td>Done — GPU stays cheap</td></tr>
+<tr><td>Opaque F2B sort</td><td>Done — small Prepare add-on for early-Z</td></tr>
+<tr><td>Async HTTP + interval cap</td><td>Done</td></tr>
+<tr><td>Snapshot under lock → unlock → layout</td><td><strong>P1</strong> (plan)</td></tr>
+<tr><td>Incremental / rate-limited layout</td><td><strong>P1</strong> (plan)</td></tr>
+<tr><td>Per-pump admit budget</td><td><strong>P2</strong> (plan)</td></tr>
+<tr><td>Secondary CBs per 64s subseg</td><td><strong>Rejected</strong> — wrong layer for this bottleneck</td></tr>
+</table>
+<h2>Current picture (scope table)</h2>
+<table>
+<tr><th>Scope</th><th>Typical role</th><th>Likely bottleneck when high</th><th>Actions</th></tr>
+<tr><td><strong>Prepare</strong></td><td>Layout (full graph on gen change), filters, F2B sort</td><td>Continuous admits; large N; long mutex hold</td><td>Unlock snapshot; amortize layout; admit budget</td></tr>
+<tr><td><strong>InstanceCullCMP</strong></td><td>GPU frustum compact</td><td>Rarely hot after prepare fixed</td><td>Cull on; later DrawMeshTasksIndirect</td></tr>
+<tr><td><strong>CubesMesh / CubesClassic</strong></td><td>Cube draw</td><td>Only if Prepare fixed and fill-bound</td><td>F2B; optional opaque blend-off later</td></tr>
+<tr><td><strong>DebugMesh / MeshArenaUpload</strong></td><td>Arrows / planes</td><td>CPU rebuild every frame</td><td>Dirty flags; cap arrows</td></tr>
+<tr><td><strong>ImGui</strong></td><td>Overlay chrome</td><td>Many widgets</td><td>Clip inactive</td></tr>
+<tr><td><strong>Picker</strong></td><td>Full pre-cull list, 1×1</td><td>VS vs upload count</td><td>Keep pre-cull for pick_map IDs</td></tr>
+<tr><td><strong>Sobel chain</strong></td><td>Outline → CMP → overlay</td><td>Tip count; fence</td><td>Skip if outline empty</td></tr>
+<tr><td><strong>PublishUpload</strong></td><td>Instance copy</td><td>Large N memcpy</td><td>Latest-wins triple buffer</td></tr>
+<tr><td><strong>PresentSync</strong></td><td>vsync wait</td><td>Expected at 60 Hz</td><td>Not an algorithm issue</td></tr>
+</table>
+<h2>Soft budgets (bench confidence)</h2>
+<p>Harness soft budgets (ms median) — not absolute guarantees:</p>
+<table>
+<tr><th>Case</th><th>frame</th><th>cpu</th><th>gpu</th></tr>
+<tr><td><code>fake_steady_frame</code></td><td>8</td><td>4</td><td>5</td></tr>
+<tr><td><code>fake_stress_instances</code></td><td>12</td><td>6</td><td>8</td></tr>
+<tr><td><code>fake_overdraw_end_z</code></td><td>28</td><td>26</td><td>2</td></tr>
+<tr><td><code>fake_overdraw_end_z_move</code></td><td>30</td><td>28</td><td>2</td></tr>
+<tr><td><code>fake_bfs_end_z</code></td><td>30</td><td>28</td><td>3</td></tr>
+</table>
+<p>Confidence \(C \in [0,1]\): weighted scores with <strong>40%</strong> soft band over budget.</p>
+<ul>
+<li>\(C &lt; 0.7\): warn</li>
+<li>\(C &lt; 0.4\): fail (serious regression)</li>
+</ul>
+<p>Baselines under <code>vnv/bench/baselines/</code> remain for stricter device-local median checks via <code>run_vnv.ps1 -Bench</code>.</p>
+<h2>Mesh + task (amplification) + F2B + prepare (landed)</h2>
+<table>
+<tr><th>Decision</th><th>Rationale</th></tr>
+<tr><td>Task frustum (amplification default)</td><td>AABB cull in task; skip compute cull on that path</td></tr>
+<tr><td>Mesh face/cone cull</td><td>Emit front faces only</td></tr>
+<tr><td>Mesh-only + classic fallback</td><td>No task feature / no mesh</td></tr>
+<tr><td>Opaque F2B sort (host, N≥256)</td><td>Early-Z</td></tr>
+<tr><td>Prepare unlock + 50ms layout rate-limit</td><td>Snapshot under lock; rebuild off-lock</td></tr>
+</table>
+<p><strong>How to compare:</strong> F3 <code>Prepare</code> vs <code>CubesTaskMesh</code> / <code>CubesMesh</code> on dense End view.</p>
+<h2>Actionable backlog</h2>
+<p>1. <strong>Incremental layout</strong> — place only ΔN when possible.</p>
+<p>2. <strong>Admit budget</strong> — max blocks/ms per poll drain.</p>
+<p>3. <strong>Opaque blend-off / dual draw</strong> — if GPU shade becomes hot after Prepare is fixed.</p>
+<p>4. <strong>Debug drawer</strong> — avoid per-frame full upload when arrows stable.</p>
+<p>5. <strong>Not planned:</strong> secondary command buffers for network subsegments; depth prepass as first step.</p>
+<p>Update this table after major host/network or graphics changes with fresh bench JSON.</p>
+</main>
+</body>
+</html>

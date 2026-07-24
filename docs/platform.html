@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Platform source layout</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="platform.md"><code>platform.md</code></a></p>
+<h1>Platform source layout</h1>
+<p>OS- and WSI-specific code lives in <strong>dedicated translation units</strong> selected at build time. Shared product TUs must not include <code>windows.h</code> / X11 / GLFW headers.</p>
+<h2>Support matrix (summary)</h2>
+<table>
+<tr><th>Platform</th><th>Host</th><th>Product GUI</th><th>Headless</th><th>VnV mod</th><th>Int visual</th><th>CI</th></tr>
+<tr><td>Windows x64</td><td>Win32</td><td>Yes (MSVC <code>sln/</code>)</td><td>Yes</td><td><code>run_vnv.ps1</code></td><td>Yes</td><td>Local dual-track</td></tr>
+<tr><td>Linux x64</td><td>GLFW</td><td>Yes (CMake)</td><td>Yes</td><td><code>run_vnv.sh</code></td><td>Yes</td><td>GitHub Actions mod</td></tr>
+<tr><td>macOS</td><td>—</td><td><strong>No</strong></td><td>—</td><td>—</td><td>—</td><td>Unscheduled</td></tr>
+</table>
+<p>User-facing checklist: <a href="../README.md">README.md</a>. Linux build steps: <a href="linux.md">linux.md</a>.</p>
+<h2>Layout</h2>
+<pre><code>src/app/platform/
+  app_platform.hpp           # host window API
+  app_platform_win32.cpp     # Win32 message loop, borderless fullscreen
+  app_platform_linux.cpp     # GLFW host + F11/Esc
+
+src/graphics/platform/
+  gpu_platform.hpp           # surface, client size, ImGui platform, screenshot, log
+  gpu_platform_win32.cpp
+  gpu_platform_linux.cpp     # GLFW surface, ImGui_ImplGlfw, stderr log
+
+src/network/platform/
+  net_platform.hpp           # cache root dir, process private bytes
+  net_platform_win32.cpp
+  net_platform_linux.cpp     # XDG cache + /proc/self/status</code></pre>
+<h2>Build rules</h2>
+<table>
+<tr><th>System</th><th>Selection</th></tr>
+<tr><td>MSVC (<code>sln/*.vcxproj</code>)</td><td>Compile only <code>*_win32.cpp</code></td></tr>
+<tr><td>CMake (<code>CMakeLists.txt</code>)</td><td><code>if(WIN32)</code> → win32 else → linux</td></tr>
+</table>
+<p><strong>MSVC PCH:</strong> each <code>*_win32.cpp</code> must <code>#include</code> the layer pch first (<code>app/pch.h</code>, <code>graphics/pch.h</code>, or <code>network/pch.h</code>) — same rule as other product TUs.</p>
+<pre><code># Audits (repo root)
+python3 scripts/check_pch.py              # MSVC PCH first-include rule
+python3 scripts/check_include_boundary.py # app must not include Vulkan / gpu_platform.hpp</code></pre>
+<h3>Checklist: new platform <code>.cpp</code></h3>
+<p>1. Name <code>src/&lt;layer&gt;/platform/&lt;area&gt;_platform_&lt;os&gt;.cpp</code></p>
+<p>2. First line: <code>#include &quot;&lt;layer&gt;/pch.h&quot;</code> (MSVC projects)</p>
+<p>3. Add TU only to the correct OS list (vcxproj: win32 only; CMake: <code>if(WIN32)</code> branch)</p>
+<p>4. No product headers that change often in PCH</p>
+<p>5. Run <code>python3 scripts/check_pch.py</code> and <code>python3 scripts/check_include_boundary.py</code></p>
+<p>Linux steps: <a href="linux.md">linux.md</a>.</p>
+<p>VnV (unit / system): <a href="../vnv/TESTING.md">vnv/TESTING.md</a> · CMake targets <code>mod_domain</code> / <code>mod_network</code> / <code>int_visual</code> + <code>scripts/run_vnv.sh</code>.</p>
+<p><strong>Headless:</strong> <code>EngineCreateInfo.headless</code> → <code>VK_EXT_headless_surface</code> (no OS window). Screenshots use GPU swapchain readback (<code>TRANSFER_SRC</code> + <code>gpu_platform_write_png_rgba</code>). Shared helpers in <code>gpu_platform_common.cpp</code>.</p>
+<p>Never link both <code><em>_win32</code> and <code></em>_linux</code> into the same target. GLFW is linked on Linux/CMake only (not the MSVC product).</p>
+<h2>Include isolation (app must stay Vulkan-free)</h2>
+<p>The <strong>app</strong> MSVC project does <strong>not</strong> add <code>$(VULKAN_SDK)\Include</code>. Including any header that pulls <code>&lt;vulkan/vulkan.h&gt;</code> fails with <strong>C1083</strong>.</p>
+<table>
+<tr><th>Consumer</th><th>May include</th></tr>
+<tr><td><strong>app</strong> (product + harnesses)</td><td><code>gpu_pub_lib.h</code>, <code>app/platform/app_platform.hpp</code>, engine public APIs</td></tr>
+<tr><td><strong>app platform</strong> <code><em>_win32</code> / <code></em>_linux</code></td><td>OS headers + <strong>forward decls</strong> of thin graphics hooks — <strong>not</strong> <code>gpu_platform.hpp</code> today</td></tr>
+<tr><td><strong>graphics</strong> product TUs</td><td><code>gpu_platform.hpp</code>, Vulkan, layer pch</td></tr>
+<tr><td><strong>network</strong> product TUs</td><td><code>net_platform.hpp</code>, curl/cJSON, layer pch</td></tr>
+</table>
+<p><strong>Incident (2026-07):</strong> <code>app_platform_*.cpp</code> included <code>graphics/platform/gpu_platform.hpp</code> (which includes Vulkan) → Windows app link/compile broke. Fix: forward-declare <code>gpu_platform_configure_headless(...)</code> in the app platform TU (linked via <code>graphics.lib</code>). Longer-term: split a Vulkan-free host-hooks header (see <a href="ROADMAP.md">ROADMAP</a> P1).</p>
+<h2>Dual-track smoke</h2>
+<p>Linux CMake/CI green does <strong>not</strong> prove Windows. After any change under <code>src/*/platform/**</code>, CMake, or vcpkg platform deps:</p>
+<table>
+<tr><th>Track</th><th>Gate</th></tr>
+<tr><td><strong>Windows (required for product)</strong></td><td><code>msbuild sln\alephium_visualizer.sln /p:Configuration=Debug /p:Platform=x64</code></td></tr>
+<tr><td><strong>Linux</strong></td><td>CMake product + <code>scripts/run_vnv.sh</code> (or GitHub Actions)</td></tr>
+<tr><td><strong>PCH hygiene</strong></td><td><code>python scripts/check_pch.py</code></td></tr>
+<tr><td><strong>App include boundary</strong></td><td><code>python scripts/check_include_boundary.py</code></td></tr>
+</table>
+<h2>Contracts</h2>
+<ul>
+<li><strong>App</strong> owns the event loop and fullscreen; graphics only observes client size via <code>gpu_platform_get_window_size</code>.</li>
+<li><strong>Graphics</strong> public types stay Vulkan-free (<code>gpu_pub_lib.h</code>); native handles remain <code>void*</code> in <code>EngineCreateInfo</code>.</li>
+<li><strong>Network</strong> uses <code>net_platform_cache_root()</code> + <code>std::filesystem</code> for paths (no hard-coded separators).</li>
+</ul>
+<p>See also: <a href="linux.md">linux.md</a>, <a href="ROADMAP.md">ROADMAP.md</a>.</p>
+</main>
+</body>
+</html>

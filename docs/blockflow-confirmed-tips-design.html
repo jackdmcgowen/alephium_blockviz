@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Design: Latest BlockFlow Visualization (Confirmed vs Unconfirmed Tips)</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="blockflow-confirmed-tips-design.md"><code>blockflow-confirmed-tips-design.md</code></a></p>
+<h1>Design: Latest BlockFlow Visualization (Confirmed vs Unconfirmed Tips)</h1>
+<p>&gt; <strong>Status: HISTORICAL (landed &amp; evolved).</strong> Original PR1–PR4 (scene confirmed set, green arrows, multi-tip Sobel, HUD) shipped and then grew (frontier <code>H_c</code>, confirm walks, cyan/orange incompletes, free-main propagation).</p>
+<p>&gt; <strong>Living docs:</strong> confirmation dual-write &amp; phases → <a href="layers/network.md"><code>docs/layers/network.md</code></a>; presentation colors → <a href="layers/app.md"><code>docs/layers/app.md</code></a>; Sobel GPU path → <a href="layers/graphics.md"><code>docs/layers/graphics.md</code></a>.</p>
+<p>&gt; Paths in this draft (<code>src/adapters/…</code>, <code>VulkanEngine</code>) predate <code>src/network/alephium/</code> and <code>GraphicsSystem</code>.</p>
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td><strong>Document</strong></td><td>Latest BlockFlow tip confirmation visualization</td></tr>
+<tr><td><strong>Author</strong></td><td>_(owner)_</td></tr>
+<tr><td><strong>Date</strong></td><td>2026-07-12</td></tr>
+<tr><td><strong>Status</strong></td><td><strong>Historical (landed &amp; evolved)</strong> — was Draft rev 2; kept for dual-write / Sobel design rationale</td></tr>
+<tr><td><strong>Repo</strong></td><td><code>C:\Users\JackD\OneDrive\Desktop\alephium_blockviz</code></td></tr>
+<tr><td><strong>Branch baseline</strong></td><td><code>integration/graphics-feature/01</code> (historical)</td></tr>
+<tr><td><strong>Related</strong></td><td><a href="layers/README.md">layers</a>, tip-dep anim in <code>ScenePresenter</code>, Sobel in <code>graphics/frame/sobel_compute.*</code></td></tr>
+</table>
+<p>---</p>
+<h2>Overview</h2>
+<p>Alephium BlockFlow tips are already drawn as per-lane max-height cubes with cyan dependency arrows that grow once, hold while tip-active, and fade full-length when superseded (<code>ScenePresenter::tip_dep_tick_and_draw_</code>). Main-chain membership is already decided on the <strong>network thread</strong> via <code>MainChainCache</code> and <code>AlephiumAdapter::verify_one</code>, but that confirmed set is <strong>invisible to the render thread</strong>. Selection Sobel outline is gold and single-instance only.</p>
+<p>This design bridges confirmation into <code>BlockScene</code> under the existing scene mutex, styles tip dependency arrows cyan→green on confirm (without re-grow), and extends the async Sobel path to outline <strong>confirmed tip cubes in green</strong> when nothing is selected (gold selection still wins when a block is selected). The result: at a glance, frontier tips read as <em>unconfirmed</em> (shard color + cyan deps) vs <em>confirmed main-chain tip</em> (green Sobel + green deps).</p>
+<p><strong>Rev 2 note:</strong> Always-on multi-tip Sobel (once tips verify) is an accepted hot-path cost with a config kill-switch in PR3; poll-time <code>is_cached_main</code> → <code>mark_confirmed</code> is required; frame plumbing goes through <code>GpuFrameSlot</code> + <code>publish_frame</code>.</p>
+<p>---</p>
+<h2>Background &amp; Motivation</h2>
+<h3>Current tip visualization (working)</h3>
+<table>
+<tr><th>Component</th><th>Path</th><th>Behavior</th></tr>
+<tr><td>Per-lane tip set</td><td><code>BlockScene::tip_ids()</code> in <code>src/domain/block_scene.cpp</code></td><td>Max height among live <code>GraphNode</code>s per lane (0..15); ties keep multiple hashes</td></tr>
+<tr><td>Tip dep arrows</td><td><code>ScenePresenter::tip_dep_tick_and_draw_</code></td><td><code>DepArrowAnim</code> phases <code>Growing → Held → Fading → Gone</code>; color fixed <code>kActiveArrowColor(0.15, 0.95, 1.0, 0.95)</code> cyan; re-admit from Fading/Gone → Held <strong>without</strong> re-grow</td></tr>
+<tr><td>Ephemeral arrows</td><td>same presenter</td><td>Selection/hover gold; separate keys (`s</td><td>…<code>, </code>h</td><td>…`); grow-only</td></tr>
+<tr><td>Cube body</td><td><code>ScenePresenter::prepare</code> + <code>PolarShardLayout</code></td><td>Shard palette color; selection/hover tint only</td></tr>
+</table>
+<pre><code>stateDiagram-v2
+    [*] --&gt; Growing: new tip edge birth_sec
+    Growing --&gt; Held: age &gt;= kArrowGrowSec (0.40s)
+    Held --&gt; Fading: tip no longer active, nodes live
+    Fading --&gt; Gone: fade_age &gt;= kArrowFadeSec (0.32s)
+    Fading --&gt; Held: tip active again (no re-grow)
+    Gone --&gt; Held: tip active again (no re-grow)
+    Gone --&gt; [*]: both endpoints leave graph (erase)</code></pre>
+<h3>Confirmation exists but is network-thread-only</h3>
+<p><code>MainChainCache</code> (<code>src/adapters/alephium/main_chain_cache.*</code>):</p>
+<ul>
+<li><code>main_yes_</code> positive cache; <code>mark_main(hash)</code>; <code>query_is_main</code> → <code>get_blockflow_is_block_in_main_chain</code></li>
+<li><code>try_hashes_singleton</code> marks when exactly one hash at height</li>
+<li><strong>Contract comment:</strong> “Network thread only”</li>
+</ul>
+<p><code>AlephiumAdapter::verify_one</code> (<code>src/adapters/alephium/alephium_adapter.cpp</code>):</p>
+<p>1. Skip if <code>is_cached_main</code></p>
+<p>2. Accept via <code>try_hashes_singleton</code> / <code>query_is_main</code> → <code>stats_verified_ok_++</code></p>
+<p>3. Else if transport OK and not main: <code>scene_.remove_block</code>, optionally replace with main hash (<code>mark_main</code> + <code>add_block</code>)</p>
+<p><strong>Poll/enqueue interaction (important):</strong> <code>enqueue_verify</code> returns early if <code>is_cached_main(job.hash)</code>. The poll loop only enqueues when <code>!is_cached_main &amp;&amp; !verify_done_</code>. Therefore a hash already in <code>main_yes_</code> never re-enters <code>verify_one</code>. After <code>confirmed_</code> is erased on remove/uncle, <strong>re-admit of a still-cached main hash will not confirm again unless the poll path marks</strong> — see K11.</p>
+<p><strong>Gap:</strong> <code>ScenePresenter</code> (render thread) has no read path for “is this hash main-chain proven.” There is no <code>confirmed</code> flag on <code>GraphNode</code>, no scene-level set, and no field on <code>FrameSourceOutput</code>.</p>
+<h3>Sobel today is selection-only</h3>
+<ul>
+<li>Trigger: <code>VulkanEngine::render()</code> maps <code>selected_hash_</code> → instance index in <code>pick_id_to_hash_</code>; <code>want_sobel = selected_instance != ~0u</code></li>
+<li>Depth: <code>SobelCompute::record_selection_depth</code> draws <strong>one</strong> <code>first_instance</code> into <code>sel_depth_</code></li>
+<li>Overlay: gold highlight <code>{1.0, 0.85, 0.15, 1.35}</code> in <code>submit_frame_with_async_sobel</code></li>
+<li>Scene depth is intentionally unused (comment in <code>sobel_compute.hpp</code>)</li>
+<li>Cost today: async Sobel (extra graphics depth pass, CMP submit, overlay CB, <code>sobel_done_fence_</code> wait) runs <strong>only when a selection maps to an instance</strong></li>
+</ul>
+<h3>Pain points</h3>
+<p>1. Operators cannot see which frontier tips have finished main-chain verification.</p>
+<p>2. Confirmation work already paid on the network thread is discarded for UX.</p>
+<p>3. Green tip outline needs multi-instance depth redraw without breaking the validated async Sobel chain (fence + g→c / c→g semaphores, VUID-09600 serialization).</p>
+<p>4. Once tips verify, green Sobel becomes effectively <strong>always-on</strong> — a deliberate hot-path change (K10).</p>
+<h3>Baseline assumptions</h3>
+<ul>
+<li>Design against <strong>current HEAD of <code>integration/graphics-feature/01</code> plus uncommitted tip-dep / camera work</strong> (modified: <code>scene_presenter.<em></code>, <code>camera_controller.hpp</code>, <code>blockflow_overlay.</em></code>, <code>vulkan_engine.cpp</code>). Implementation PRs stack cleanly on that tip.</li>
+<li>Do not change orphan purge, poll cadence, or verify queue policy.</li>
+</ul>
+<h3>Codebase claims (spot-checked OK)</h3>
+<table>
+<tr><th>Claim</th><th>Verdict</th></tr>
+<tr><td><code>BlockScene::tip_ids</code> per-lane max height, ties keep multiple</td><td>True (<code>block_scene.cpp</code>)</td></tr>
+<tr><td><code>DepArrowAnim</code> phases + cyan + no re-grow</td><td>True (<code>scene_presenter.*</code>)</td></tr>
+<tr><td><code>MainChainCache</code> network-only; <code>verify_one</code> mark/remove/replace</td><td>True</td></tr>
+<tr><td>No scene confirmed flag / no <code>FrameSourceOutput</code> confirm field</td><td>True</td></tr>
+<tr><td>Sobel single <code>first_instance</code>; gold highlight ~<code>vulkan_engine.cpp:778</code></td><td>True</td></tr>
+<tr><td>Presenter holds scene mutex for full <code>prepare</code></td><td>True</td></tr>
+<tr><td>Adapter does not hold scene mutex across calls</td><td>True</td></tr>
+<tr><td>16 lanes = <code>ALPH_NUM_GROUPS²</code> (4×4)</td><td>True</td></tr>
+<tr><td><code>kMaxDepArrows = 512</code></td><td>True</td></tr>
+<tr><td>Feed cap 120 is feed-only, <strong>not</strong> a graph-size bound</td><td>True</td></tr>
+</table>
+<p>---</p>
+<h2>Goals &amp; Non-Goals</h2>
+<h3>Goals</h3>
+<p>1. <strong>Confirmed tip readability:</strong> Max-height tips that are main-chain proven get green Sobel outline (when unselected) and green dependency arrows.</p>
+<p>2. <strong>Unconfirmed tips unchanged in body color:</strong> Keep shard palette cubes; cyan dep arrows until confirm.</p>
+<p>3. <strong>Confirm transition:</strong> On confirm, arrows <strong>lerp cyan → green</strong> at full length; <strong>no re-grow</strong>. Cubes acquire green Sobel without body recolor (outline only).</p>
+<p>4. <strong>Supersede path unchanged:</strong> Existing fade-out full-length alpha fade when tip no longer active; erase only when endpoints leave the graph.</p>
+<p>5. <strong>Selection + tip arrows:</strong> Gold Sobel + gold/ephemeral selection/hover arrows still win for the selected (and hover) UX. <strong>Tip dep arrows keep cyan/green under selection; gold ephemeral arrows are additive</strong> (do not hide tip arrows when selected).</p>
+<p>6. <strong>Thread-safe bridge:</strong> Network thread marks confirmation into <code>BlockScene</code> under <code>mu_</code>; render thread reads under the same mutex already held in <code>ScenePresenter::prepare</code>.</p>
+<p>7. <strong>Correct re-admit:</strong> Poll-time and verify early-exit paths re-mark scene confirmation whenever <code>MainChainCache</code> already knows the hash is main.</p>
+<p>8. <strong>Incremental, reviewable PRs</strong> with kill-switch for always-on tip Sobel in the engine PR (see PR Plan).</p>
+<h3>Non-Goals (explicitly out of scope)</h3>
+<table>
+<tr><th>Item</th><th>Reason</th></tr>
+<tr><td>Dual simultaneous gold <strong>and</strong> green Sobel overlays</td><td>MVP: one edge buffer / one highlight color per frame</td></tr>
+<tr><td>Height-based confirm-depth heuristic as <strong>sole</strong> confirmation</td><td>Real confirm = API/<code>MainChainCache</code> only; <code>ALPH_MAIN_CHAIN_CONFIRM_DEPTH</code> remains hot-zone priority for verify queue</td></tr>
+<tr><td>Meshlets / mesh pipeline changes</td><td>Unrelated</td></tr>
+<tr><td>Changing orphan purge / uncle eviction policy</td><td>Unrelated</td></tr>
+<tr><td>Recoloring non-tip confirmed blocks</td><td>Product is <strong>tip</strong> frontier, not full main-chain paint</td></tr>
+<tr><td>Green cube fill (body albedo)</td><td>Product table: outline + arrows only</td></tr>
+<tr><td>Persisting confirm across process restart</td><td>In-memory only, like <code>main_yes_</code></td></tr>
+<tr><td>Bounding <code>confirmed_</code> tighter than erase-on-remove</td><td>Accepted growth like <code>main_yes_</code> (see Data Model)</td></tr>
+<tr><td>Throttled / every-N-frame tip Sobel</td><td>Rejected for MVP; kill-switch is the escape hatch</td></tr>
+</table>
+<p>---</p>
+<h2>Key Decisions</h2>
+<table>
+<tr><th>#</th><th>Decision</th><th>Rationale</th></tr>
+<tr><td>K1</td><td>Plumb confirmation through <strong><code>BlockScene</code></strong> (<code>mark_confirmed</code> self-locking; <code>is_confirmed_locked</code> / <code>confirmed_tip_ids_locked</code> for presenter), not by sharing <code>MainChainCache</code> with the render thread</td><td>Cache is documented network-only; scene mutex is the established adapter↔presenter bridge</td></tr>
+<tr><td>K2</td><td>Call <code>scene_.mark_confirmed(hash)</code> from the adapter on <strong>all</strong> verify-success paths (including early <code>is_cached_main</code>, singleton, query-ok, replace) <strong>without</strong> forcing extra <code>mark_main</code></td><td>Scene dual-write is the bridge; cache writes stay where they already are</td></tr>
+<tr><td>K3</td><td>Keep <code>DepArrowAnim</code> phase machine; add <strong>color target + blend</strong>, not a new phase</td><td>Confirm is a styling event; “no re-grow” already encoded in Held/Fading→Held</td></tr>
+<tr><td>K4</td><td><code>FrameSourceOutput</code> carries <strong>confirmed tip hashes</strong>; engine multi-draws them into <code>sel_depth_</code></td><td>Presenter owns domain knowledge; engine stays domain-light (hash→instance via existing <code>pick_map</code>)</td></tr>
+<tr><td>K5</td><td><strong>MVP Sobel priority:</strong> if selection active and picked instance exists → gold selection Sobel; else if confirmed tips visible → green multi-tip Sobel; else no Sobel</td><td>One overlay color/buffer; gold wins</td></tr>
+<tr><td>K6</td><td>Confirm only changes <strong>arrow color target</strong>; fade/grow timings and erase rules stay</td><td>Lowest risk to tip-dep UX</td></tr>
+<tr><td>K7</td><td>Erase confirmed on <strong><code>remove_block</code> and uncle eviction inside <code>add_block</code></strong> (shared private erase helper)</td><td>Uncle path does not call <code>remove_block</code>; easy to miss</td></tr>
+<tr><td>K8</td><td><strong>Config kill-switch in PR3</strong> (<code>visualize_confirmed_tips</code> / engine flag, default <strong>on</strong>): disables tip green Sobel only (arrows may still green from PR2)</td><td>Always-on Sobel needs runtime rollback without git-revert</td></tr>
+<tr><td>K9</td><td><strong>Frame plumbing:</strong> extend <code>GpuFrameSlot</code> + <code>publish_frame</code> to carry <code>confirmed_tip_hashes</code>; load into <code>sobel_tip_hashes_</code> in <code>apply_published_frame</code> next to <code>pick_id_to_hash_</code></td><td>Same coherence as pick_map/instance buffer; not a loose member set after prepare</td></tr>
+<tr><td>K10</td><td><strong>Always-on multi-tip Sobel accepted</strong> once tips verify and no selection: full async path (depth + CMP + overlay + fence) runs most frames</td><td>Product requires continuous green tip outlines; cost documented with perf budget and kill-switch</td></tr>
+<tr><td>K11</td><td><strong>Poll-time mark required:</strong> after each poll admit (whether <code>add_block</code> returns true or false), if <code>is_cached_main(hash)</code> → <code>scene_.mark_confirmed(hash)</code></td><td>Cached-main never re-enters <code>verify_one</code>; re-admit after erase would stay unconfirmed forever without this</td></tr>
+</table>
+<p>---</p>
+<h2>Proposed Design</h2>
+<h3>High-level data flow</h3>
+<pre><code>flowchart LR
+  subgraph net [&quot;Network thread&quot;]
+    Poll[AlephiumAdapter::poll_once]
+    Vfy[verify_one]
+    MCC[MainChainCache]
+    Poll --&gt;|is_cached_main → mark_confirmed| BS
+    Poll --&gt; Vfy
+    Vfy --&gt; MCC
+    Vfy --&gt;|mark_confirmed| BS
+  end
+
+  subgraph domain [&quot;BlockScene under mu_&quot;]
+    BS[(confirmed_ set)]
+    Graph[BlockGraph]
+    Tips[tip_ids / confirmed_tip_ids_locked]
+    BS --&gt; Tips
+    Graph --&gt; Tips
+  end
+
+  subgraph render [&quot;Render thread&quot;]
+    SP[ScenePresenter::prepare]
+    Arrows[tip_dep_tick_and_draw_ color blend]
+    FSO[FrameSourceOutput]
+    Pub[publish_frame → GpuFrameSlot]
+    Apply[apply_published_frame]
+    VE[VulkanEngine::render]
+    Sobel[SobelCompute multi-instance depth]
+    SP --&gt; Arrows
+    SP --&gt; FSO
+    FSO --&gt; Pub
+    Pub --&gt; Apply
+    Apply --&gt; VE
+    VE --&gt; Sobel
+  end
+
+  BS --&gt; SP</code></pre>
+<h3>1. Domain: confirmed set on <code>BlockScene</code></h3>
+<p><strong>Files:</strong> <code>src/domain/block_scene.hpp</code>, <code>src/domain/block_scene.cpp</code></p>
+<p>#### Final public API (normative)</p>
+<pre><code>// Network thread / adapter: self-locking (like add_block / remove_block).
+// Do NOT call while already holding mutex().
+void mark_confirmed(const NodeId&amp; hash);
+
+// Presenter only: call while holding scene.mutex().
+// Self-locking overloads intentionally omitted for these two (deadlock risk).
+bool is_confirmed_locked(const NodeId&amp; hash) const;
+std::vector&lt;NodeId&gt; confirmed_tip_ids_locked() const;</code></pre>
+<p>Private (implementation detail):</p>
+<pre><code>void mark_confirmed_unlocked_(const NodeId&amp; hash);   // mu_ held
+void erase_confirmed_unlocked_(const NodeId&amp; hash);  // mu_ held — used by remove + uncle
+bool is_confirmed_unlocked_(const NodeId&amp; hash) const;
+std::vector&lt;NodeId&gt; confirmed_tip_ids_unlocked_() const;</code></pre>
+<p><code>tip_ids()</code> remains as today (graph snapshot only; does not take <code>mu_</code>). <code>confirmed_tip_ids_locked</code> filters tip results by <code>confirmed_</code> under the caller&#x27;s held lock.</p>
+<p>#### Storage</p>
+<pre><code>std::unordered_set&lt;NodeId&gt; confirmed_; // guarded by mu_</code></pre>
+<p>#### Semantics</p>
+<table>
+<tr><th>API / path</th><th>Behavior</th></tr>
+<tr><td><code>mark_confirmed(h)</code></td><td>No-op if <code>h.empty()</code>; insert into <code>confirmed_</code>. Idempotent. <strong>Does not require graph membership</strong> (safe if mark races before/after add).</td></tr>
+<tr><td><code>is_confirmed_locked(h)</code></td><td>Lookup in <code>confirmed_</code>; caller holds <code>mu_</code></td></tr>
+<tr><td><code>confirmed_tip_ids_locked()</code></td><td>Live tips ∩ <code>confirmed_</code>; caller holds <code>mu_</code></td></tr>
+<tr><td><code>remove_block(h)</code></td><td>Existing remove + <code>erase_confirmed_unlocked_(h)</code> under same lock</td></tr>
+<tr><td>Uncle eviction in <code>add_block</code></td><td>For <strong>each</strong> hash in <code>removed_uncles</code>, call <code>erase_confirmed_unlocked_(unc)</code> under the same <code>mu_</code> as the graph apply — <strong>not</strong> via <code>remove_block</code></td></tr>
+</table>
+<pre><code>// Inside add_block, after computing removed_uncles / applying delta:
+for (const NodeId&amp; unc : removed_uncles)
+    erase_confirmed_unlocked_(unc);</code></pre>
+<p><strong>Locking (normative):</strong></p>
+<table>
+<tr><th>Caller</th><th>Holds <code>mu_</code>?</th><th>API</th></tr>
+<tr><td>Adapter network thread</td><td>No</td><td><code>mark_confirmed</code> (self-locking)</td></tr>
+<tr><td><code>ScenePresenter::prepare</code></td><td>Yes for full prepare</td><td><code>is_confirmed_locked</code> / <code>confirmed_tip_ids_locked</code> only</td></tr>
+<tr><td>Never</td><td>—</td><td>Do not add a self-locking <code>is_confirmed()</code> used from prepare</td></tr>
+</table>
+<h3>2. Adapter: mark confirmation (scene-only dual-write)</h3>
+<p><strong>File:</strong> <code>src/adapters/alephium/alephium_adapter.cpp</code> (+ optional private helper in <code>.hpp</code>)</p>
+<p>#### Helper (scene only — preferred)</p>
+<pre><code>// Private. Does NOT call mark_main — cache writes stay at existing sites.
+void AlephiumAdapter::mark_scene_confirmed_(const std::string&amp; hash)
+{
+    if (hash.empty()) return;
+    scene_.mark_confirmed(hash);
+    ++stats_confirmed_marks_;
+}</code></pre>
+<p>Do <strong>not</strong> wrap <code>mark_main</code> inside this helper: call sites that already ran <code>try_hashes_singleton</code> / <code>query_is_main</code> / explicit <code>mark_main</code> would double-write the cache and obscure the dual-write audit.</p>
+<p>#### Dual-write matrix (required — PR1 acceptance)</p>
+<table>
+<tr><th>Branch</th><th>Approx. site</th><th>Cache write (existing)</th><th>Scene mark (required)</th></tr>
+<tr><td>Early <code>is_cached_main(job.hash)</code></td><td><code>verify_one</code> start</td><td>already in cache</td><td><code>mark_scene_confirmed_(job.hash)</code> then return</td></tr>
+<tr><td><code>try_hashes_singleton</code> success</td><td><code>verify_one</code></td><td>singleton <code>mark_main</code>s</td><td><code>mark_scene_confirmed_(job.hash)</code></td></tr>
+<tr><td><code>query_is_main</code> success</td><td><code>verify_one</code></td><td>query <code>mark_main</code>s</td><td><code>mark_scene_confirmed_(job.hash)</code></td></tr>
+<tr><td>Replace: after choosing <code>main_hash</code></td><td><code>verify_one</code> end</td><td><code>mark_main(main_hash)</code> (existing)</td><td>After <code>add_block(block)</code>, <strong>always</strong> <code>mark_scene_confirmed_(main_hash)</code> — <strong>ignore</strong> <code>add_block</code> bool</td></tr>
+<tr><td>Poll admit / re-see</td><td><code>poll_once</code> loop</td><td>none here</td><td>After <code>add_block</code> <strong>or when hash already live</strong>: if <code>is_cached_main(block_hash)</code> → <code>mark_scene_confirmed_(block_hash)</code></td></tr>
+</table>
+<p><strong>Poll path (K11 — required, not optional):</strong></p>
+<pre><code>const bool added = scene_.add_block(block);
+// Re-admit or first admit of cached-main must re-populate confirmed_
+// (enqueue_verify skips is_cached_main; verify_one will never run).
+if (main_chain_cache_.is_cached_main(block_hash))
+    mark_scene_confirmed_(block_hash);
+// ... enqueue_verify only if !is_cached_main &amp;&amp; !verify_done_ (unchanged)
+(void)added; // mark does not depend on add result</code></pre>
+<p><strong>Replace path:</strong></p>
+<pre><code>main_chain_cache_.mark_main(main_hash);  // existing
+// ... fetch block ...
+scene_.add_block(block);                 // may return false if already live
+mark_scene_confirmed_(main_hash);        // ALWAYS — do not gate on add_block return</code></pre>
+<p><strong>Do not</strong> mark on transport failure or NOT-main remove path.</p>
+<h3>3. Presenter: confirmed arrow styling</h3>
+<p><strong>Files:</strong> <code>src/app/scene_presenter.hpp</code>, <code>src/app/scene_presenter.cpp</code></p>
+<p>#### Constants</p>
+<pre><code>// existing
+const glm::vec4 kActiveArrowColor(0.15f, 0.95f, 1.0f, 0.95f);   // cyan unconfirmed
+// new
+const glm::vec4 kConfirmedArrowColor(0.20f, 0.95f, 0.35f, 0.95f); // green main-chain tip
+constexpr float kConfirmBlendSec = 0.35f; // cyan→green lerp duration</code></pre>
+<p>#### <code>DepArrowAnim</code> extensions</p>
+<pre><code>struct DepArrowAnim
+{
+    // ... existing fields ...
+    bool  tip_confirmed     = false; // last known confirm state for edge&#x27;s tip (to hash)
+    float confirm_blend_t   = 0.f;   // 0 = cyan, 1 = green
+    float confirm_blend_from = 0.f;  // value when transition started
+    float confirm_blend_start_sec = -1.f; // &lt;0 = no active blend
+};</code></pre>
+<p>#### Confirm blend tick (normative)</p>
+<p><strong>Only update confirm blend for keys in <code>active_keys</code> (Growing/Held refresh).</strong></p>
+<p><strong>Fading / Gone keep the last <code>confirm_blend_t</code> (freeze on fade).</strong> Never reset <code>birth_sec</code> or force <code>Growing</code> for confirm.</p>
+<p>For each active edge with tip <code>e.to</code>:</p>
+<pre><code>bool conf = scene_.is_confirmed_locked(e.to);
+if (conf != anim.tip_confirmed) {
+  anim.tip_confirmed = conf;
+  anim.confirm_blend_from = anim.confirm_blend_t;
+  anim.confirm_blend_start_sec = now;
+}
+float target = conf ? 1.f : 0.f;
+if (anim.confirm_blend_start_sec &gt;= 0.f) {
+  float u = clamp((now - confirm_blend_start_sec) / kConfirmBlendSec, 0, 1);
+  anim.confirm_blend_t = mix(confirm_blend_from, target, u);
+  if (u &gt;= 1) confirm_blend_start_sec = -1;
+} else {
+  anim.confirm_blend_t = target;
+}</code></pre>
+<p>#### Draw color (all phases drawn)</p>
+<pre><code>glm::vec4 color = glm::mix(kActiveArrowColor, kConfirmedArrowColor, anim.confirm_blend_t);
+color.a = alpha; // existing phase alpha still applies</code></pre>
+<p>#### Selection interaction</p>
+<p>When a block is selected, <strong>still run</strong> tip-dep tick/draw with cyan/green. Gold ephemeral selection arrows are <strong>additive</strong> (separate keys). Do not skip tip-dep drawing under selection.</p>
+<h3>4. Frame output: tip hashes for Sobel</h3>
+<p><strong>File:</strong> <code>src/engine/blockviz_engine_api.hpp</code></p>
+<pre><code>struct FrameSourceOutput
+{
+    std::vector&lt;GpuInstance&gt; instances;
+    std::vector&lt;std::string&gt; pick_map;
+    bool      has_look_target = false;
+    glm::vec3 look_target_pos{ 0.f };
+    UiSnapshot ui{};
+
+    // Confirmed tip hashes still present in this frame&#x27;s pick_map (frustum-culled out = omitted).
+    // Engine maps hash → instance index for multi-draw Sobel depth.
+    std::vector&lt;std::string&gt; confirmed_tip_hashes;
+};</code></pre>
+<p><strong>Populate in <code>ScenePresenter::prepare</code></strong> (while holding scene mutex), after instance build:</p>
+<pre><code>const auto conf_tips = scene_.confirmed_tip_ids_locked();
+std::unordered_set&lt;std::string&gt; conf_set(conf_tips.begin(), conf_tips.end());
+for (const auto&amp; h : out.pick_map) {
+  if (conf_set.count(h))
+    out.confirmed_tip_hashes.push_back(h);
+}
+// Cap push to max 32 (16 lanes + ties)
+if (out.confirmed_tip_hashes.size() &gt; 32)
+  out.confirmed_tip_hashes.resize(32);</code></pre>
+<p>Do <strong>not</strong> put unconfirmed tips in this list.</p>
+<h3>5. Engine + Sobel: multi-instance green tips</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li><code>src/engine/blockviz_engine_api.hpp</code> / <code>IBlockvizEngine::publish_frame</code> signature</li>
+<li><code>src/engine/vulkan_engine.hpp</code> / <code>.cpp</code> (<code>GpuFrameSlot</code>, <code>publish_frame</code>, <code>apply_published_frame</code>, <code>render</code>)</li>
+<li><code>src/engine/sobel_compute.hpp</code> / <code>.cpp</code></li>
+<li><code>src/app/scene_presenter.cpp</code> (fill <code>confirmed_tip_hashes</code>)</li>
+<li>Config surface for kill-switch (see K8)</li>
+</ul>
+<p>#### 5.1 Always-on Sobel cost (K10)</p>
+<p><strong>Today:</strong> <code>want_sobel</code> is true only when <code>selected_hash_</code> maps to an instance.</p>
+<p><strong>After this feature:</strong> whenever confirmed tips are visible and nothing is selected (and kill-switch is on), every such frame takes the <strong>full</strong> async Sobel path:</p>
+<table>
+<tr><th>Cost component</th><th>Notes</th></tr>
+<tr><td>Selection-depth graphics work</td><td>One clear + ≤32 indexed cube draws</td></tr>
+<tr><td>Extra queue submits</td><td>Graphics (depth) → CMP (dispatch) → Graphics (overlay)</td></tr>
+<tr><td><code>sobel_done_fence_</code></td><td>Serializes chains so shared <code>sel_depth_</code> / edge images are not rewritten mid-flight (VUID-09600)</td></tr>
+<tr><td>Overlay CB</td><td>Fullscreen edge composite</td></tr>
+</table>
+<p>Depth draws (≤32) are <strong>not</strong> the dominant cost; fence waits + extra submits + overlay dominate. In steady state after tips verify, this is <strong>essentially every frame</strong> with no selection — a major behavioral change vs selection-only Sobel.</p>
+<p><strong>Accepted for MVP</strong> with:</p>
+<p>1. Config kill-switch (default on) in <strong>PR3</strong></p>
+<p>2. Perf acceptance criteria (below)</p>
+<p>3. No every-N-frame throttle in MVP (would flicker outlines)</p>
+<p><strong>Perf acceptance criteria (PR3):</strong></p>
+<table>
+<tr><th>Criterion</th><th>Target</th></tr>
+<tr><td>Before/after frame time</td><td>Measure median frame time with validation layers <strong>off</strong>, unselected, ≥16 confirmed tips visible; document delta. Soft target: <strong>&amp;lt; 2 ms median regression</strong> on the project&#x27;s usual debug/release workstation; if exceeded, default kill-switch remains available and investigate fence/wait overlap</td></tr>
+<tr><td>Continuous Sobel soak</td><td>≥ <strong>1 minute</strong> unselected with confirmed tips: no hang, no growing latency, no validation timeouts</td></tr>
+<tr><td>Selection path</td><td>Selecting a block still gold-only; deselect restores green without stutter</td></tr>
+<tr><td>Validation</td><td>Debug build clean under continuous tip Sobel (same barrier pattern as today)</td></tr>
+</table>
+<p>#### 5.2 Frame plumbing (K9 — normative)</p>
+<p>Mirror pick_map coherence end-to-end:</p>
+<pre><code>// GpuFrameSlot (vulkan_engine.hpp) — extend
+struct GpuFrameSlot {
+  std::vector&lt;GpuInstance&gt; instances;
+  CameraUBO camera{};
+  uint64_t client_seq = 0;
+  std::vector&lt;std::string&gt; pick_map;
+  std::vector&lt;std::string&gt; confirmed_tip_hashes; // NEW
+};
+
+// IBlockvizEngine / VulkanEngine::publish_frame
+void publish_frame(const FrameSubmit&amp; frame,
+                   const std::vector&lt;std::string&gt;&amp; pick_map,
+                   const std::vector&lt;std::string&gt;&amp; confirmed_tip_hashes);
+
+// apply_published_frame:
+//   pick_id_to_hash_ = slot.pick_map;
+//   sobel_tip_hashes_ = slot.confirmed_tip_hashes;</code></pre>
+<p><strong>Call site in <code>render_loop</code></strong> (after <code>prepare</code>):</p>
+<pre><code>publish_frame(submit, fout.pick_map, fout.confirmed_tip_hashes);</code></pre>
+<p>Empty frame-source branch: publish empty <code>confirmed_tip_hashes</code> (clear tips for that frame).</p>
+<p>Do <strong>not</strong> assign a loose member only after prepare outside <code>publish_frame</code> / <code>apply_published_frame</code> — tip hashes must stay paired with the same <code>pick_map</code> / instance buffer the multi-draw indexes into.</p>
+<p>#### 5.3 <code>want_sobel</code> rewrite and submit signature</p>
+<pre><code>// In render(), after apply has filled pick_id_to_hash_ + sobel_tip_hashes_:
+SobelFrameRequest req{};
+bool want_sobel = false;
+
+if (sobel_.ready() &amp;&amp; visualize_confirmed_tips_ /* kill-switch; selection gold always on */) {
+  // Selection gold always attempts when selected maps; kill-switch only gates *green tip* mode.
+}
+// Cleaner split:
+uint32_t selected_instance = resolve_selected_instance(); // ~0u if none
+std::vector&lt;uint32_t&gt; tip_indices = resolve_hashes(sobel_tip_hashes_, pick_id_to_hash_);
+
+if (sobel_.ready() &amp;&amp; selected_instance != ~0u) {
+  req.mode = SobelFrameRequest::Mode::SelectionGold;
+  req.instance_indices = { selected_instance };
+  want_sobel = true;
+} else if (sobel_.ready() &amp;&amp; visualize_confirmed_tips_ &amp;&amp; !tip_indices.empty()) {
+  req.mode = SobelFrameRequest::Mode::ConfirmedTipsGreen;
+  req.instance_indices = std::move(tip_indices); // already capped ≤32
+  want_sobel = true;
+}
+
+// ...
+if (want_sobel)
+  submit_frame_with_async_sobel(frame_index, image_index, graphics_cb,
+                                image_available, render_finished, req);</code></pre>
+<pre><code>struct SobelFrameRequest {
+  enum class Mode { SelectionGold, ConfirmedTipsGreen } mode;
+  std::vector&lt;uint32_t&gt; instance_indices; // size 1 for selection; 1..32 for tips
+};
+
+void submit_frame_with_async_sobel(..., const SobelFrameRequest&amp; req);</code></pre>
+<p>Highlight:</p>
+<pre><code>const float kGoldHighlight[4]  = { 1.0f, 0.85f, 0.15f, 1.35f };
+const float kGreenHighlight[4] = { 0.25f, 0.95f, 0.40f, 1.35f };
+// SelectionGold → kGold; ConfirmedTipsGreen → kGreen</code></pre>
+<p><strong>Kill-switch semantics:</strong> <code>visualize_confirmed_tips</code> (config or engine member, default <strong>true</strong>) disables <strong>ConfirmedTipsGreen</strong> only. Selection gold Sobel is unaffected. Arrow green (PR2) is independent (presenter).</p>
+<pre><code>flowchart TD
+  A[sobel_.ready?] --&gt;|no| N[No Sobel path]
+  A --&gt;|yes| B{selected_hash in pick_map?}
+  B --&gt;|yes| G[Gold single-instance depth + overlay]
+  B --&gt;|no| K{visualize_confirmed_tips?}
+  K --&gt;|no| N
+  K --&gt;|yes| C{any confirmed_tip resolved to instance?}
+  C --&gt;|yes| Gr[Green multi-instance depth + overlay]
+  C --&gt;|no| N</code></pre>
+<p>#### 5.4 Multi-instance depth draw (normative)</p>
+<p>Extend <code>SelectionDepthDrawParams</code>:</p>
+<pre><code>struct SelectionDepthDrawParams
+{
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkDescriptorSet ubo_set = VK_NULL_HANDLE;
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VkBuffer instance_buffer = VK_NULL_HANDLE;
+    VkBuffer index_buffer = VK_NULL_HANDLE;
+    const uint32_t* instance_indices = nullptr;
+    uint32_t instance_index_count = 0; // required ≥1 when recording for sobel
+    uint32_t index_count = 36;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};</code></pre>
+<p><strong>Hard rule — single pass only:</strong></p>
+<pre><code>one vkCmdBeginRendering
+  one depth CLEAR (LOAD_OP_CLEAR)          // existing
+  bind pipeline / buffers / UBO once
+  for i in 0 .. instance_index_count-1:    // N ≤ 32
+    vkCmdDrawIndexed(..., instance_indices[i])
+one vkCmdEndRendering
+then existing record_sel_depth_release_for_compute</code></pre>
+<p><strong>Forbidden:</strong> second <code>BeginRendering</code>, re-clear, or intermediate barriers that wipe <code>sel_depth_</code> between tip draws.</p>
+<p>Depth test <code>LESS</code> (existing pipeline) forms a union silhouette. Overlay highlight is push-constant — <strong>no shader change</strong>.</p>
+<p>Async chain (fence serialize, g2c / cfin semaphores) <strong>unchanged</strong> if multi-draw stays inside this single depth pass.</p>
+<h3>6. Cube body behavior (product table)</h3>
+<table>
+<tr><th>State</th><th>Cube body</th><th>Outline</th><th>Dep arrows</th></tr>
+<tr><td>Unconfirmed tip</td><td>Shard color</td><td>none (unless selected)</td><td>cyan</td></tr>
+<tr><td>Confirmed tip</td><td>Shard color (no green fill)</td><td>green Sobel if unselected + kill-switch on</td><td>green (blended)</td></tr>
+<tr><td>Unconfirmed → confirmed</td><td>unchanged body</td><td>green Sobel appears next frames</td><td>lerp cyan→green</td></tr>
+<tr><td>Tip superseded</td><td>existing</td><td>none (no longer tip)</td><td>full-length fade; <strong>frozen</strong> last blend color</td></tr>
+<tr><td>Selected (any)</td><td>white mix tint (existing)</td><td><strong>gold</strong> Sobel</td><td>gold ephemeral <strong>+</strong> tip arrows still cyan/green (additive)</td></tr>
+</table>
+<h3>Architecture diagram (layers)</h3>
+<pre><code>flowchart TB
+  subgraph app_layer [&quot;app&quot;]
+    SP[ScenePresenter]
+    Overlay[BlockflowOverlay]
+  end
+  subgraph domain_layer [&quot;domain&quot;]
+    Scene[BlockScene + confirmed_]
+    Graph[BlockGraph]
+    Layout[PolarShardLayout]
+  end
+  subgraph adapter_layer [&quot;adapters/alephium&quot;]
+    Adapter[AlephiumAdapter]
+    MCC[MainChainCache]
+  end
+  subgraph engine_layer [&quot;engine&quot;]
+    VE[VulkanEngine + GpuFrameSlot]
+    Sobel[SobelCompute]
+    API[FrameSourceOutput]
+  end
+
+  Adapter --&gt;|mark_confirmed / add / remove| Scene
+  Adapter --&gt; MCC
+  SP --&gt;|locked read| Scene
+  SP --&gt; Layout
+  SP --&gt; API
+  VE --&gt; SP
+  VE --&gt; Sobel
+  API --&gt;|publish_frame| VE</code></pre>
+<h3>Sequence: confirm a live tip</h3>
+<pre><code>sequenceDiagram
+  participant Net as Network thread
+  participant Ad as AlephiumAdapter
+  participant MCC as MainChainCache
+  participant BS as BlockScene
+  participant SP as ScenePresenter
+  participant Pub as publish_frame / GpuFrameSlot
+  participant VE as VulkanEngine
+  participant SC as SobelCompute
+
+  Net-&gt;&gt;Ad: drain_verify → verify_one(job)
+  Ad-&gt;&gt;MCC: query_is_main(hash)
+  MCC--&gt;&gt;Ad: true + mark_main
+  Ad-&gt;&gt;BS: mark_confirmed(hash)
+  Note over BS: confirmed_ insert under mu_
+
+  VE-&gt;&gt;SP: prepare(fin, fout)
+  SP-&gt;&gt;BS: lock mutex; confirmed_tip_ids_locked
+  SP-&gt;&gt;SP: tip_dep blend → green
+  SP--&gt;&gt;VE: fout.confirmed_tip_hashes
+  VE-&gt;&gt;Pub: publish_frame(instances, pick_map, confirmed_tip_hashes)
+  Pub-&gt;&gt;VE: apply_published_frame → sobel_tip_hashes_
+  VE-&gt;&gt;SC: record_selection_depth one clear + N draws
+  VE-&gt;&gt;SC: dispatch Sobel + green overlay</code></pre>
+<h3>Performance / scale estimates</h3>
+<table>
+<tr><th>Quantity</th><th>Expected</th><th>Notes</th></tr>
+<tr><td>Lanes</td><td>16</td><td><code>ALPH_NUM_GROUPS²</code> layout</td></tr>
+<tr><td>Confirmed tips drawn</td><td>≤16 typical; ≤32 hard cap</td><td>Ties at max height rare</td></tr>
+<tr><td>Extra depth draws</td><td>≤32 indexed draws</td><td>Cheap vs full async path</td></tr>
+<tr><td>Full async Sobel path</td><td><strong>Most frames</strong> once tips confirmed &amp; unselected</td><td>Dominant: fence + 2 extra submits + overlay (K10)</td></tr>
+<tr><td><code>confirmed_</code> set size</td><td>Unbounded growth like <code>main_yes_</code></td><td>Erase on remove/uncle; <strong>not</strong> capped by feed (120) or graph prune (unused today). Drawing still safe: tip filter + pick_map</td></tr>
+<tr><td>Arrow blend cost</td><td>O(active tip edges)</td><td>Already capped <code>kMaxDepArrows = 512</code></td></tr>
+<tr><td>Latency to green</td><td>verify queue + poll; hot zone prioritized</td><td>Visual blend 0.35s after mark</td></tr>
+</table>
+<p>---</p>
+<h2>API / Interface Changes</h2>
+<h3><code>BlockScene</code> (<code>block_scene.hpp</code>) — final surface</h3>
+<pre><code>// Self-locking — network / adapter only
+void mark_confirmed(const NodeId&amp; hash);
+
+// Caller must hold mutex() — presenter only
+bool is_confirmed_locked(const NodeId&amp; hash) const;
+std::vector&lt;NodeId&gt; confirmed_tip_ids_locked() const;</code></pre>
+<p>No public self-locking <code>is_confirmed()</code> in MVP (avoids accidental use from prepare).</p>
+<h3><code>FrameSourceOutput</code> / <code>publish_frame</code></h3>
+<pre><code>// FrameSourceOutput
+std::vector&lt;std::string&gt; confirmed_tip_hashes;
+
+// IBlockvizEngine
+void publish_frame(const FrameSubmit&amp; frame,
+                   const std::vector&lt;std::string&gt;&amp; pick_map,
+                   const std::vector&lt;std::string&gt;&amp; confirmed_tip_hashes);</code></pre>
+<h3><code>SelectionDepthDrawParams</code> / <code>SobelCompute</code></h3>
+<ul>
+<li>Multi-instance indices; <strong>one clear + N draws</strong> in a single rendering scope.</li>
+<li>No shader changes (highlight push-constant).</li>
+</ul>
+<h3><code>VulkanEngine</code></h3>
+<ul>
+<li><code>GpuFrameSlot.confirmed_tip_hashes</code></li>
+<li><code>sobel_tip_hashes_</code> loaded in <code>apply_published_frame</code></li>
+<li><code>SobelFrameRequest</code> + rewritten <code>want_sobel</code></li>
+<li><code>visualize_confirmed_tips_</code> kill-switch (default true)</li>
+</ul>
+<h3>Unchanged public surfaces</h3>
+<ul>
+<li><code>IBlockvizEngine</code> selection API (aside from <code>publish_frame</code> arity)</li>
+<li><code>MainChainCache</code> network-only contract</li>
+<li><code>DebugDrawer::add_arrow</code> signature</li>
+<li>Cube instance layout (<code>GpuInstance</code>)</li>
+</ul>
+<p>---</p>
+<h2>Data Model Changes</h2>
+<h3>In-memory only</h3>
+<pre><code>BlockScene {
+  ...
+  unordered_set&lt;NodeId&gt; confirmed_;  // NEW, under mu_
+}</code></pre>
+<p>No disk, no JSON schema, no <code>GraphNode</code> field (keeps graph chain-agnostic; confirmation is Alephium adapter policy projected into scene).</p>
+<h3>Migration</h3>
+<p>None. Cold start: tips cyan until first successful verify <strong>or</strong> poll-time cached-main mark.</p>
+<h3>Consistency rules</h3>
+<p>1. <code>confirmed_</code> may contain hashes not currently in the graph (mark without membership). <strong>Accepted</strong> — same spirit as <code>main_yes_</code> growth. Drawing is safe: <code>confirmed_tip_ids_locked</code> ∩ live tips ∩ pick_map.</p>
+<p>2. On remove <strong>and</strong> uncle eviction: erase from <code>confirmed_</code>.</p>
+<p>3. <code>MainChainCache::main_yes_</code> and <code>confirmed_</code> diverge only if a dual-write path is missed — dual-write matrix is the audit list.</p>
+<p>4. <strong>Growth:</strong> Graph <code>prune()</code> is not called from the adapter today; live graph grows with admits minus uncles/NOT-main removes. <code>confirmed_</code> mirrors marks with erase-on-remove only — <strong>unbounded like <code>main_yes_</code></strong>. Not urgent at current scale; not enforced to <code>&lt;&lt;1e5</code>. Optional future: mark only when <code>graph_.contains(h)</code> or GC non-tip confirmed after N frames — out of MVP.</p>
+<p>---</p>
+<h2>Alternatives Considered</h2>
+<h3>A1. Share <code>MainChainCache</code> with render thread (mutex it)</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>No second set</td><td>Cache is network-oriented (HTTP, tips array); mixes layers</td></tr>
+<tr><td>Single source of truth</td><td>Presenter would depend on adapters/alephium</td></tr>
+<tr><td></td><td>Risk of blocking render on any future network call misuse</td></tr>
+</table>
+<p><strong>Rejected</strong> in favor of scene bridge (K1).</p>
+<h3>A2. Put <code>bool main_chain</code> on <code>GraphNode</code></h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>Travels with snapshots</td><td>Graph is chain-agnostic by design (<code>block_graph.hpp</code> header)</td></tr>
+<tr><td>Layout could color by flag</td><td>Confirmation is Alephium-specific policy</td></tr>
+</table>
+<p><strong>Rejected</strong> for layering; optional later if multi-chain shares a generic “finalized” bit.</p>
+<h3>A3. Color tip cube body green instead of Sobel</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>No Sobel multi-draw work</td><td>Fights shard identity; product asked for Sobel outline</td></tr>
+<tr><td>Simpler engine path</td><td>Less consistent with selection language (outline = focus/state)</td></tr>
+</table>
+<p><strong>Rejected</strong> for product fidelity; may remain a debug toggle later.</p>
+<h3>A4. Dual Sobel (gold + green simultaneous)</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>Select confirmed tip and still see green tips</td><td>Needs two depth targets or multipass overlays; more barriers</td></tr>
+<tr><td></td><td>Out of scope per product non-goals</td></tr>
+</table>
+<p><strong>Deferred.</strong></p>
+<h3>A5. Infer confirmation from height depth only (<code>tip - height &gt;= D</code>)</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>No API bridge</td><td>False positives/negatives vs real main-chain</td></tr>
+<tr><td></td><td>Product: API-proven only</td></tr>
+</table>
+<p><strong>Rejected</strong> as sole signal; hot-zone depth remains verify <strong>priority</strong> only.</p>
+<h3>A6. Non-Sobel tip outline (debug-draw wire / edge quads)</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>Avoids always-on async Sobel cost</td><td>Different look from selection gold edges</td></tr>
+<tr><td>Simpler engine; no fence path</td><td>Product language is Sobel parity with selection</td></tr>
+<tr><td>Good emergency fallback</td><td>Two outline systems to maintain</td></tr>
+</table>
+<p><strong>Rejected for MVP</strong> in favor of Sobel parity with selection (K10). Kill-switch reverts to arrows-only confirmation (PR2) if Sobel cost is unacceptable. Could revisit if perf budget fails.</p>
+<h3>A7. Self-locking <code>is_confirmed()</code> + recursive mutex</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>Single API</td><td>Easy to reintroduce deadlocks; recursive mutex hides lock-order bugs</td></tr>
+</table>
+<p><strong>Rejected</strong> — <code>_locked</code> suffix only for presenter reads.</p>
+<p>---</p>
+<h2>Security &amp; Privacy Considerations</h2>
+<table>
+<tr><th>Topic</th><th>Assessment</th></tr>
+<tr><td>Threat model</td><td>Local visualizer; no new network endpoints</td></tr>
+<tr><td>Auth</td><td>Unchanged (existing node URL in <code>config.json</code>)</td></tr>
+<tr><td>Data handling</td><td>Block hashes only in <code>confirmed_</code>; same sensitivity as graph</td></tr>
+<tr><td>Injection</td><td>Hashes already treated as opaque strings from cJSON</td></tr>
+<tr><td>DoS</td><td>Cap multi-draw count; confirmed set unbounded but string hashes only</td></tr>
+</table>
+<p>No PII. No new secrets.</p>
+<p>---</p>
+<h2>Observability</h2>
+<h3>Logging</h3>
+<p><strong>PR1 required:</strong> Include <code>confirmed_marks</code> on the existing poll summary line so the counter is visible in normal runs:</p>
+<pre><code>[adapter] seen=%d added=%d verify_queued+=%d skipped_bad=%d
+          q=%zu verified_ok=%d removed=%d replaced=%d refilled=%d confirmed_marks=%d</code></pre>
+<p>Optional rate-limited per-hash log for replace path only:</p>
+<pre><code>[adapter] confirmed mark %s (replace)</code></pre>
+<h3>Metrics (adapter)</h3>
+<table>
+<tr><th>Counter</th><th>Meaning</th></tr>
+<tr><td><code>stats_confirmed_marks_</code></td><td>Times <code>mark_scene_confirmed_</code> called</td></tr>
+<tr><td>existing <code>stats_verified_ok_</code></td><td>Verify success</td></tr>
+</table>
+<p>Expose via getter if other stats are exposed; at minimum print on poll line.</p>
+<h3>Debug HUD (optional PR4)</h3>
+<ul>
+<li>Overlay line: <code>confirmed_tips=N / tips=M</code></li>
+<li>Not required for MVP.</li>
+</ul>
+<h3>Validation</h3>
+<ul>
+<li>Run with Vulkan validation layers (Debug). Multi-draw must remain inside the same depth pass / same barrier pattern.</li>
+<li>Use project skill <code>vulkan-validator</code> before push of engine PR.</li>
+<li>Continuous tip-Sobel soak ≥1 min (PR3).</li>
+</ul>
+<h3>Alerting</h3>
+<p>N/A (desktop tool).</p>
+<p>---</p>
+<h2>Rollout Plan</h2>
+<h3>Staging</h3>
+<p>1. <strong>PR1</strong> domain + adapter dual-write matrix (no visual change) — poll marks + verify marks; logs show <code>confirmed_marks</code>.</p>
+<p>2. <strong>PR2</strong> arrow green blend — visual confirm without Sobel.</p>
+<p>3. <strong>PR3</strong> <code>GpuFrameSlot</code> plumbing + multi-instance green Sobel + <strong>kill-switch default on</strong> + perf/soak tests.</p>
+<p>4. <strong>PR4</strong> (optional) HUD counts, color tuning after eye-check.</p>
+<h3>Feature flag / kill-switch</h3>
+<table>
+<tr><th>Flag</th><th>Default</th><th>Lands in</th><th>Effect when false</th></tr>
+<tr><td><code>visualize_confirmed_tips</code></td><td><strong>true</strong></td><td><strong>PR3</strong> (required)</td><td>No green tip Sobel; selection gold unchanged; PR2 arrows still green</td></tr>
+</table>
+<p>Optional PR4 may expose the same flag in overlay UI; the engine/config bit itself is not deferred to PR4.</p>
+<h3>Rollback</h3>
+<ul>
+<li>Toggle kill-switch → no tip Sobel without rebuild (if config-loaded).</li>
+<li>Revert PR3 → arrows still show confirm state (PR2).</li>
+<li>Revert PR2 → marks still land (PR1, harmless).</li>
+<li>Full revert: drop <code>confirmed_</code> set.</li>
+</ul>
+<h3>Risks</h3>
+<table>
+<tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr>
+<tr><td>Deadlock if self-locking query used under <code>mu_</code></td><td><strong>High</strong></td><td>Public surface is <code>_locked</code> only for reads; checklist</td></tr>
+<tr><td>Missed <code>mark_confirmed</code> (esp. poll re-admit)</td><td><strong>High</strong></td><td>K11 required poll path; dual-write matrix in PR1</td></tr>
+<tr><td>Always-on Sobel frame-time regression</td><td><strong>High</strong></td><td>K10 budget; kill-switch in PR3; soak test</td></tr>
+<tr><td>Uncle path forgets erase</td><td><strong>Med</strong></td><td><code>erase_confirmed_unlocked_</code> shared; explicit checklist</td></tr>
+<tr><td>Multi-draw re-clear wipes tips</td><td><strong>Med</strong></td><td>Single BeginRendering / one clear / N draws rule</td></tr>
+<tr><td>Unbounded <code>confirmed_</code> growth</td><td><strong>Low</strong></td><td>Accepted like <code>main_yes_</code>; erase on remove/uncle</td></tr>
+<tr><td>Uncommitted tip-dep baseline drift</td><td><strong>Med</strong></td><td>Stack on integration tip; land tip-dep first if needed</td></tr>
+</table>
+<p>---</p>
+<h2>Open Questions</h2>
+<p>1. <strong>Exact green hex:</strong> Proposed <code>(0.20, 0.95, 0.35)</code> arrows / <code>(0.25, 0.95, 0.40, 1.35)</code> Sobel — confirm with product eye-check on shard palette contrast (especially green-ish shards).</p>
+<p>2. <strong>Blend duration:</strong> 0.35s default — match <code>kArrowFadeSec</code> (0.32) or snappier (0.2s)?</p>
+<p>3. <strong>Selected confirmed tip:</strong> Gold outline only (MVP) vs future dual outline — dual remains post-MVP.</p>
+<p>4. <strong>Should non-tip confirmed blocks ever show a subtle mark?</strong> Currently no.</p>
+<p>5. <strong>UI copy:</strong> Feed row indicator for confirmed? Out of scope unless requested.</p>
+<p>6. <strong>Config storage:</strong> <code>config.json</code> key vs hard-coded engine default until PR4 UI — implementer choice as long as PR3 has a runtime toggle.</p>
+<p>---</p>
+<h2>References</h2>
+<table>
+<tr><th>Resource</th><th>Location</th></tr>
+<tr><td>Tip ids</td><td><code>src/domain/block_scene.cpp</code> — <code>BlockScene::tip_ids</code></td></tr>
+<tr><td>Tip dep state machine</td><td><code>src/app/scene_presenter.cpp</code> — <code>tip_dep_tick_and_draw_</code></td></tr>
+<tr><td>Arrow colors</td><td><code>scene_presenter.cpp</code> — <code>kActiveArrowColor</code>, <code>kSelectionArrowColor</code></td></tr>
+<tr><td>Main-chain cache</td><td><code>src/adapters/alephium/main_chain_cache.*</code></td></tr>
+<tr><td>Verify / replace / poll enqueue</td><td><code>src/adapters/alephium/alephium_adapter.cpp</code> — <code>verify_one</code>, <code>poll_once</code>, <code>enqueue_verify</code></td></tr>
+<tr><td>Frame API</td><td><code>src/engine/blockviz_engine_api.hpp</code> — <code>FrameSourceOutput</code></td></tr>
+<tr><td>Frame slot / publish</td><td><code>src/engine/vulkan_engine.hpp</code> — <code>GpuFrameSlot</code>, <code>publish_frame</code>, <code>apply_published_frame</code></td></tr>
+<tr><td>Sobel depth + overlay</td><td><code>src/engine/sobel_compute.*</code>, <code>VulkanEngine::submit_frame_with_async_sobel</code></td></tr>
+<tr><td>Gold highlight</td><td><code>vulkan_engine.cpp</code> ~line 778</td></tr>
+<tr><td>Modularization design</td><td><code>docs/graphics-modularization-design.md</code></td></tr>
+<tr><td>Confirm depth (hot zone)</td><td><code>ALPH_MAIN_CHAIN_CONFIRM_DEPTH</code> in <code>main_chain_cache.hpp</code></td></tr>
+</table>
+<p>---</p>
+<h2>PR Plan</h2>
+<p>Incremental stack on <code>integration/graphics-feature/01</code> (after tip-dep anim is committed if still local-only). Each PR independently reviewable and mergeable.</p>
+<p>---</p>
+<h3>PR1 — Domain confirmed set + adapter dual-write</h3>
+<table>
+<tr><th>Field</th><th>Content</th></tr>
+<tr><td><strong>Title</strong></td><td><code>domain: BlockScene confirmed set; adapter dual-write marks</code></td></tr>
+<tr><td><strong>Files / components</strong></td><td><code>src/domain/block_scene.hpp</code>, <code>src/domain/block_scene.cpp</code>, <code>src/adapters/alephium/alephium_adapter.cpp</code> / <code>.hpp</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td>Soft: tip-dep on branch for stack order; no hard code dep</td></tr>
+<tr><td><strong>Changes</strong></td><td><code>confirmed_</code> + <code>mark_confirmed</code> / <code>_locked</code> APIs; <code>erase_confirmed_unlocked_</code> in <code>remove_block</code> <strong>and</strong> uncle loop in <code>add_block</code>; dual-write matrix (verify branches + <strong>required poll</strong> <code>is_cached_main</code>); <code>stats_confirmed_marks_</code> on poll printf. <strong>No visual change.</strong></td></tr>
+<tr><td><strong>Test plan</strong></td><td>Dual-write matrix code review against each <code>verify_one</code> branch; poll re-admit after <code>remove_block</code> of a cached-main hash re-marks; uncle erase removes confirm; <code>add_block</code> false still marks on replace and poll; deadlock smoke: adapter marks under load while presenter <code>prepare</code> holds mutex; poll log shows <code>confirmed_marks</code>; no double-lock</td></tr>
+</table>
+<p>---</p>
+<h3>PR2 — Confirmed tip dependency arrow colors (cyan→green)</h3>
+<table>
+<tr><th>Field</th><th>Content</th></tr>
+<tr><td><strong>Title</strong></td><td><code>app: green tip-dep arrows for confirmed tips with cyan→green blend</code></td></tr>
+<tr><td><strong>Files / components</strong></td><td><code>src/app/scene_presenter.hpp</code>, <code>src/app/scene_presenter.cpp</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td><strong>PR1</strong>; hard baselined on tip-dep anim in <code>scene_presenter.*</code></td></tr>
+<tr><td><strong>Changes</strong></td><td>Extend <code>DepArrowAnim</code> with confirm blend; mix cyan→green; freeze blend on Fading; phase machine / re-grow untouched; tip arrows still drawn under selection (gold ephemeral additive).</td></tr>
+<tr><td><strong>Test plan</strong></td><td>Unconfirmed tip cyan grow; after verify/poll-mark, arrows lerp green without re-grow; supersede full-length fade with frozen color; re-tip uses Held not Growing; select block: gold ephemeral + cyan/green tip deps both visible</td></tr>
+</table>
+<p>---</p>
+<h3>PR3 — Frame plumbing + multi-instance green Sobel + kill-switch</h3>
+<table>
+<tr><th>Field</th><th>Content</th></tr>
+<tr><td><strong>Title</strong></td><td><code>engine: confirmed-tip Sobel via GpuFrameSlot; multi-draw green; kill-switch</code></td></tr>
+<tr><td><strong>Files / components</strong></td><td><code>blockviz_engine_api.hpp</code>, <code>scene_presenter.cpp</code>, <code>sobel_compute.<em></code>, <code>vulkan_engine.</em></code>, config load path for <code>visualize_confirmed_tips</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td><strong>PR1</strong> (data); <strong>PR2</strong> recommended first for full UX</td></tr>
+<tr><td><strong>Changes</strong></td><td><code>confirmed_tip_hashes</code> on <code>FrameSourceOutput</code>; extend <code>publish_frame</code> / <code>GpuFrameSlot</code> / <code>apply_published_frame</code>; <code>SobelFrameRequest</code>; one clear + N draws; mode matrix gold vs green; <strong>kill-switch default on</strong>; no every-N throttle.</td></tr>
+<tr><td><strong>Test plan</strong></td><td>Unselected confirmed tips → green; select → gold only; deselect → green; kill-switch off → no tip Sobel; frustum-culled omitted; validation clean; <strong>continuous confirmed tips ≥1 min</strong> no fence hang; before/after median frame time documented (validation off)</td></tr>
+</table>
+<p>&gt; Note: PR3 is large but kept as one PR so plumbing and multi-draw land atomically (wrong intermediate state = tips without outline or mismatched pick_map). Senior owner preferred; if needed, land as two commits in one PR (plumb + multi-draw) rather than defer kill-switch to PR4.</p>
+<p>---</p>
+<h3>PR4 (optional polish) — HUD / color tuning</h3>
+<table>
+<tr><th>Field</th><th>Content</th></tr>
+<tr><td><strong>Title</strong></td><td><code>app: confirmed-tip visualization polish (HUD counts, colors)</code></td></tr>
+<tr><td><strong>Files / components</strong></td><td><code>src/app/blockflow_overlay.*</code>, constants in presenter/engine</td></tr>
+<tr><td><strong>Depends on</strong></td><td><strong>PR2</strong>, <strong>PR3</strong></td></tr>
+<tr><td><strong>Changes</strong></td><td>Optional status line <code>tips confirmed N/M</code>; color tweak after eye-check; optional UI binding to existing kill-switch. <strong>Not</strong> the first land of the kill-switch.</td></tr>
+<tr><td><strong>Test plan</strong></td><td>HUD counts match tips; UI toggle drives same flag as config</td></tr>
+</table>
+<p>---</p>
+<h3>Suggested merge order</h3>
+<pre><code>[tip-dep anim commit if still uncommitted]
+    → PR1 (domain/adapter dual-write + poll mark)
+        → PR2 (arrows)
+            → PR3 (GpuFrameSlot + multi Sobel + kill-switch)
+                → PR4 (optional HUD/colors)</code></pre>
+<p>---</p>
+<h2>Implementation checklist (for implementers)</h2>
+<ul>
+<li>[ ] <code>mark_scene_confirmed_</code> on every verify-ok branch (early cached, singleton, query, replace)</li>
+<li>[ ] <strong>Poll:</strong> <code>is_cached_main</code> → <code>mark_confirmed</code> regardless of <code>add_block</code> return</li>
+<li>[ ] Replace: <code>mark_confirmed</code> always after <code>add_block</code>, ignore bool</li>
+<li>[ ] Helper marks <strong>scene only</strong> (no forced double <code>mark_main</code>)</li>
+<li>[ ] <code>confirmed_.erase</code> / <code>erase_confirmed_unlocked_</code> in <code>remove_block</code> <strong>and</strong> uncle loop in <code>add_block</code></li>
+<li>[ ] No double-lock of <code>BlockScene::mu_</code>; presenter uses <code>_locked</code> APIs only</li>
+<li>[ ] Confirm does not reset <code>DepArrowAnim::birth_sec</code> or force <code>Growing</code></li>
+<li>[ ] Confirm blend updates only for <code>active_keys</code>; freeze on Fading/Gone</li>
+<li>[ ] Tip dep arrows still drawn under selection (gold ephemeral additive)</li>
+<li>[ ] <code>confirmed_tip_hashes</code> via <code>publish_frame</code> → <code>GpuFrameSlot</code> → <code>apply_published_frame</code></li>
+<li>[ ] Selection Sobel remains single gold instance</li>
+<li>[ ] Tip Sobel only when unselected <strong>and</strong> kill-switch on</li>
+<li>[ ] One BeginRendering / one CLEAR / N DrawIndexed / EndRendering</li>
+<li>[ ] Cap multi-draw count ≤ 32</li>
+<li>[ ] Poll printf includes <code>confirmed_marks</code></li>
+<li>[ ] Vulkan validation clean; continuous tip-Sobel soak ≥1 min</li>
+<li>[ ] Stack commits cleanly on <code>integration/graphics-feature/01</code></li>
+</ul>
+</main>
+</body>
+</html>

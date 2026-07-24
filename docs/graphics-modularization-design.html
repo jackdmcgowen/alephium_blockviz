@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — alephium_blockviz — Graphics Engine Modularization &amp; Multi-Chain Architecture</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="graphics-modularization-design.md"><code>graphics-modularization-design.md</code></a></p>
+<h1>alephium_blockviz — Graphics Engine Modularization &amp; Multi-Chain Architecture</h1>
+<p>&gt; <strong>Status: HISTORICAL (landed).</strong> Core modularization (host / domain / network / engine / graphics, detail store, slim, rename off god-class renderer) shipped.</p>
+<p>&gt; <strong>Do not treat this file as the live backlog.</strong> Living goals and plans:</p>
+<p>&gt; <a href="layers/README.md"><code>docs/layers/README.md</code></a> · <a href="layers/app.md">app</a> · <a href="layers/engine.md">engine</a> · <a href="layers/graphics.md">graphics</a> · <a href="layers/network.md">network</a>.</p>
+<p>&gt; Residual items from the old PR plan map roughly to: FakeChain/Debug → <strong>network</strong> (+ app UX); config polish → <strong>app</strong>; further PSO modularization → <strong>graphics</strong>.</p>
+<table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td><strong>Document</strong></td><td>Target architecture &amp; incremental modularization plan</td></tr>
+<tr><td><strong>Author</strong></td><td>_(owner)_</td></tr>
+<tr><td><strong>Date</strong></td><td>2026-07-09</td></tr>
+<tr><td><strong>Status</strong></td><td><strong>Historical (landed)</strong> — was Draft rev 2; kept for design rationale</td></tr>
+<tr><td><strong>Repo</strong></td><td><code>C:\Users\JackD\OneDrive\Desktop\alephium_blockviz</code></td></tr>
+<tr><td><strong>Solution</strong></td><td><code>alephium_visualizer.sln</code> (app: <code>alephium_visualizer</code>, libs: <code>graphics</code>, <code>blockviz_engine</code>, <code>network</code>)</td></tr>
+</table>
+<p>---</p>
+<h2>Overview</h2>
+<p><code>alephium_blockviz</code> is a working Windows Vulkan + ImGui visualizer that polls Alephium’s blockflow API and draws blocks as instanced cubes on a 16-shard polar layout. The application runs, but nearly all concerns—GPU bootstrap, frame loop, mouse picking, domain storage, layout, UX, and Alephium JSON parsing—live inside a single god-class (<code>VulkanRenderer</code> in <code>src/vulkan_renderer.hpp</code> ~150 lines + <code>vulkan_renderer.cpp</code> ~1347 non-blank / ~1714 physical lines) plus a thin <code>main.cpp</code> poll loop.</p>
+<p>A partial graphics peel already exists: static library <code>graphics</code> (<code>graphics/graphics.vcxproj</code>) compiles free-function helpers under <code>src/graphics/</code> (<code>create_instance</code>, <code>create_device</code>, <code>create_buffer</code>, etc.) exposed via <code>gpu_prv_lib.h</code>. Public engine surface <code>gpu_pub_lib.h</code> is empty. Domain sketches (<code>src/dag.hpp</code>, <code>src/alph_block.hpp</code>) are either underused or tightly coupled to the renderer.</p>
+<p>This document inventories that coupling, proposes a <strong>layered target architecture</strong> (adapters → shared graph → layout/scene → pure graphics engine), defines <strong>critical C++ interfaces</strong> (including ImGui/threading, detail store, FrameSubmit lifetime, layout origin state), and lays out a <strong>prototype-first, incremental PR path</strong> with <strong>explicit spike→PR gates</strong>. Multi-chain support is planned as <strong>one stable graph model + per-chain adapters</strong>, not N renderers.</p>
+<p>---</p>
+<h2>Background &amp; Motivation</h2>
+<h3>Current state (as built)</h3>
+<pre><code>flowchart TB
+  subgraph client [&quot;Client (main.cpp)&quot;]
+    Win32[Win32 WndProc]
+    Curl[curl poll loop]
+    Cfg[config.json]
+    Parse[cJSON blocksAndEvents]
+    DeadQ[&quot;dead blockQueue vector&amp;lt;cJSON*&amp;gt;&quot;]
+  end
+
+  subgraph god [&quot;VulkanRenderer god-class&quot;]
+    GPU[Vulkan instance/device/swapchain/pipelines]
+    Thread[Render thread + mutexes]
+    Domain[&quot;chains / blockQueue / AlphBlock&quot;]
+    Layout[Polar 16-shard layout]
+    ImGui[ImGui HUD + explorer links]
+    Pick[GPU object pick]
+    Statics[&quot;file-statics: eye_z, SHARD_COLORS, lastPickedID, ...&quot;]
+  end
+
+  subgraph lib [&quot;graphics.lib (partial peel)&quot;]
+    Helpers[instance/device/surface/swapchain/buffer/image/shader]
+    Arrow[DebugRenderer arrows]
+  end
+
+  Cfg --&gt; Curl
+  Curl --&gt; Parse
+  Parse --&gt;|Add_Block cJSON*| Domain
+  Win32 --&gt;|Init/Start/Resize/Stop| GPU
+  Domain --&gt; Layout
+  Layout --&gt; GPU
+  Helpers --&gt; GPU
+  Arrow --&gt; GPU
+  ImGui --&gt; GPU
+  Statics --&gt; Layout
+  Statics --&gt; Pick</code></pre>
+<p><strong>Entry / client</strong> (<code>src/main.cpp</code>):</p>
+<ul>
+<li>Win32 window + <code>WndProc</code> → <code>renderer.Resize()</code> on <code>WM_SIZE</code>; ImGui Win32 handler on main thread.</li>
+<li>Loads <code>config.json</code> via <code>load_configs()</code> (<code>src/config.c</code>); uses first entry’s <code>url</code> as <code>baseUrl</code> (array may hold mainnet + testnet; only <code>[0]</code> is used).</li>
+<li>Polls every <code>ALPH_TARGET_BLOCK_SECONDS</code> (8s) with <code>get_blockflow_blocks_with_events()</code> (<code>src/commands.c</code>).</li>
+<li>Initializes <code>lastPollTs</code> to <code>now - ALPH_LOOKBACK_WINDOW_SECONDS</code> (10 min); on success advances watermark; on failed parse/HTTP leaves watermark unchanged (only assigns <code>lastPollTs = now</code> inside <code>if (obj)</code>).</li>
+<li>Overlaps query window: <code>fromTs = lastPollTs - ALPH_TARGET_BLOCK_SECONDS*1000</code>.</li>
+<li>Walks nested <code>blocksAndEvents</code> arrays, extracts each <code>block</code> object, calls <code>renderer.Add_Block(block)</code>.</li>
+<li>Hard-coded 4×4 height helpers (<code>get_heights</code>, unused in main loop body), Esc quit, <code>Sleep(10)</code> main loop.</li>
+<li>Window size macros come from renderer header (<code>WDW_WIDTH</code> / <code>WDW_HEIGHT</code>).</li>
+<li><strong>Dead code:</strong> <code>std::vector&lt;cJSON*&gt; blockQueue</code> is declared, never populated with live blocks, and <code>cJSON_Delete</code>’d at exit — not the renderer’s <code>blockQueue</code>.</li>
+</ul>
+<p><strong>God-class renderer</strong> (<code>VulkanRenderer</code>):</p>
+<table>
+<tr><th>Concern</th><th>Symbols / behavior</th></tr>
+<tr><td>Full Vulkan</td><td><code>instance</code>, <code>device</code>, <code>surface</code>, <code>swapchain</code>, depth, main + picker pipelines, buffers, descriptors, timeline sync, <code>MAX_FRAMES_IN_FLIGHT</code> (3)</td></tr>
+<tr><td>Threading</td><td><code>renderThread</code>, <code>renderMutex</code>, <code>dataMutex</code>, <code>dataCond</code>, <code>render_loop()</code> @ ~60 Hz</td></tr>
+<tr><td>Domain</td><td><code>chains</code> = <code>vector&lt;HeightToHash&gt;</code> sized to <strong>16</strong>; <code>HashToBlocks</code> = <code>map&lt;string, AlphBlock&gt;</code>; <code>blockQueue</code> deque; <code>selected_block</code></td></tr>
+<tr><td>Ingest</td><td><code>Add_Block(cJSON*)</code> constructs <code>AlphBlock</code>, indexes by <code>chain_idx()</code>, uncle erasure; prints <code>&quot;duplicate\n&quot;</code> on emplace fail</td></tr>
+<tr><td>Layout</td><td>Per-frame under <code>dataMutex</code>: polar coords from <code>shardId</code>, <code>meters_per_height</code>, colors from <code>SHARD_COLORS[16]</code>, session-local <code>start_height[16]</code></td></tr>
+<tr><td>UX</td><td>ImGui status bar + inspector <strong>after</strong> <code>dataMutex</code> unlock; explorer.alephium.org links; camera sliders</td></tr>
+<tr><td>GPU pick</td><td>Second pipeline + <code>R32_UINT</code> pick image; instance index → <code>selected_block</code> via <code>lastPickedID</code></td></tr>
+<tr><td>Camera</td><td><code>eye_z</code> (init <code>-ALPH_LOOKBACK_WINDOW_SECONDS</code>), <code>meters_per_second</code>, <code>elapsedSeconds</code> → UBO in <code>update_uniform_buffer()</code></td></tr>
+</table>
+<p><strong>Partial graphics peel</strong> (<code>src/graphics/</code>, linked as <code>graphics.lib</code>):</p>
+<ul>
+<li>Implemented: <code>instance.cpp</code>, <code>device.cpp</code>, <code>surface.cpp</code>, <code>swapchain.cpp</code>, <code>buffer.cpp</code>, <code>image.cpp</code>, <code>shader.cpp</code>, <code>validation.cpp</code>, <code>debug/arrow.cpp</code>.</li>
+<li>API: free functions in <code>gpu_prv_lib.h</code> (Vulkan types in signatures).</li>
+<li><code>gpu_pub_lib.h</code>: <strong>empty</strong> — no stable public engine API yet.</li>
+<li>Pre-build: <code>compile_shaders.py</code> builds <code>.spv</code> from <code>src/graphics/shaders/*.glsl</code>.</li>
+<li>Validation layers: enabled in Debug via <code>validation.cpp</code> / instance extensions; stripped in Release (<code>#ifndef NDEBUG</code>).</li>
+</ul>
+<p><strong>Domain sketches (underused / misplaced):</strong></p>
+<ul>
+<li><code>src/dag.hpp</code> / <code>dag.cpp</code>: <code>map&lt;string, cJSON*&gt;</code> with <code>MAX_GROUPS 4</code>; <strong>not on main data path</strong> (<code>Dag</code> is compiled in vcxproj but not used from <code>main</code> or renderer).</li>
+<li><code>src/alph_block.hpp</code>: full Alephium block/txn/UTXO model + poll constants (<code>ALPH_LOOKBACK_WINDOW_SECONDS</code>, <code>ALPH_TARGET_BLOCK_SECONDS</code>, <code>ALPH_NUM_GROUPS</code>).</li>
+<li><code>src/commands.c/h</code>: Alephium REST command table only; global <code>CURL* curl</code> and <code>baseUrl</code>; URL buffers 128 chars.</li>
+</ul>
+<h3>Pain points</h3>
+<p>1. <strong>Cannot extract a reusable engine</strong> — <code>VulkanRenderer</code> depends on <code>alph_block.hpp</code> / cJSON; graphics cannot be unit-tested or demoed without chain data.</p>
+<p>2. <strong>Layout fused with GPU upload under ingest lock</strong> — positions written straight into mapped instance memory inside <code>render_loop()</code> while holding <code>dataMutex</code>. ImGui is <strong>not</strong> under that lock (see inventory).</p>
+<p>3. <strong>Post-unlock data races</strong> — after <code>lock.unlock()</code>, <code>blockQueue</code> and <code>selected_block</code> are read/written on the render thread while <code>Add_Block</code> may mutate them from main under <code>dataMutex</code> only during ingest (ImGui path races).</p>
+<p>4. <strong>Multi-chain would require forking the renderer</strong> unless a shared graph model is introduced first.</p>
+<p>5. <strong><code>Dag</code> and <code>AlphBlock</code> diverge</strong> — two incomplete models; main path owns rich <code>AlphBlock</code> inside the GPU class.</p>
+<p>6. <strong>Public API vacuum</strong> — <code>gpu_pub_lib.h</code> empty; callers include private helpers and own half the Vulkan lifecycle.</p>
+<p>7. <strong>Client still knows too much about shards</strong> — 4×4 loops and Alephium JSON shape in <code>main.cpp</code>.</p>
+<p>8. <strong>File-static coupling</strong> — camera, palette, pick state live as <code>.cpp</code> statics, hard to peel into engine members vs client inputs.</p>
+<h3>Hardware context (non-central)</h3>
+<p>Local Windows laptop (HP Victus, Ryzen AI 7 350, RTX 5060 Laptop + Radeon 860M, ~16 GB). Device selection already prefers discrete GPU (<code>pick_physical_device</code> in <code>device.cpp</code>). Dual-GPU is a deployment note, not a driver for architecture.</p>
+<p>---</p>
+<h2>Goals &amp; Non-Goals</h2>
+<h3>Goals</h3>
+<p>1. <strong>Modularize the graphics engine</strong> so it is pure GPU: no chain types, no cJSON, no Alephium URLs.</p>
+<p>2. <strong>Abstract rendering from client code</strong> — client owns window/config/network/UX; domain owns graph + layout; engine owns GPU.</p>
+<p>3. <strong>Enable multi-chain later</strong> via <strong>one stable graph model + adapters</strong>, not N renderers.</p>
+<p>4. <strong>Prototype-first validation</strong> — thin spikes before <em>matching</em> full PRs; pivot quickly on dead ends.</p>
+<p>5. <strong>Keep the app running</strong> after every mergeable PR (no big-bang rewrite), including <strong>selection inspector continuity</strong>.</p>
+<p>6. <strong>Document coupling inventory</strong> so refactors have a checklist.</p>
+<h3>Non-Goals (explicit)</h3>
+<ul>
+<li>Designing a full multi-chain product (UI for chain switcher marketplace, multi-network dashboards, etc.).</li>
+<li>Rewriting to another graphics API (D3D12/OpenGL/WebGPU) unless Vulkan is proven inadequate.</li>
+<li>Perfect ECS, plugin SDKs, or scripting.</li>
+<li>Production-grade networking (retries, auth, websocket streaming design) beyond extracting what exists.</li>
+<li>Replacing ImGui or Win32 in this design pass.</li>
+<li>Shipping a second chain implementation in the first modularization wave (interfaces only; Alephium remains the sole adapter).</li>
+<li>Solving dual-GPU presentation edge cases beyond current discrete-GPU pick.</li>
+<li>Structured logging frameworks (printf + ImGui remain acceptable).</li>
+</ul>
+<p>---</p>
+<h2>Inventory: Coupling Analysis</h2>
+<h3>Legend</h3>
+<table>
+<tr><th>Tag</th><th>Meaning</th></tr>
+<tr><td><strong>G</strong></td><td>Pure graphics (belongs in engine)</td></tr>
+<tr><td><strong>S</strong></td><td>Scene / layout (domain→visual, chain-agnostic)</td></tr>
+<tr><td><strong>D</strong></td><td>Domain graph (chain-agnostic)</td></tr>
+<tr><td><strong>A</strong></td><td>Alephium-specific (adapter / client)</td></tr>
+<tr><td><strong>C</strong></td><td>Client / platform (window, config, process)</td></tr>
+<tr><td><strong>M</strong></td><td>Mixed today (must split)</td></tr>
+</table>
+<h3>Size note</h3>
+<table>
+<tr><th>File</th><th>Approx. size</th></tr>
+<tr><td><code>vulkan_renderer.cpp</code></td><td>~1714 physical lines / ~1347 non-blank</td></tr>
+<tr><td><code>vulkan_renderer.hpp</code></td><td>~179 physical lines / ~150 non-blank</td></tr>
+<tr><td>Combined god-class surface</td><td><strong>~1.5–1.9k LOC</strong> (doc previously understated as “~1.3k”)</td></tr>
+</table>
+<h3><code>VulkanRenderer</code> member / method inventory</h3>
+<table>
+<tr><th>Item</th><th>Location</th><th>Tag</th><th>Notes</th></tr>
+<tr><td><code>Init/Start/Stop/Resize</code></td><td>public API</td><td><strong>M</strong></td><td>Should become engine lifecycle + client resize hook</td></tr>
+<tr><td><code>Add_Block(cJSON*)</code></td><td>public</td><td><strong>A</strong></td><td>Must leave engine; becomes adapter → graph + detail store</td></tr>
+<tr><td><code>VertexNormal</code>, <code>CUBE_*</code></td><td>mesh</td><td><strong>G</strong></td><td>Engine mesh primitive or asset</td></tr>
+<tr><td><code>InstanceData { pos, color }</code></td><td>draw</td><td><strong>G</strong>/<strong>S</strong></td><td>Engine draws; scene fills — <strong>no per-instance scale today</strong></td></tr>
+<tr><td><code>UniformBufferObject</code></td><td>shaders</td><td><strong>G</strong></td><td>Camera/lighting; filled from client/camera state in target</td></tr>
+<tr><td><code>PushConstants</code> mouse pick</td><td>picker</td><td><strong>G</strong></td><td>Engine feature; selection ID is opaque</td></tr>
+<tr><td>Vulkan handles / swapchain / pipelines</td><td>private</td><td><strong>G</strong></td><td>Engine core</td></tr>
+<tr><td><code>renderThread</code>, mutexes, cond</td><td>threading</td><td><strong>G</strong></td><td><strong>v1: engine-owned render thread</strong> (K8/K15)</td></tr>
+<tr><td><code>chains</code>, <code>HeightToHash</code>, <code>HashToBlocks</code></td><td>domain</td><td><strong>D</strong>/<strong>A</strong></td><td>Structure is sharded; values are full <code>AlphBlock</code> (incl. txns)</td></tr>
+<tr><td><code>blockQueue</code>, <code>total_blocks</code></td><td>UX feed</td><td><strong>D</strong>/<strong>C</strong></td><td>Recent-blocks UI list; race after unlock today</td></tr>
+<tr><td><code>selected_block: AlphBlock</code></td><td>selection</td><td><strong>A</strong>/<strong>D</strong></td><td>Holds full txn detail for inspector</td></tr>
+<tr><td>Layout polar + palette</td><td><code>render_loop</code></td><td><strong>S</strong>/<strong>A</strong></td><td>Layout reusable; 16-lane palette is presentation</td></tr>
+<tr><td><code>start_height[16]</code></td><td>local in <code>render_loop</code></td><td><strong>S</strong></td><td>Session-local Z origin per lane — <strong>must be layout state</strong></td></tr>
+<tr><td>ImGui “Blockflow” / explorer links</td><td><code>render_loop</code></td><td><strong>C</strong>/<strong>A</strong></td><td>Client/UX; runs <strong>after</strong> <code>dataMutex</code> unlock</td></tr>
+<tr><td><code>DebugRenderer</code> arrows</td><td>camera debug</td><td><strong>G</strong></td><td>Already mostly pure; lives in graphics lib</td></tr>
+<tr><td>Uses <code>create_*</code> from <code>gpu_prv_lib.h</code></td><td>Init</td><td><strong>G</strong></td><td>Good; incomplete peel</td></tr>
+</table>
+<h3>File-static / free-function state in <code>vulkan_renderer.cpp</code> (must re-home)</h3>
+<table>
+<tr><th>Symbol</th><th>Tag</th><th>Target home</th></tr>
+<tr><td><code>lastPickedID</code></td><td><strong>G</strong>/<strong>C</strong></td><td>Engine pick result → client maps index</td></tr>
+<tr><td><code>SHARD_COLORS[16]</code></td><td><strong>A</strong>/<strong>S</strong></td><td><code>LanePalette</code> in layout params / adapter theme</td></tr>
+<tr><td><code>meters_per_height</code></td><td><strong>S</strong></td><td><code>LayoutParams</code></td></tr>
+<tr><td><code>meters_per_second</code>, <code>eye_z</code></td><td><strong>C</strong></td><td><code>CameraState</code> owned by client (sliders in UI overlay)</td></tr>
+<tr><td><code>debugRender</code></td><td><strong>G</strong></td><td>Engine member</td></tr>
+<tr><td><code>s_resized</code></td><td><strong>G</strong></td><td>Engine member</td></tr>
+<tr><td><code>pickMouseX/Y</code></td><td><strong>G</strong></td><td>Engine pick query</td></tr>
+<tr><td><code>viewProj</code></td><td><strong>G</strong></td><td>Engine (debug arrows)</td></tr>
+<tr><td><code>statusBarHeight</code></td><td><strong>C</strong></td><td>App UI layout constant</td></tr>
+<tr><td><code>pipeline_barrier</code> helper</td><td><strong>G</strong></td><td>Engine private</td></tr>
+</table>
+<h3>Pick input path (today)</h3>
+<ul>
+<li>In <code>record_command_buffer</code>, after main draw + ImGui draw data:</li>
+</ul>
+<p>- Reads <code>ImGuiIO</code>; if <code>io.WantCaptureMouse &amp;&amp; io.MouseClicked[Left]</code> then records picker pass.</p>
+<p>- Comment says “outside ImGui UI” but the condition requires <code>WantCaptureMouse</code> — <strong>inverted vs typical “pick when UI does not capture”</strong>. Treat as existing bug/behavior to preserve or fix deliberately during engine peel (document, don’t silently “fix” without smoke-testing selection).</p>
+<h3>Mutex scope (corrected)</h3>
+<pre><code>render_loop frame:
+  lock dataMutex
+    rebuild InstanceData[] into mappedInstanceMemory from chains   // layout+upload
+    // also may set selected_block from lastPickedID while locked
+  unlock dataMutex
+
+  ImGui NewFrame already started earlier; build Blockflow + Block panels  // NOT under dataMutex
+    reads blockQueue, selected_block, total_blocks  // RACE with Add_Block
+  update_uniform_buffer(); render();</code></pre>
+<table>
+<tr><th>What</th><th>Under <code>dataMutex</code>?</th></tr>
+<tr><td>Layout + instance memcpy</td><td><strong>Yes</strong></td></tr>
+<tr><td>ImGui windows / explorer UI</td><td><strong>No</strong></td></tr>
+<tr><td><code>Add_Block</code> mutations</td><td><strong>Yes</strong> (on main thread)</td></tr>
+<tr><td><code>blockQueue</code> / <code>selected_block</code> UI reads</td><td><strong>No</strong> → <strong>existing races</strong></td></tr>
+</table>
+<h3>File-level coupling matrix</h3>
+<table>
+<tr><th>File</th><th>Depends on</th><th>Tag</th><th>Role today</th></tr>
+<tr><td><code>src/main.cpp</code></td><td>curl, cJSON, commands, config, <code>VulkanRenderer</code>, Win32</td><td><strong>C</strong>+<strong>A</strong></td><td>Window + poll + push blocks; dead <code>blockQueue</code> vector</td></tr>
+<tr><td><code>src/vulkan_renderer.*</code></td><td>Vulkan, glm, ImGui, alph_block, cJSON, gpu_prv, arrow</td><td><strong>M</strong></td><td>God object + file-statics</td></tr>
+<tr><td><code>src/alph_block.hpp</code></td><td>cJSON, commands macros</td><td><strong>A</strong></td><td>Alephium model (hot + detail)</td></tr>
+<tr><td><code>src/commands.c/h</code></td><td>curl, cJSON</td><td><strong>A</strong></td><td>HTTP API</td></tr>
+<tr><td><code>src/config.c/h</code></td><td>cJSON</td><td><strong>C</strong></td><td>Config load</td></tr>
+<tr><td><code>src/dag.*</code></td><td>cJSON</td><td><strong>D</strong> (stub)</td><td>Unused map</td></tr>
+<tr><td><code>src/graphics/*</code></td><td>Vulkan only</td><td><strong>G</strong></td><td>Helpers</td></tr>
+<tr><td><code>src/graphics/debug/arrow.*</code></td><td>Vulkan, glm, gpu_prv</td><td><strong>G</strong></td><td>Debug draw</td></tr>
+<tr><td>ImGui sources in vcxproj</td><td>Vulkan/Win32 backends</td><td><strong>C</strong>/<strong>G</strong></td><td>UI — host in engine v1, chrome via overlay</td></tr>
+</table>
+<h3>Data flow today (critical path)</h3>
+<pre><code>sequenceDiagram
+  participant Main as main.cpp
+  participant Cmd as commands.c
+  participant VR as VulkanRenderer
+  participant RT as render_loop thread
+  participant GPU as Vulkan
+
+  Main-&gt;&gt;Cmd: get_blockflow_blocks_with_events(from,to)
+  Cmd--&gt;&gt;Main: cJSON* blocksAndEvents
+  loop each block
+    Main-&gt;&gt;VR: Add_Block(cJSON*)
+    Note over VR: dataMutex: AlphBlock into chains + blockQueue
+  end
+  RT-&gt;&gt;VR: dataMutex: layout → mapped instances
+  RT-&gt;&gt;VR: unlock then ImGui panels (racey reads)
+  RT-&gt;&gt;GPU: update UBO, record draws, present
+  Note over RT,GPU: lastPickedID maps instance index to AlphBlock</code></pre>
+<h3>What is already pure graphics (keep / grow)</h3>
+<ul>
+<li>Free functions: <code>create_instance</code>, <code>destroy_instance</code>, <code>create_debug_messenger</code>, <code>create_win32_surface</code>, <code>pick_physical_device</code>, <code>create_device</code>, <code>create_swapchain</code>, <code>create_buffer</code> / <code>destroy_buffer</code>, <code>create_image</code> / views, <code>load_shader_source</code> / <code>create_shader_module</code>.</li>
+<li>Shader set: <code>vert.spv</code> / <code>frag.spv</code> (instanced lit cubes; <strong>pos+color only</strong>, uniform <code>ubo.meters</code>), <code>picker_<em>.spv</code>, <code>arrow_</em>.spv</code>, <code>color_frag.spv</code>.</li>
+<li>Timeline + dynamic rendering (Vulkan 1.3 features enabled in <code>create_device</code>).</li>
+<li>Instanced draw path: cube mesh + <code>InstanceData</code> buffer + UBO.</li>
+</ul>
+<h3>What is Alephium-specific inside the renderer (must exit)</h3>
+<ul>
+<li><code>#include &quot;alph_block.hpp&quot;</code> and all <code>AlphBlock</code> storage (including txn-rich selection).</li>
+<li><code>Add_Block(cJSON*)</code>.</li>
+<li><code>chains</code> sized to 16; <code>chainFrom</code>/<code>chainTo</code>/<code>chain_idx()</code>.</li>
+<li>Uncle removal loop over ghost uncles.</li>
+<li><code>SHARD_COLORS[16]</code> and explorer.alephium.org URLs in ImGui.</li>
+<li>Timing constants from <code>ALPH_*</code> used for camera init and layout scale.</li>
+</ul>
+<p>---</p>
+<h2>Target Architecture</h2>
+<h3>Layering principle</h3>
+<pre><code>Chain adapters → BlockGraph (normalize) → Scene / layout → Graphics engine
+                 ↘ AlphDetailStore (v1, adapter-owned)</code></pre>
+<table>
+<tr><th>Layer</th><th>Owns</th><th>Must not own</th></tr>
+<tr><td><strong>Client</strong></td><td>Win32 window, message pump, config, process lifetime, <code>CameraState</code>, wiring, ImGui <strong>chrome content</strong> via overlay</td><td>Vulkan details, chain JSON schemas inside engine</td></tr>
+<tr><td><strong>Adapters</strong></td><td>HTTP, parse chain-native payloads → <code>GraphDelta</code> + <strong>detail store upserts</strong></td><td>Drawing, GPU resources</td></tr>
+<tr><td><strong>BlockGraph</strong></td><td>Nodes, optional edges, indices, retention, thread-safe ingest</td><td>cJSON, Vulkan, screen positions, txn lists</td></tr>
+<tr><td><strong>Detail store</strong></td><td>Full <code>AlphBlock</code> (or equivalent) keyed by <code>NodeId</code> for inspector</td><td>GPU types</td></tr>
+<tr><td><strong>Scene / Layout</strong></td><td>Positions, colors, stable instance order, lane origin heights</td><td>Device creation, swapchain</td></tr>
+<tr><td><strong>Graphics engine</strong></td><td>Instance/device/swapchain, pipelines, frame buffers, pick indices, ImGui Vulkan host</td><td>Chain types, cJSON, explorer URLs, <code>AlphBlock</code></td></tr>
+</table>
+<pre><code>flowchart LR
+  subgraph client_layer [Client]
+    Win[Win32 pump]
+    Cam[CameraState]
+    Overlay[IUiOverlay chrome]
+  end
+
+  subgraph adapter_layer [Adapters]
+    Alph[AlephiumAdapter]
+    Det[AlphDetailStore]
+  end
+
+  subgraph domain_layer [Domain]
+    BG[BlockGraph]
+    Layout2[PolarShardLayout]
+    Scene[FrameDrawList]
+  end
+
+  subgraph engine_layer [graphics engine]
+    Eng[IRenderEngine]
+    GPU2[Vulkan backend]
+    ImHost[ImGui host + NewFrame/Render]
+  end
+
+  Alph --&gt;|GraphDelta| BG
+  Alph --&gt;|upsert| Det
+  BG --&gt; Layout2
+  Layout2 --&gt; Scene
+  Cam --&gt; Eng
+  Scene --&gt;|FrameSubmit deep copy| Eng
+  Eng --&gt; GPU2
+  ImHost --&gt;|on render thread| Overlay
+  Overlay --&gt;|selected NodeId| Det
+  Eng --&gt;|PickResult + frame_seq| Overlay</code></pre>
+<h3>Ownership &amp; threading model (target) — decided for v1</h3>
+<table>
+<tr><th>Thread</th><th>Responsibilities</th></tr>
+<tr><td><strong>Main</strong></td><td>Win32 messages (<code>ImGui_ImplWin32_WndProcHandler</code>), config, <code>adapter.poll</code> → <code>graph.apply</code> + detail store, build <code>FrameDrawList</code>, <code>engine-&gt;submit_frame</code> (deep copy), <code>resize</code>/<code>stop</code></td></tr>
+<tr><td><strong>Render (engine-owned)</strong></td><td>Wait timeline → swap published frame buffer → ImGui <code>NewFrame</code> → <strong>call <code>IUiOverlay::draw()</code></strong> → upload instances/camera → record → pick if requested → submit → present</td></tr>
+</table>
+<p><strong>v1 decision (closes former OQ6):</strong> Keep <strong>engine-owned render thread</strong> (<code>start</code>/<code>stop</code>) to match current code. Client-driven <code>render_frame()</code> is a future option only if testing pain demands it.</p>
+<p><strong>Boundary rules:</strong></p>
+<p>1. Adapters never touch <code>Vk*</code> or engine types.</p>
+<p>2. Engine never includes adapter or <code>alph_block</code> headers.</p>
+<p>3. <code>BlockGraph</code> is the single source of truth for <strong>block identity / layout inputs</strong>; <strong>txn detail</strong> lives in <code>AlphDetailStore</code> (adapter-owned in v1).</p>
+<p>4. Each <code>submit_frame</code> <strong>deep-copies</strong> into an internal slot with a <strong>monotonic <code>frame_seq</code></strong>. Render thread never reads live graph.</p>
+<p>5. <code>IUiOverlay::draw()</code> runs <strong>on the render thread</strong> and must only touch <strong>snapshot/shared atomics / mutex-protected read-only views</strong> (e.g. last published <code>UiSnapshot</code> from main: recent ids, selected id, detail copy for selection).</p>
+<p>6. Pick indices are valid only for the <strong>GPU-visible frame’s</strong> instance order (<code>PickResult.frame_seq</code> must match client’s mapping table for that seq, or client keeps last N maps).</p>
+<h3>Suggested physical layout (target tree)</h3>
+<pre><code>src/
+  app/                 # main, Win32, IUiOverlay impl, CameraState
+  config/              # config.c/h (keep or thin C++ wrapper)
+  domain/
+    block_graph.hpp
+    layout.hpp
+    scene.hpp          # FrameDrawList helpers, stable sort
+  adapters/
+    alephium/          # alph_block, commands, AlephiumAdapter, AlphDetailStore
+  engine/
+    include/engine/    # IRenderEngine, types (no chain)
+  graphics/            # existing peel → engine impl detail</code></pre>
+<p>Build: keep MSVC solution; grow <code>graphics</code> static lib; <strong>set <code>/std:c++17</code> minimum</strong> (or C++20 if <code>std::span</code> desired — see Build). Do not link curl/cjson into <code>graphics</code>.</p>
+<p>---</p>
+<h2>Critical Interfaces</h2>
+<p>These are <strong>target</strong> headers — not present yet.</p>
+<h3>1. Shared graph model (<code>domain/block_graph.hpp</code>)</h3>
+<pre><code>// Chain-agnostic. No cJSON. No Vulkan. No txn lists.
+#pragma once
+#include &lt;cstdint&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;optional&gt;
+#include &lt;unordered_map&gt;
+#include &lt;shared_mutex&gt;
+
+using NodeId = std::string;   // typically block hash; adapters normalize
+
+enum class EdgeKind : uint8_t {
+    Parent,
+    Dependency,   // e.g. Alephium deps[]
+    Uncle,
+    Reference
+};
+
+struct GraphNode {
+    NodeId id;
+    int64_t timestamp_ms = 0;
+    int64_t height = -1;
+    uint32_t group_from = 0;      // Alephium: chainFrom; linear: 0
+    uint32_t group_to = 0;        // Alephium: chainTo; linear: 0
+    uint32_t lane = 0;            // e.g. chainFrom*4+chainTo
+    uint32_t lane_count_hint = 1; // e.g. 16 for Alph, 1 for linear
+    std::string chain_label;      // optional UI tag
+    // NO txn/UTXO vectors here (see AlphDetailStore / K14)
+};
+
+struct GraphEdge {
+    NodeId from;
+    NodeId to;
+    EdgeKind kind = EdgeKind::Dependency;
+};
+
+struct GraphDelta {
+    std::vector&lt;GraphNode&gt; upsert_nodes;
+    // Edges optional in v1 (OQ3): may be empty until edge visualization is chosen
+    std::vector&lt;GraphEdge&gt; upsert_edges;
+    std::vector&lt;NodeId&gt; remove_nodes;   // uncle eviction, etc.
+};
+
+class BlockGraph {
+public:
+    void apply(const GraphDelta&amp; delta);
+    bool contains(const NodeId&amp; id) const;
+    std::optional&lt;GraphNode&gt; get(const NodeId&amp; id) const;
+    std::vector&lt;GraphNode&gt; nodes_snapshot() const; // sorted copy for layout
+    std::vector&lt;GraphEdge&gt; edges_from(const NodeId&amp; id) const;
+    void prune(int64_t min_timestamp_ms, size_t max_nodes);
+
+    // Dual-write validation helpers
+    size_t node_count() const;
+    std::vector&lt;NodeId&gt; live_ids_sorted() const;
+
+private:
+    mutable std::shared_mutex mu_;
+    std::unordered_map&lt;NodeId, GraphNode&gt; nodes_;
+    std::unordered_map&lt;NodeId, std::vector&lt;GraphEdge&gt;&gt; out_edges_;
+};</code></pre>
+<p><strong>v1 edges:</strong> PR3 may ship <strong>nodes-only</strong> deltas (<code>upsert_edges</code> empty). Edge storage is allowed but not required until OQ3 decides visualization.</p>
+<p><strong>Rationale vs current <code>chains</code>:</strong> flat nodes + <code>lane</code> avoid hard-coding 16-way containers.</p>
+<p><strong>Rationale vs <code>Dag</code>:</strong> replace; do not store <code>cJSON*</code>.</p>
+<h3>2. Detail continuity — <code>AlphDetailStore</code> (mandatory before engine drops <code>AlphBlock</code>)</h3>
+<pre><code>// adapters/alephium/alph_detail_store.hpp
+#pragma once
+#include &quot;alph_block.hpp&quot;
+#include &quot;domain/block_graph.hpp&quot;
+#include &lt;unordered_map&gt;
+#include &lt;mutex&gt;
+#include &lt;optional&gt;
+
+// v1: populated at parse time alongside GraphDelta (not lazy fetch).
+// Ensures inspector never loses txn/UTXO data when renderer stops storing AlphBlock.
+class AlphDetailStore {
+public:
+    void upsert(const AlphBlock&amp; block);          // by block.hash
+    void remove(const NodeId&amp; id);                // uncle eviction / prune
+    void remove_many(const std::vector&lt;NodeId&gt;&amp;);
+    std::optional&lt;AlphBlock&gt; get(const NodeId&amp; id) const;
+    // Thread-safe: main writes on poll; UI overlay may copy selected detail under mutex
+    AlphBlock get_or_empty(const NodeId&amp; id) const;
+
+private:
+    mutable std::mutex mu_;
+    std::unordered_map&lt;NodeId, AlphBlock&gt; by_id_;
+};</code></pre>
+<p><strong>v1 policy (K14 refined):</strong></p>
+<ul>
+<li>Hot <code>GraphNode</code> = metadata only.</li>
+<li><strong>At parse time</strong>, adapter upserts full <code>AlphBlock</code> into <code>AlphDetailStore</code> (same moment as <code>GraphDelta</code> nodes).</li>
+<li>Selection UI: <code>NodeId</code> → <code>detail_store.get(id)</code> (no network required for already-polled blocks).</li>
+<li>Optional later: <code>fetch_detail</code> for sparse/historical blocks not in store.</li>
+<li>PR that removes <code>AlphBlock</code> from the renderer <strong>must not land</strong> without this store already feeding the inspector.</li>
+</ul>
+<h3>3. Chain adapter (<code>adapters/chain_adapter.hpp</code>)</h3>
+<pre><code>#pragma once
+#include &quot;domain/block_graph.hpp&quot;
+#include &lt;string&gt;
+
+struct AdapterConfig {
+    std::string base_url;
+    int64_t lookback_window_ms = 10 * 60 * 1000;  // ALPH_LOOKBACK_WINDOW_SECONDS
+    int64_t poll_interval_ms   = 8 * 1000;        // ALPH_TARGET_BLOCK_SECONDS
+    int64_t overlap_ms         = 8 * 1000;        // one block interval overlap
+};
+
+class IChainAdapter {
+public:
+    virtual ~IChainAdapter() = default;
+    virtual const char* chain_id() const = 0;
+    virtual void configure(const AdapterConfig&amp; cfg) = 0;
+
+    // On success: advances last_success_to_ts to now_ms; returns delta (may be empty).
+    // On failure: leaves watermark unchanged; returns empty delta (caller keeps last graph).
+    virtual GraphDelta poll(int64_t now_ms) = 0;
+
+    // Optional remote hydrate (not required for v1 inspector if store is warm)
+    virtual bool fetch_detail(const NodeId&amp; id, std::string&amp; /*out*/) { (void)id; return false; }
+};</code></pre>
+<p><strong>Alephium adapter poll watermark policy (mirror today’s success-only advance):</strong></p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>last_success_to_ts</code></td><td>End of last successful poll window (ms); init <code>now - lookback</code> on first configure/start</td></tr>
+<tr><td>Request range</td><td><code>[last_success_to_ts - overlap_ms, now_ms]</code></td></tr>
+<tr><td>Success</td><td>Parse → build <code>GraphDelta</code> + detail upserts → set <code>last_success_to_ts = now_ms</code></td></tr>
+<tr><td>Failure (null JSON / HTTP error)</td><td><strong>Do not</strong> advance watermark; log; return empty delta</td></tr>
+<tr><td>Idempotency</td><td><code>BlockGraph</code> upsert by hash; duplicate hashes no-op (same as <code>emplace</code> + <code>&quot;duplicate\n&quot;</code>)</td></tr>
+<tr><td>Uncle eviction</td><td><code>remove_nodes</code> for uncle hashes removed from live set; also <code>detail_store.remove</code></td></tr>
+</table>
+<p><strong>Also owns:</strong> mapping <code>chainFrom/chainTo</code> → <code>lane</code>, <code>lane_count_hint = 16</code>, default <code>LanePalette</code> export for layout (or document that layout uses the fixed 16-color table ported from <code>SHARD_COLORS</code>).</p>
+<h3>4. Scene / layout (<code>domain/layout.hpp</code>)</h3>
+<pre><code>#pragma once
+#include &quot;domain/block_graph.hpp&quot;
+#include &lt;glm/glm.hpp&gt;
+#include &lt;vector&gt;
+#include &lt;array&gt;
+#include &lt;cstdint&gt;
+#include &lt;unordered_map&gt;
+
+// v1: no per-instance scale (vert.glsl / InstanceData are pos+color only).
+struct VisualInstance {
+    NodeId id;
+    glm::vec3 position;
+    glm::vec3 color;
+};
+
+struct FrameDrawList {
+    uint64_t layout_seq = 0;              // bumps each build
+    std::vector&lt;VisualInstance&gt; instances; // stable order: sort by NodeId for pick coherence
+    std::vector&lt;NodeId&gt; pick_index_to_node; // parallel to instances (redundant with id field; keep explicit)
+    // edges optional — empty until OQ3
+    struct Segment { glm::vec3 a, b; glm::vec4 color; };
+    std::vector&lt;Segment&gt; edges;
+};
+
+// Palette: exact parity with file-static SHARD_COLORS[16] for Alephium
+struct LanePalette {
+    static constexpr size_t kMax = 16;
+    std::array&lt;glm::vec3, kMax&gt; colors; // initialize to current SHARD_COLORS literals
+    glm::vec3 color_for(uint32_t lane) const {
+        return colors[lane % kMax];
+    }
+};
+
+struct LayoutParams {
+    float meters_per_height = 8.f;  // ALPH_TARGET_BLOCK_SECONDS
+    float base_radius = 20.f;
+    LanePalette palette;            // default = port of SHARD_COLORS
+};
+
+class ILayout {
+public:
+    virtual ~ILayout() = default;
+    virtual FrameDrawList build(const BlockGraph&amp; graph, const LayoutParams&amp; p) = 0;
+    virtual void reset_session_origins() = 0; // clear start_height-like state
+};
+
+// Port of current polar layout — STATEFUL
+class PolarShardLayout final : public ILayout {
+public:
+    FrameDrawList build(const BlockGraph&amp; graph, const LayoutParams&amp; p) override;
+    void reset_session_origins() override { origin_height_by_lane_.clear(); }
+
+private:
+    // Session-local: first-seen height per lane → Z origin (mirrors start_height[16])
+    std::unordered_map&lt;uint32_t, int64_t&gt; origin_height_by_lane_;
+    uint64_t seq_ = 0;
+};</code></pre>
+<p><strong>Layout math (parity):</strong></p>
+<pre><code>// origin = origin_height_by_lane_[lane]; if missing, set to node.height on first sight
+angle  = (lane / lane_count_hint) * 2π
+radius = base_radius + block_index_within_height_lane * meters_per_height
+z      = -(height - origin) * meters_per_height
+color  = palette.color_for(lane)</code></pre>
+<p><strong>Stable instance order (acceptance for PR4+):</strong> after building instances, <strong>sort by <code>NodeId</code> ascending</strong> (or assign sticky <code>pick_id</code> integer). Do not rely on <code>unordered_map</code> / nested <code>map</code> iteration order alone without documenting it. Today’s order is map iteration; target prefers explicit sort so pick mapping is reproducible.</p>
+<p><strong>Who calls <code>build</code> during migration:</strong></p>
+<table>
+<tr><th>Phase</th><th>Caller</th></tr>
+<tr><td>PR4 (layout extract, domain still in renderer)</td><td><code>VulkanRenderer::render_loop</code> calls <code>layout_.build(graph_, params)</code> under or after taking a <strong>graph snapshot</strong>, still before GPU upload</td></tr>
+<tr><td>PR6a+ (submit_frame path)</td><td><strong>Main thread</strong> builds <code>FrameDrawList</code> and <code>submit_frame</code>s it</td></tr>
+</table>
+<h3>5. Graphics engine public API</h3>
+<p><strong>Language:</strong> v1 public headers <strong>avoid <code>std::span</code></strong> so they compile without forcing C++20. Prefer:</p>
+<pre><code>struct FrameSubmit {
+    const GpuInstance* instances = nullptr;
+    size_t instance_count = 0;
+    CameraUBO camera{};
+    uint64_t frame_seq = 0;     // client-assigned or engine-assigned on copy
+    // optional: const ArrowDesc* arrows; size_t arrow_count;
+};</code></pre>
+<p>Hygiene PR may set <code>/std:c++17</code> on both vcxproj files. C++20/<code>std::span</code> is optional later.</p>
+<pre><code>#pragma once
+#include &lt;cstdint&gt;
+#include &lt;glm/glm.hpp&gt;
+
+struct EngineCreateInfo {
+    void* platform_instance;  // HINSTANCE
+    void* window;             // HWND
+    uint32_t width;
+    uint32_t height;
+    bool enable_validation = true; // Debug default true
+};
+
+struct CameraUBO {
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::vec3 light_pos;
+    float pad1;
+    glm::vec3 view_pos;
+    float pad2;
+    float meters;  // matches vert.glsl ubo.meters
+};
+
+struct GpuInstance {
+    glm::vec3 pos;
+    glm::vec3 color;
+    // no scale in v1
+};
+
+struct FrameSubmit {
+    const GpuInstance* instances = nullptr;
+    size_t instance_count = 0;
+    CameraUBO camera{};
+    uint64_t client_seq = 0; // correlates with pick map
+};
+
+struct PickQuery {
+    uint32_t mouse_x;
+    uint32_t mouse_y;
+};
+
+struct PickResult {
+    bool hit = false;
+    uint32_t instance_index = ~0u;
+    uint64_t frame_seq = 0;  // which submitted frame was GPU-visible
+};
+
+// App chrome drawn on the RENDER THREAD between ImGui::NewFrame and ImGui::Render
+class IUiOverlay {
+public:
+    virtual ~IUiOverlay() = default;
+    virtual void draw() = 0; // ImGui::* calls only; no Vulkan
+};
+
+class IRenderEngine {
+public:
+    virtual ~IRenderEngine() = default;
+
+    virtual void initialize(const EngineCreateInfo&amp; info) = 0;
+    virtual void resize(uint32_t width, uint32_t height) = 0;
+    virtual void shutdown() = 0;
+
+    virtual void start() = 0;  // starts engine-owned render thread
+    virtual void stop() = 0;   // joins thread; safe after last submit
+
+    // Thread-safe from main: deep-copy into next publish slot (triple buffer preferred).
+    // If called multiple times per GPU frame, latest copy wins (drop intermediate).
+    // Pointers in FrameSubmit need only live for the duration of this call.
+    virtual void submit_frame(const FrameSubmit&amp; frame) = 0;
+
+    virtual void set_ui_overlay(IUiOverlay* overlay) = 0; // nullptr = none; not owned
+
+    virtual void request_pick(const PickQuery&amp; q) = 0;
+    virtual bool consume_pick(PickResult&amp; out) = 0; // true if a new result available
+};
+
+IRenderEngine* create_vulkan_engine();
+void destroy_render_engine(IRenderEngine*);</code></pre>
+<p>#### FrameSubmit / pick lifetime rules</p>
+<p>1. <strong>Deep copy:</strong> <code>submit_frame</code> copies <code>instance_count * sizeof(GpuInstance)</code> + <code>CameraUBO</code> + <code>client_seq</code> into a free slot; returns after copy (does not retain caller pointers).</p>
+<p>2. <strong>Buffering:</strong> at least double-buffer; <strong>triple-buffer</strong> recommended so main never blocks on GPU. Slots: <code>writing</code>, <code>pending</code>, <code>gpu_reading</code>.</p>
+<p>3. <strong>Latest wins:</strong> multiple submits before next GPU frame → only newest <code>pending</code> is swapped in.</p>
+<p>4. <strong>resize / stop:</strong> <code>resize</code> may flag swapchain recreate on render thread; <code>stop</code> waits idle then joins — no submit after <code>stop</code> begins.</p>
+<p>5. <strong>Pick coherence:</strong> when picker runs, it records against the <strong>currently bound instance buffer</strong> for that command buffer. <code>PickResult.frame_seq</code> = that buffer’s <code>client_seq</code>. Client must map <code>instance_index</code> using the <code>pick_index_to_node</code> from the <code>FrameDrawList</code> with the same seq (keep a small ring of recent maps, e.g. last 3).</p>
+<p>6. <strong>Stable order:</strong> enforced by layout sort so re-layout without set change does not scramble indices unnecessarily.</p>
+<p>#### ImGui contract (K8)</p>
+<table>
+<tr><th>Step</th><th>Thread</th><th>Owner</th></tr>
+<tr><td><code>ImGui_ImplWin32_WndProcHandler</code></td><td>Main</td><td>Client <code>WndProc</code></td></tr>
+<tr><td><code>ImGui_ImplVulkan_Init</code> / Shutdown</td><td>Engine init/shutdown</td><td>Engine</td></tr>
+<tr><td><code>ImGui_ImplVulkan_NewFrame</code> + <code>ImGui_ImplWin32_NewFrame</code> + <code>ImGui::NewFrame</code></td><td><strong>Render</strong></td><td>Engine</td></tr>
+<tr><td><code>IUiOverlay::draw()</code></td><td><strong>Render</strong></td><td>App implementation</td></tr>
+<tr><td><code>ImGui::Render</code> + <code>ImGui_ImplVulkan_RenderDrawData</code></td><td><strong>Render</strong></td><td>Engine</td></tr>
+<tr><td>Camera sliders in overlay</td><td><strong>Render</strong></td><td>Mutate <code>CameraState</code> under mutex; main reads for next <code>submit_frame</code> <strong>or</strong> overlay writes camera directly into a side channel the engine merges (prefer shared <code>CameraState</code> with mutex — K15)</td></tr>
+</table>
+<p>**Target main does <em>not</em> call ImGui::NewFrame on main.** Pseudocode below reflects that.</p>
+<h3>6. Client wiring (target shape)</h3>
+<pre><code>// Pseudocode — v1
+CameraState camera; // eye_z, meters_per_second, mutex
+UiSnapshot  ui_snap; // recent NodeIds, selected, detail copy — published by main
+
+class AppOverlay : public IUiOverlay {
+  void draw() override {
+    // read ui_snap / camera under locks; ImGui sliders write camera
+    // inspector uses AlphDetailStore copy from snapshot, not live adapter
+  }
+};
+
+auto engine = create_vulkan_engine();
+engine-&gt;initialize({ hInstance, hwnd, w, h });
+AppOverlay overlay{...};
+engine-&gt;set_ui_overlay(&amp;overlay);
+engine-&gt;start();
+
+BlockGraph graph;
+PolarShardLayout layout;
+AlphDetailStore details;
+AlephiumAdapter adapter{details};
+adapter.configure({ baseUrl });
+
+uint64_t seq = 0;
+std::array&lt;std::vector&lt;NodeId&gt;, 3&gt; pick_maps;
+while (running) {
+  pump_win32(); // ImGui Win32 handler only
+  if (poll_due) {
+    auto delta = adapter.poll(now_ms); // also upserts details
+    graph.apply(delta);
+    graph.prune(...);
+  }
+  FrameDrawList dl = layout.build(graph, params);
+  // stable sort already inside build
+  pick_maps[seq % 3] = dl.pick_index_to_node;
+  CameraUBO cam = camera.to_ubo(aspect);
+  std::vector&lt;GpuInstance&gt; gpu = to_gpu(dl);
+  engine-&gt;submit_frame({ gpu.data(), gpu.size(), cam, seq });
+  publish_ui_snapshot(ui_snap, graph, details, selected);
+
+  PickResult pr;
+  if (engine-&gt;consume_pick(pr) &amp;&amp; pr.hit) {
+    auto&amp; map = pick_maps[pr.frame_seq % 3];
+    if (pr.frame_seq matches map epoch) selected = map[pr.instance_index];
+  }
+  ++seq;
+  Sleep(10);
+}
+engine-&gt;stop();
+engine-&gt;shutdown();</code></pre>
+<h3>Interface dependency rules</h3>
+<pre><code>flowchart BT
+  App[app/main + overlay]
+  Adapt[adapters/alephium + detail store]
+  Dom[domain/block_graph+layout]
+  Eng[engine public API]
+  Gfx[graphics Vulkan impl]
+
+  Adapt --&gt; Dom
+  App --&gt; Adapt
+  App --&gt; Dom
+  App --&gt; Eng
+  Eng --&gt; Gfx
+  Dom -.-&gt;|no link| Gfx
+  Adapt -.-&gt;|no link| Eng</code></pre>
+<p>---</p>
+<h2>Proposed Design (detailed)</h2>
+<h3>Phase model + spike→PR gates (corrected)</h3>
+<pre><code>flowchart TD
+  P0[P0: hygiene PR1/PR2]
+  S1[Spike S1: BlockGraph offline]
+  S2[Spike S2: Engine FrameSubmit only]
+  S3[Spike S3: Adapter + detail store live]
+  S4[Spike S4: IUiOverlay boundary]
+  PR3[PR3 dual-write]
+  PR4[PR4 layout]
+  PR5[PR5 adapter]
+  PR6[PR6a/b strip domain]
+  PR9[PR9 delete dual-write]
+
+  P0 --&gt; S1
+  P0 --&gt; S2
+  S1 --&gt; PR3
+  S1 --&gt; S3
+  PR3 --&gt; PR4
+  PR3 --&gt; PR5
+  S3 --&gt; PR5
+  S2 --&gt; PR6
+  PR4 --&gt; PR6
+  PR5 --&gt; PR6
+  S4 --&gt; PR8
+  PR6 --&gt; PR9
+  S1 --&gt; PR9
+  S2 --&gt; PR9
+  S3 --&gt; PR9</code></pre>
+<table>
+<tr><th>Gate</th><th>Required before</th></tr>
+<tr><td><strong>S1 pass</strong></td><td>Merge <strong>PR3</strong> (dual-write graph)</td></tr>
+<tr><td><strong>S2 pass</strong></td><td>Merge <strong>PR6a</strong> (<code>submit_frame</code> path / engine-only draw validation)</td></tr>
+<tr><td><strong>S3 pass</strong></td><td>Merge <strong>PR5</strong> (live adapter); also required before <strong>PR6b</strong> (delete <code>Add_Block</code>) so detail store + poll path exist</td></tr>
+<tr><td><strong>S4 pass</strong></td><td>Merge <strong>PR8</strong> (overlay extraction)</td></tr>
+<tr><td><strong>S1+S2+S3 green</strong></td><td>Merge <strong>PR9</strong> (delete dual-write / dead structures)</td></tr>
+</table>
+<p>There is <strong>no</strong> blanket “all spikes before PR3+”. Low-risk dual-write proceeds after S1 alone.</p>
+<h3>Graphics engine modularization strategy</h3>
+<p>1. Complete peel bottom-up; keep <code>gpu_prv_lib.h</code> private.</p>
+<p>2. Publish real public API (<code>IRenderEngine</code>).</p>
+<p>3. <strong>Snapshot + double/triple buffer:</strong> layout produces CPU vectors; engine deep-copies — <strong>do not</strong> write layout output into mapped GPU memory under the ingest lock.</p>
+<p>4. Pick returns index + <code>frame_seq</code> only.</p>
+<p>5. ImGui host in engine; chrome via <code>IUiOverlay</code> on render thread (K8).</p>
+<h3>Domain: BlockGraph + DetailStore as replacement for <code>chains</code> + <code>Dag</code></h3>
+<table>
+<tr><th>Current</th><th>Target</th></tr>
+<tr><td><code>vector&lt;HeightToHash&gt; chains</code> (16)</td><td><code>BlockGraph</code> nodes with <code>lane</code></td></tr>
+<tr><td>Full <code>AlphBlock</code> in renderer maps</td><td>Metadata in graph; <strong>full block in <code>AlphDetailStore</code></strong></td></tr>
+<tr><td><code>Dag</code> cJSON map</td><td>delete</td></tr>
+<tr><td><code>blockQueue</code> for UI</td><td><code>RecentIndex</code> / <code>UiSnapshot</code> (<code>deque&lt;NodeId&gt;</code>)</td></tr>
+</table>
+<h3>Layout</h3>
+<p>See interfaces: <strong>stateful</strong> <code>origin_height_by_lane_</code>, palette from <code>LanePalette</code> (port of <code>SHARD_COLORS</code>), no v1 scale.</p>
+<h3>Multi-chain path</h3>
+<p>Unchanged principle: second adapter → same graph; engine untouched.</p>
+<h3>Build system (near term)</h3>
+<ul>
+<li>Keep <code>alephium_visualizer.sln</code> + <code>graphics</code> static lib + vcpkg (<code>curl</code>, <code>cjson</code>, <code>glm</code>).</li>
+<li><strong>Early hygiene:</strong> set <code>&lt;LanguageStandard&gt;stdcpp17&lt;/LanguageStandard&gt;</code> (or <code>stdcpp20</code> if adopting span later) on <strong>both</strong> app and graphics vcxproj — currently unspecified.</li>
+<li><code>graphics</code> must not link curl/cjson.</li>
+<li>Debug: validation layers via existing <code>validation.cpp</code> (<code>#ifndef NDEBUG</code>); Release strips messenger.</li>
+</ul>
+<p>---</p>
+<h2>API / Interface Changes</h2>
+<h3>Public app-facing API today</h3>
+<pre><code>class VulkanRenderer {
+public:
+    void Init(void *hInstance, void *hwnd);
+    void Add_Block(cJSON* block);  // domain + detail leak
+    void Resize();
+    void Start();
+    void Stop();
+};</code></pre>
+<h3>Target app-facing API</h3>
+<pre><code>IRenderEngine* create_vulkan_engine();
+// + BlockGraph, ILayout, IChainAdapter, AlphDetailStore, IUiOverlay
+// No Add_Block on engine.</code></pre>
+<h3>Migration shims</h3>
+<table>
+<tr><th>Stage</th><th>Shim</th></tr>
+<tr><td>PR3–PR5</td><td><code>Add_Block</code> dual-writes graph + detail store; chains remain source for draw</td></tr>
+<tr><td>PR6a</td><td><code>submit_frame</code> path available <strong>beside</strong> <code>Add_Block</code>; main may still call <code>Add_Block</code></td></tr>
+<tr><td>PR6b</td><td>Delete <code>Add_Block</code> / domain types from engine</td></tr>
+</table>
+<p>---</p>
+<h2>Data Model Changes</h2>
+<h3>From</h3>
+<pre><code>cJSON block
+  → AlphBlock (full, incl. txns)
+    → chains[chain_idx][height][hash]   // renderer
+    → blockQueue (UI)
+    → InstanceData {pos,color}          // pick via index</code></pre>
+<h3>To</h3>
+<pre><code>cJSON block (adapter only)
+  → GraphDelta (nodes; edges optional)
+  → AlphDetailStore[id] = AlphBlock     // mandatory for inspector
+  → BlockGraph
+    → FrameDrawList (stable order)
+      → FrameSubmit deep copy → engine</code></pre>
+<h3>Migration strategy</h3>
+<p>1. <strong>PR3:</strong> dual-write <code>BlockGraph</code> + <strong>start <code>AlphDetailStore</code></strong> from the same parse as <code>Add_Block</code>; validate live hash sets (not counts alone).</p>
+<p>2. <strong>PR4:</strong> layout from graph with <code>origin_height_by_lane_</code> + <code>LanePalette</code>; call site still renderer.</p>
+<p>3. <strong>PR5:</strong> adapter owns poll watermark + parse; still fills detail store.</p>
+<p>4. <strong>PR6a:</strong> <code>submit_frame</code> path; inspector already uses detail store by <code>NodeId</code>.</p>
+<p>5. <strong>PR6b:</strong> remove <code>AlphBlock</code> from engine; selection is <code>NodeId</code> only.</p>
+<p>6. <strong>PR11 (optional):</strong> slim store (drop bulk txn copies for unselected nodes) only <strong>after</strong> store is sole detail path — not the first introduction of the store.</p>
+<p>7. Drop <code>Dag</code> and main’s dead <code>vector&lt;cJSON*&gt; blockQueue</code>.</p>
+<h3>Dual-write acceptance (stronger than count)</h3>
+<table>
+<tr><th>Check</th><th>Pass criteria</th></tr>
+<tr><td>Live hash set</td><td>Sorted list of hashes in <code>chains</code> == <code>graph.live_ids_sorted()</code> after each <code>Add_Block</code>/poll</td></tr>
+<tr><td>Uncle eviction</td><td>Removing an uncle from <code>chains</code> produces <code>remove_nodes</code> containing that hash; detail store removes too</td></tr>
+<tr><td>Lane/height</td><td>For each live node, <code>lane == chain_idx()</code> and <code>height</code> match</td></tr>
+<tr><td>Layout instance count</td><td><code>layout.build</code> count == cubes that would have been emitted from <code>chains</code></td></tr>
+<tr><td>Debug toggle</td><td>Optional <code>BLOCKVIZ_DUALWRITE_ASSERT</code> flashes/logs first mismatch</td></tr>
+</table>
+<h3>Storage estimates</h3>
+<table>
+<tr><th>Item</th><th>Estimate</th></tr>
+<tr><td>GraphNode metadata</td><td>~100–200 B/node</td></tr>
+<tr><td>AlphDetailStore full blocks</td><td>larger (txns); acceptable for lookback-scale node counts</td></tr>
+<tr><td>10 min lookback ~1–2k nodes</td><td>hundreds of KB metadata; detail dominates if all txns kept</td></tr>
+<tr><td>Instance buffer <code>MAX_INSTANCES</code> 1M × 24 B</td><td>~24 MB reserved — right-size later</td></tr>
+<tr><td>FrameSubmit triple buffer</td><td>3 × active_instances × 24 B CPU side</td></tr>
+</table>
+<p>---</p>
+<h2>Alternatives Considered</h2>
+<h3>Alternative A — “Clean VulkanRenderer in place”</h3>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr><td>Minimal churn</td><td>Domain remains in renderer; multi-chain blocked</td></tr>
+</table>
+<p><strong>Reject as end state</strong>; OK as intermediate steps.</p>
+<h3>Alternative B — Full ECS</h3>
+<p><strong>Reject for now</strong> — overkill.</p>
+<h3>Alternative C — N renderers per chain</h3>
+<p><strong>Reject</strong> — contradicts multi-chain goal.</p>
+<h3>Alternative D — One graph model + adapters (chosen)</h3>
+<p><strong>Accept.</strong> Edges may be deferred (nodes-first PR3).</p>
+<h3>Alternative E — Immediate CMake + GLFW rewrite</h3>
+<p><strong>Reject</strong> until engine boundary is stable on Win32.</p>
+<p>---</p>
+<h2>Security &amp; Privacy Considerations</h2>
+<table>
+<tr><th>Topic</th><th>Assessment</th></tr>
+<tr><td><strong>Threat model</strong></td><td>Local desktop tool; public HTTPS APIs; not a wallet; no private keys</td></tr>
+<tr><td><strong>Network</strong></td><td>User-configured URLs in <code>config.json</code></td></tr>
+<tr><td><strong>Data handling</strong></td><td>Public chain data; avoid verbose address/tx logging</td></tr>
+<tr><td><strong>Supply chain</strong></td><td>vcpkg: curl, cjson, glm</td></tr>
+<tr><td><strong>Injection</strong></td><td>Remote JSON via cJSON; <code>commands.c</code> URL buffers 128 chars — watch truncation</td></tr>
+<tr><td><strong>ImGui</strong></td><td>Clipboard hash copy is fine</td></tr>
+<tr><td><strong>Validation layers</strong></td><td>Debug builds enable Khronos validation via <code>validation.cpp</code> / instance setup; Release strips debug messenger (<code>#ifndef NDEBUG</code>)</td></tr>
+</table>
+<p>No auth redesign required for this architecture pass. Structured logging remains a non-goal (printf/ImGui).</p>
+<p>---</p>
+<h2>Observability</h2>
+<h3>Current</h3>
+<ul>
+<li><code>printf</code> for poll counts, duplicates, HTTP errors, device name.</li>
+<li>ImGui totals/bps; no structured metrics.</li>
+</ul>
+<h3>Target (lightweight)</h3>
+<table>
+<tr><th>Signal</th><th>Where</th><th>How</th></tr>
+<tr><td>Poll latency / block count</td><td>adapter</td><td>log + ImGui</td></tr>
+<tr><td>Graph node counts + dual-write mismatch</td><td>domain</td><td>log / assert</td></tr>
+<tr><td>Instance count / upload bytes</td><td>engine</td><td>ImGui or console</td></tr>
+<tr><td>Frame time / GPU wait</td><td>engine</td><td>existing QPC loop</td></tr>
+<tr><td>Pick hit + frame_seq</td><td>engine</td><td>debug</td></tr>
+<tr><td>Validation layers</td><td>graphics</td><td>Debug-only (<code>validation.cpp</code>)</td></tr>
+</table>
+<p><strong>Alerting:</strong> N/A; prefer non-fatal poll failures (keep last graph + detail).</p>
+<p>---</p>
+<h2>Prototype-First Validation Plan</h2>
+<h3>Spike S1 — BlockGraph offline (½–1 day)</h3>
+<ul>
+<li><code>BlockGraph</code> + <code>GraphDelta</code> (nodes; edges optional).</li>
+<li>Synthetic 16-lane nodes; uncle <code>remove_nodes</code> unit check.</li>
+<li><strong>Pass:</strong> 10k deltas &lt; 50 ms; prune works; no Vulkan link.</li>
+<li><strong>Unlocks:</strong> PR3.</li>
+</ul>
+<h3>Spike S2 — Engine-only draw (1–2 days)</h3>
+<ul>
+<li>Hardcoded <code>FrameSubmit</code>; <code>start/stop/resize/pick</code> with <code>frame_seq</code>.</li>
+<li><strong>Pass:</strong> ~60 FPS; pick returns index+seq; <strong>zero</strong> <code>alph_block</code>/cJSON in engine TU.</li>
+<li><strong>Unlocks:</strong> PR6a.</li>
+</ul>
+<h3>Spike S3 — AlephiumAdapter + detail store (1 day)</h3>
+<ul>
+<li>Poll watermark policy; <code>GraphDelta</code> + <code>AlphDetailStore</code> upserts.</li>
+<li>Inspector can show txns via store <strong>without</strong> renderer <code>AlphBlock</code>.</li>
+<li><strong>Pass:</strong> live net visual + selection inspector.</li>
+<li><strong>Unlocks:</strong> PR5 merge quality; required before PR6b.</li>
+</ul>
+<h3>Spike S4 — IUiOverlay (½ day)</h3>
+<ul>
+<li>Explorer strings only in app overlay TU.</li>
+<li><strong>Unlocks:</strong> PR8.</li>
+</ul>
+<h3>Dead-end / pivot triggers</h3>
+<table>
+<tr><th>Signal</th><th>Sev</th><th>Pivot</th></tr>
+<tr><td>Layout still requires mapped GPU memory under ingest lock</td><td>High</td><td>Snapshot first (PR4/PR7)</td></tr>
+<tr><td>Pick index wrong after reorder</td><td>High</td><td>Stable sort + <code>frame_seq</code> maps (PR4/PR6a)</td></tr>
+<tr><td>Inspector empty after domain peel</td><td>Critical</td><td>Detail store before PR6b (mandatory)</td></tr>
+<tr><td>UI overlay data races</td><td>High</td><td><code>UiSnapshot</code> publish from main</td></tr>
+<tr><td><code>lane</code>/<code>group</code> insufficient for next chain</td><td>Med</td><td>Extend graph; not engine</td></tr>
+<tr><td>Dual-write hash sets diverge</td><td>High</td><td>Fix delta builder before deleting chains</td></tr>
+</table>
+<p>---</p>
+<h2>Risks &amp; Mitigations</h2>
+<table>
+<tr><th>Risk</th><th>Sev</th><th>Mitigation</th></tr>
+<tr><td>Big-bang rewrite stalls project</td><td>High</td><td>Incremental PRs; split PR6; spikes with mapped gates</td></tr>
+<tr><td>Lose selection UX at PR6</td><td>Critical</td><td>Mandatory <code>AlphDetailStore</code> before PR6b</td></tr>
+<tr><td>Leaking cJSON into engine</td><td>High</td><td>S2 gate; include hygiene</td></tr>
+<tr><td>Existing <code>blockQueue</code>/<code>selected_block</code> races</td><td>High</td><td>Snapshot/<code>UiSnapshot</code> as part of dual-write/layout work — not only “double-buffer GPU”</td></tr>
+<tr><td>Layout origin state forgotten</td><td>Med</td><td><code>origin_height_by_lane_</code> in PR4 acceptance</td></tr>
+<tr><td>Pick/frame desync</td><td>High</td><td><code>frame_seq</code> + ring of pick maps</td></tr>
+<tr><td>Over-abstract multi-chain</td><td>Med</td><td>Alephium-only adapter; optional edges</td></tr>
+<tr><td><code>queueFamilyIndex = 0</code></td><td>Med</td><td>Note for later robustness</td></tr>
+<tr><td>MSVC language standard unspecified</td><td>Low</td><td>Hygiene sets C++17</td></tr>
+</table>
+<p>---</p>
+<h2>Rollout Plan</h2>
+<h3>Principles</h3>
+<p>1. Spikes unlock <strong>specific</strong> PRs (table above); no multi-week dark branch.</p>
+<p>2. Each PR: Debug\|x64 + smoke (poll, cubes, <strong>inspector with txns</strong>, pick, resize).</p>
+<p>3. Dual-write/facade over flag soup; optional <code>BLOCKVIZ_DUALWRITE_ASSERT</code>.</p>
+<p>4. Rollback = revert one PR; <strong>PR6 split</strong> keeps reverts small.</p>
+<h3>Feature flags</h3>
+<ul>
+<li>Prefer none. Optional compile-time dual-write asserts only.</li>
+</ul>
+<h3>Staging</h3>
+<p>Local mainnet/testnet via <code>config.json</code>.</p>
+<p>---</p>
+<h2>Key Decisions</h2>
+<table>
+<tr><th>#</th><th>Decision</th><th>Rationale</th></tr>
+<tr><td>K1</td><td><strong>Adapter → BlockGraph → Layout/Scene → Engine</strong></td><td>Separates change rates</td></tr>
+<tr><td>K2</td><td><strong>One graph + adapters</strong> (not N renderers)</td><td>Multi-chain without forking Vulkan</td></tr>
+<tr><td>K3</td><td><strong>Engine API has no chain/cJSON types</strong></td><td>Enforces modularization</td></tr>
+<tr><td>K4</td><td><strong>Pick returns index + frame_seq; client maps to NodeId</strong></td><td>Detail stays out of GPU; coherent with reordering</td></tr>
+<tr><td>K5</td><td><strong>Keep Vulkan + Win32 + ImGui</strong></td><td>Working stack; rewrite non-goal</td></tr>
+<tr><td>K6</td><td>**Prototype spikes before <em>matching</em> large PRs**</td><td>Validate-then-commit; per-PR gates not blanket</td></tr>
+<tr><td>K7</td><td><strong>Incremental PRs; app always runs</strong></td><td>Revert-friendly; split mega-PRs</td></tr>
+<tr><td>K8</td><td><strong>v1: engine-owned render thread; ImGui host in engine; chrome via <code>IUiOverlay::draw</code> on render thread</strong></td><td>Matches current architecture; avoids dual Vulkan owners; closes OQ6 for v1</td></tr>
+<tr><td>K9</td><td><strong>Replace <code>Dag</code> rather than extend</strong></td><td>Wrong abstraction</td></tr>
+<tr><td>K10</td><td><strong>Polar layout as <code>ILayout</code>; palette = <code>LanePalette</code> port of <code>SHARD_COLORS</code></strong></td><td>Parity + reuse</td></tr>
+<tr><td>K11</td><td><strong>Grow <code>graphics</code> static lib into engine backend</strong></td><td>Lowest build friction</td></tr>
+<tr><td>K12</td><td><strong>Alephium sole adapter until core proves out</strong></td><td>Scope control</td></tr>
+<tr><td>K13</td><td><strong>Deep-copy FrameSubmit triple/double buffer; layout never writes GPU-mapped memory under ingest lock; publish UI snapshots to fix races</strong></td><td>Corrects lock-scope myth; fixes real races + hitch</td></tr>
+<tr><td>K14</td><td><strong>v1: full <code>AlphBlock</code> in adapter-owned <code>AlphDetailStore</code> at parse time; hot graph nodes stay slim; inspector reads store by NodeId</strong></td><td>Selection continuity mandatory before engine drops <code>AlphBlock</code></td></tr>
+<tr><td>K15</td><td><strong>v1 camera state (<code>eye_z</code>, <code>meters_per_second</code>, aspect) owned by client <code>CameraState</code>; sliders in <code>IUiOverlay</code> mutate it under mutex; each <code>submit_frame</code> carries <code>CameraUBO</code> snapshot</strong></td><td>Resolves ImGui-on-render-thread vs camera-on-FrameSubmit</td></tr>
+<tr><td>K16</td><td><strong>v1 public API avoids <code>std::span</code>; set explicit MSVC C++17 (or 20 later)</strong></td><td>Compiles with current unspecified language mode</td></tr>
+<tr><td>K17</td><td><strong>v1 <code>VisualInstance</code>/<code>GpuInstance</code> = pos+color only (no scale)</strong></td><td>Matches <code>vert.glsl</code> / current instance buffer</td></tr>
+<tr><td>K18</td><td><strong><code>PolarShardLayout</code> keeps session-local <code>origin_height_by_lane_</code></strong></td><td>Visual parity with <code>start_height[16]</code></td></tr>
+<tr><td>K19</td><td><strong>Graph edges optional until OQ3; PR3 may be nodes-only</strong></td><td>Keep early PRs small</td></tr>
+</table>
+<p>---</p>
+<h2>Open Questions</h2>
+<p>Product / owner choices still open (OQ6 <strong>decided for v1</strong> as K8 — listed for future revisit only):</p>
+<p>1. <strong>Second chain priority?</strong> Topology stress on <code>lane</code>/<code>height</code>?</p>
+<p>2. <strong>History depth?</strong> Session lookback only vs hour-scale + LOD?</p>
+<p>3. <strong>Dependency edge visualization?</strong> (edges optional in graph until decided)</p>
+<p>4. <strong>ImGui scope?</strong> Minimal status vs always-on rich inspector?</p>
+<p>5. <strong>Network model?</strong> REST poll vs websockets later?</p>
+<p>6. ~~Engine threading~~ → <strong>Decided v1: engine-owned thread (K8).</strong> Revisit only if client-driven frames needed for tests.</p>
+<p>7. <strong>Config evolution?</strong> Select network index + layout + adapter id?</p>
+<p>8. <strong>C vs C++ boundary</strong> for <code>commands.c</code> / <code>config.c</code>?</p>
+<p>9. <strong>Executable naming</strong> when multi-chain-ready?</p>
+<p>10. <strong>Testing appetite?</strong> Console spikes vs Catch2/GoogleTest?</p>
+<p>11. <strong>Pick when <code>WantCaptureMouse</code>?</strong> Preserve current (possibly inverted) condition or switch to <code>!WantCaptureMouse</code>?</p>
+<p>---</p>
+<h2>Observability checklist for refactors</h2>
+<p>After each PR smoke test:</p>
+<ul>
+<li>[ ] Launch → discrete GPU name printed</li>
+<li>[ ] Cubes appear within one poll interval</li>
+<li>[ ] <strong>Select block → txn/UTXO inspector still populated</strong></li>
+<li>[ ] Esc / window close clean shutdown (<code>renderThread.join</code>)</li>
+<li>[ ] Resize (swapchain recreate)</li>
+<li>[ ] Click cube pick works (or known WantCaptureMouse behavior noted)</li>
+<li>[ ] Testnet URL via config</li>
+<li>[ ] Dual-write asserts clean (while enabled)</li>
+</ul>
+<p>---</p>
+<h2>References</h2>
+<table>
+<tr><th>Resource</th><th>Path / note</th></tr>
+<tr><td>App entry</td><td><code>src/main.cpp</code></td></tr>
+<tr><td>God-class</td><td><code>src/vulkan_renderer.hpp</code>, <code>src/vulkan_renderer.cpp</code></td></tr>
+<tr><td>Alephium model</td><td><code>src/alph_block.hpp</code></td></tr>
+<tr><td>HTTP API</td><td><code>src/commands.c</code>, <code>src/commands.h</code></td></tr>
+<tr><td>Config</td><td><code>src/config.c</code>, <code>config.json</code></td></tr>
+<tr><td>Unused DAG sketch</td><td><code>src/dag.hpp</code>, <code>src/dag.cpp</code></td></tr>
+<tr><td>GPU helpers</td><td><code>src/graphics/gpu_prv_lib.h</code>, <code>*.cpp</code></td></tr>
+<tr><td>Empty public API</td><td><code>src/graphics/gpu_pub_lib.h</code></td></tr>
+<tr><td>Validation</td><td><code>src/graphics/validation.cpp</code> (Debug layers)</td></tr>
+<tr><td>Debug arrows</td><td><code>src/graphics/debug/arrow.h</code></td></tr>
+<tr><td>Shaders</td><td><code>src/graphics/shaders/*.glsl</code> (<code>vert.glsl</code> UBO + instance pos/color)</td></tr>
+<tr><td>Solution</td><td><code>alephium_visualizer.sln</code></td></tr>
+<tr><td>Deps</td><td><code>vcpkg.json</code> (<code>curl</code>, <code>cjson</code>, <code>glm</code>)</td></tr>
+<tr><td>README</td><td><code>README.md</code></td></tr>
+</table>
+<p>---</p>
+<h2>PR Plan</h2>
+<p>Ordered, independently reviewable/mergeable PRs. <strong>Spike gates are per-PR (not “all before PR3”).</strong></p>
+<p>---</p>
+<h3>PR1 — Hygiene: language standard + public header stub + dead code notes</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>build: C++17 language standard; stub IRenderEngine types; exclude unused Dag</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>alephium_visualizer.vcxproj</code>, <code>graphics/graphics.vcxproj</code> (<code>LanguageStandard</code>), <code>src/graphics/gpu_pub_lib.h</code> (types: <code>GpuInstance</code>, <code>CameraUBO</code>, <code>EngineCreateInfo</code>, <code>FrameSubmit</code> without span), optional exclude <code>dag.cpp</code> from compile list</td></tr>
+<tr><td><strong>Depends on</strong></td><td>None</td></tr>
+<tr><td><strong>Spike gate</strong></td><td>None</td></tr>
+<tr><td><strong>Description</strong></td><td>Fold former PR1+PR2. No runtime behavior change. Establish compile-safe public types. Remove unused <code>Dag</code> from build if green. Note main’s dead <code>vector&lt;cJSON*&gt; blockQueue</code> for later cleanup.</td></tr>
+</table>
+<p>---</p>
+<h3>PR2 — (absorbed into PR1)</h3>
+<p>_Intentionally empty — hygiene + stubs are one PR to avoid a no-op merge._</p>
+<p>---</p>
+<h3>PR3 — Domain: BlockGraph dual-write + AlphDetailStore seed</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>domain: BlockGraph + AlphDetailStore dual-write from Add_Block</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>src/domain/block_graph.<em></code>, <code>src/adapters/alephium/alph_detail_store.</em></code> (or under domain temporarily), <code>vulkan_renderer.cpp</code> <code>Add_Block</code>, vcxproj</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR1; <strong>Spike S1 pass</strong></td></tr>
+<tr><td><strong>Description</strong></td><td>Parse still produces <code>AlphBlock</code> into <code>chains</code>. Also: <code>graph.apply(nodes±remove)</code>, <code>details.upsert</code>, uncle → <code>remove_nodes</code> + detail remove. <strong>Acceptance:</strong> sorted live hash set match; optional assert toggle. Edges optional/empty. App behavior unchanged. Inspector still reads renderer <code>selected_block</code> for now, but store is warm for later.</td></tr>
+</table>
+<p>---</p>
+<h3>PR4 — Domain: PolarShardLayout extract (stateful origins + palette)</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>domain: PolarShardLayout with origin_height_by_lane and LanePalette</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>src/domain/layout.*</code>; <code>vulkan_renderer.cpp</code> layout loop</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR3</td></tr>
+<tr><td><strong>Call site</strong></td><td>Still <strong>inside</strong> <code>VulkanRenderer::render_loop</code> (or a method it calls): snapshot graph → <code>layout.build</code> → copy to instance buffer. Main does not own layout yet.</td></tr>
+<tr><td><strong>Description</strong></td><td>Port polar math; <code>LanePalette</code> = current <code>SHARD_COLORS</code> literals; session origins for Z; <strong>stable sort by NodeId</strong>. <strong>Acceptance:</strong> visual parity (relative Z progression, colors); same instance count as dual-write baseline. Does not remove <code>Add_Block</code>.</td></tr>
+</table>
+<p>---</p>
+<h3>PR5 — Adapter: poll + parse + watermark + detail upserts</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>adapter: AlephiumAdapter owns poll watermark, GraphDelta, detail store</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>src/adapters/alephium/*</code>, <code>main.cpp</code>, wrappers over <code>commands.c</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR3; <strong>Spike S3 pass</strong> recommended before merge</td></tr>
+<tr><td><strong>Description</strong></td><td><code>main</code> calls <code>adapter.poll(now)</code> → <code>graph.apply</code> + store already updated inside adapter. Nested cJSON walk leaves <code>main</code>. <strong>Do not</strong> delete <code>Add_Block</code> yet if still used as bridge; prefer adapter → graph path feeding same dual-write. Failed poll does not advance watermark; overlap = one block interval.</td></tr>
+</table>
+<p>---</p>
+<h3>PR6a — Engine: submit_frame path beside Add_Block</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>engine: add submit_frame + frame_seq pick path alongside existing Add_Block</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>vulkan_renderer.*</code> / engine, <code>main</code> optional dual path</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR4, PR5; <strong>Spike S2 pass</strong></td></tr>
+<tr><td><strong>Description</strong></td><td>Implement deep-copy frame buffer + <code>submit_frame</code>. Main (or renderer internal) can publish layout output without domain types on the public engine header. <code>Add_Block</code> remains for rollback. Wire pick <code>frame_seq</code>. Smoke: both paths or feature compile switch.</td></tr>
+</table>
+<p>---</p>
+<h3>PR6b — Engine: remove domain types / Add_Block</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>engine: remove Add_Block, AlphBlock, chains from renderer</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>vulkan_renderer.*</code>, <code>main.cpp</code>, overlay/selection wiring</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR6a, PR5; detail store <strong>already</strong> serving inspector</td></tr>
+<tr><td><strong>Description</strong></td><td>Selection = <code>NodeId</code> + <code>AlphDetailStore</code>. Engine TU has no cJSON block ingest. <strong>Hard gate:</strong> inspector still shows txns. File-statics become members or client inputs.</td></tr>
+</table>
+<p>---</p>
+<h3>PR7 — Engine: triple-buffer submit + UI snapshot races</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>engine: triple-buffer FrameSubmit; publish UiSnapshot for overlay</code></td></tr>
+<tr><td><strong>Files</strong></td><td>engine impl, app overlay snapshot types</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR6a (can land after 6a even before 6b); ideally after PR4</td></tr>
+<tr><td><strong>Description</strong></td><td>Latest-wins publish; main never blocks on GPU. Fix races by stopping ImGui from reading live <code>blockQueue</code>/<code>selected_block</code> without snapshot. Reframe of old “double-buffer only for ImGui-under-mutex” (which was incorrect). Optional: land buffering earlier after PR4 if lock time still hurts.</td></tr>
+</table>
+<p>---</p>
+<h3>PR8 — UX: IUiOverlay + camera ownership</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>app: IUiOverlay chrome; CameraState; strip explorer URLs from engine</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>app/ui_*.cpp</code>, engine <code>set_ui_overlay</code>, remove explorer strings from engine TU</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR6b (or 6a if inspector already store-based); <strong>Spike S4</strong></td></tr>
+<tr><td><strong>Description</strong></td><td>Overlay <code>draw()</code> on render thread; camera sliders → <code>CameraState</code> (K15). Engine hosts ImGui only.</td></tr>
+</table>
+<p>---</p>
+<h3>PR9 — Cleanup transitional structures</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>cleanup: remove chains dual-write, Dag, dead main blockQueue</code></td></tr>
+<tr><td><strong>Files</strong></td><td>renderer, <code>dag.*</code>, <code>main.cpp</code>, vcxproj</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR6b, PR7, PR8; <strong>S1+S2+S3 green</strong></td></tr>
+<tr><td><strong>Description</strong></td><td>Single graph path; delete bridges.</td></tr>
+</table>
+<p>---</p>
+<h3>PR10 — Rename VulkanRenderer → VulkanEngine / folder move</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>refactor: rename to VulkanEngine; engine/ include layout</code></td></tr>
+<tr><td><strong>Files</strong></td><td>renames, includes, vcxproj filters</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR9</td></tr>
+<tr><td><strong>Description</strong></td><td>No behavior change. <strong>Warn:</strong> MSVC include-path / filter churn — keep PR pure rename.</td></tr>
+</table>
+<p>---</p>
+<h3>PR11 — Optional: slim detail store</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>adapter: optional prune of unselected txn payloads in detail store</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>AlphDetailStore</code>, prune policy</td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR8, PR9</td></tr>
+<tr><td><strong>Description</strong></td><td><strong>Not</strong> the introduction of the store (that is PR3). Only memory optimization once store is sole detail path.</td></tr>
+</table>
+<p>---</p>
+<h3>PR12 — Optional: config network index + layout params</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>config: select network entry and layout meters from config.json</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>config.*</code>, <code>config.json</code>, <code>main</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR5</td></tr>
+<tr><td><strong>Description</strong></td><td>Use config array; still Alephium-only.</td></tr>
+</table>
+<p>---</p>
+<h3>PR13 — Optional: FakeChainAdapter</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><strong>Title</strong></td><td><code>adapter: FakeChainAdapter for offline layout demos</code></td></tr>
+<tr><td><strong>Files</strong></td><td><code>src/adapters/fake/*</code></td></tr>
+<tr><td><strong>Depends on</strong></td><td>PR6b</td></tr>
+<tr><td><strong>Description</strong></td><td>Proves multi-adapter wiring without second real chain.</td></tr>
+</table>
+<p>---</p>
+<h3>PR dependency graph</h3>
+<pre><code>flowchart TD
+  PR1[PR1 hygiene+stubs]
+  PR3[PR3 graph+detail dual-write]
+  PR4[PR4 layout]
+  PR5[PR5 adapter]
+  PR6a[PR6a submit_frame]
+  PR6b[PR6b drop domain]
+  PR7[PR7 triple-buffer+UiSnapshot]
+  PR8[PR8 overlay+camera]
+  PR9[PR9 cleanup]
+  PR10[PR10 rename]
+  PR11[PR11 slim store opt]
+  PR12[PR12 config opt]
+  PR13[PR13 fake adapter opt]
+
+  PR1 --&gt; PR3
+  PR3 --&gt; PR4
+  PR3 --&gt; PR5
+  PR4 --&gt; PR6a
+  PR5 --&gt; PR6a
+  PR6a --&gt; PR6b
+  PR6a --&gt; PR7
+  PR6b --&gt; PR8
+  PR7 --&gt; PR9
+  PR8 --&gt; PR9
+  PR9 --&gt; PR10
+  PR9 --&gt; PR11
+  PR5 --&gt; PR12
+  PR6b --&gt; PR13</code></pre>
+<p>---</p>
+<h2>Revision Summary (design doc)</h2>
+<p>_Revision 2 — 2026-07-09: addressed design review Issues 1–15._</p>
+<ul>
+<li>Detail continuity via mandatory <code>AlphDetailStore</code> before PR6b; PR11 demoted to slim-only.</li>
+<li>Spike gates remapped (S1→PR3, S2→PR6a, S3→PR5/PR6b, all→PR9).</li>
+<li>K8/K15: engine-owned thread, <code>IUiOverlay</code>, camera ownership; OQ6 decided for v1.</li>
+<li>Corrected mutex inventory; documented races; reframed K13.</li>
+<li>Layout <code>origin_height_by_lane_</code>; palette; no v1 scale; no <code>std::span</code>.</li>
+<li>FrameSubmit deep-copy / frame_seq / stable sort rules.</li>
+<li>Inventory: LOC, file-statics, dead main queue, pick path, camera tags.</li>
+<li>Stronger dual-write acceptance; adapter watermark policy; optional edges; validation.cpp note.</li>
+<li>PR1∪PR2 merge; PR6 split into 6a/6b; call site for PR4 layout clarified.</li>
+</ul>
+</main>
+</body>
+</html>

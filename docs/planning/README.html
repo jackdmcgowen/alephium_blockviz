@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Planning notes (integration/planning/01)</title>
+  <link rel="stylesheet" href="../site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="../index.html">BlockViz docs</a>
+    <a href="../index.html">Hub</a>
+    <a href="../layers/index.html">Layers</a>
+    <a href="../planning/index.html">Planning</a>
+    <a href="../architecture.html">Architecture</a>
+    <a href="../dev-roadmap.html">Roadmap</a>
+    <a href="../user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="README.md"><code>README.md</code></a></p>
+<h1>Planning notes (integration/planning/01)</h1>
+<p>Living product + engineering plans for <strong>alephium_blockviz</strong>. Browser view: <a href="index.html">index.html</a>.</p>
+<p><strong>Working branch for implementation:</strong> <code>integration/docs_site_and_motion/01</code></p>
+<p><strong>Do not land features on <code>main</code> until squash/release.</strong></p>
+<p>---</p>
+<h2>Branch policy</h2>
+<table>
+<tr><th>Branch</th><th>Use</th></tr>
+<tr><td><code>main</code></td><td>Releases only; tags <code>app-v<em></code> / <code>engine-v</em></code> (see <code>AGENTS.md</code>)</td></tr>
+<tr><td><code>integration/planning/01</code></td><td>Plans, critique, motion/docs specs (this folder)</td></tr>
+<tr><td><code>integration/docs_site_and_motion/01</code></td><td>HTML parity + motion/art code</td></tr>
+</table>
+<p>---</p>
+<h2>Brutal honesty (blockchain enthusiast)</h2>
+<h3>Strong</h3>
+<ul>
+<li>Real multi-shard BlockFlow (16 lanes, tips, deps) — uncommon and interesting</li>
+<li>Live mainnet + history fill + disk cache — explorer energy, not a toy</li>
+<li>Semantic colors (tip / unconfirmed / incomplete / select) once learned</li>
+<li>Polar + timeline Z layout is a <strong>distinctive identity</strong> — keep it</li>
+</ul>
+<h3>Weak / wanted</h3>
+<table>
+<tr><th>Gap</th><th>Ask</th></tr>
+<tr><td>Cold start</td><td>30s of rails + arrow soup; need 3-step “what is this?”</td></tr>
+<tr><td>Hierarchy</td><td>Arrows beat blocks; default fewer edges, power-user “all deps”</td></tr>
+<tr><td>Time</td><td>Mainnet clump spacing looks random without ticks/density cues</td></tr>
+<tr><td>Trust</td><td>“Why green?” one click (height, bag, explorer)</td></tr>
+<tr><td>Perf</td><td>~25 fps @ 12k blocks feels unfinished; Prepare is the bottleneck</td></tr>
+<tr><td>Art</td><td>Flat cubes + neon; motion + materials will outrank layout redesign</td></tr>
+<tr><td>Share</td><td>Clean screenshot mode (hide rails)</td></tr>
+</table>
+<p><strong>Layout is good. Next investment: motion, materials, information hierarchy — not a new layout.</strong></p>
+<p>---</p>
+<h2>Motion language (no over-tween)</h2>
+<p>Principles: one hero motion per event; ease-out / ease-in-out; overshoot only on pop-in; compute only on <strong>drawn ring</strong>.</p>
+<table>
+<tr><th>Event</th><th>Motion</th><th>Easing</th></tr>
+<tr><td>Block admit (visible)</td><td>Scale 0 → ~1.08 → 1.0</td><td>ease-out-back</td></tr>
+<tr><td>Tip advance</td><td>Scale pulse 1 → 1.12 → 1</td><td>ease-in-out</td></tr>
+<tr><td>Selection</td><td>Brief gold pop + Sobel</td><td>ease-out</td></tr>
+<tr><td>Network wave</td><td>Staggered bump along Z (“the wave”)</td><td>ease-in-out, <strong>rare</strong></td></tr>
+<tr><td>Arrow grow</td><td>Path length <code>u</code></td><td>ease-out cubic (not linear)</td></tr>
+<tr><td>Shape</td><td>Light squash/stretch on pop</td><td>ease-out-back</td></tr>
+<tr><td>Death</td><td>Scale down + alpha</td><td>ease-in</td></tr>
+</table>
+<p><strong>Avoid:</strong> idle breathing, continuous orbit, full-graph animation.</p>
+<p>Style tokens: <code>resource/style_blockflow.json</code> durations/amplitudes.</p>
+<p>---</p>
+<h2>Docs HTML parity</h2>
+<p>Rule: <strong>every <code>docs/</strong>/*.md</code> has a sibling <code>.html</code>** (same nav chrome).</p>
+<p>Markdown currently missing HTML:</p>
+<ul>
+<li><code>ROADMAP.md</code>, <code>platform.md</code>, <code>linux.md</code>, <code>perf-bottlenecks.md</code>, <code>build-performance.md</code></li>
+<li><code>segment-disk-cache.md</code>, <code>brand/alephium_palette.md</code>, <code>layers/README.md</code></li>
+<li>Archives: <code>blockflow-confirmed-tips-design.md</code>, <code>graphics-modularization-design.md</code></li>
+</ul>
+<p>Hub (<code>docs/index.html</code>): Guides · Story · Layers · Platform · Perf · Brand · Archives · Planning.</p>
+<p>Scripts (on motion branch):</p>
+<ul>
+<li><code>scripts/md_to_docs_html.py</code> — MD source of truth → HTML body + nav</li>
+<li><code>scripts/check_docs_html_parity.py</code> — fail if MD without HTML</li>
+</ul>
+<p>---</p>
+<h2>PR sequence (<code>integration/docs_site_and_motion/01</code>)</h2>
+<table>
+<tr><th>PR</th><th>Deliverable</th></tr>
+<tr><td><strong>PR1</strong></td><td>HTML parity + hub + check script</td></tr>
+<tr><td><strong>PR2</strong></td><td><code>motion_easing.hpp</code> + block pop-in overshoot</td></tr>
+<tr><td><strong>PR3</strong></td><td>Wave / shuffle bump + style tokens</td></tr>
+<tr><td><strong>PR4</strong></td><td>Arrow ease-out + death scale; legend docs</td></tr>
+</table>
+<p>Then squash/merge to <code>main</code> when ready; tag per AGENTS.md.</p>
+<p>---</p>
+<h2>Related</h2>
+<ul>
+<li><a href="../index.html">docs hub</a></li>
+<li><a href="../layers/index.html">layers</a></li>
+<li><a href="../perf-bottlenecks.md">perf bottlenecks</a></li>
+<li><a href="../brand/alephium_palette.md">brand palette</a></li>
+</ul>
+</main>
+</body>
+</html>

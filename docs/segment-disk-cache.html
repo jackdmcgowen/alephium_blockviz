@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alephium BlockViz — Segment disk cache (design)</title>
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+<nav class="site-nav" aria-label="Docs">
+  <div class="site-nav-inner">
+    <a class="brand" href="index.html">BlockViz docs</a>
+    <a href="index.html">Hub</a>
+    <a href="layers/index.html">Layers</a>
+    <a href="planning/index.html">Planning</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="dev-roadmap.html">Roadmap</a>
+    <a href="user-guide-timeline.html">Timeline</a>
+  </div>
+</nav>
+<main>
+  <p class="muted">Source: <a href="segment-disk-cache.md"><code>segment-disk-cache.md</code></a></p>
+<h1>Segment disk cache (design)</h1>
+<p><strong>Status:</strong> <strong>Segment hierarchy cache (v3)</strong> — <code>G_&lt;id&gt;/</code> directory with multi-chunk gzip entries.</p>
+<p><strong>Goal:</strong> Bootstrap recent sessions; complete historical G packs replace network body loads; live edge stays network-first.</p>
+<h3>Unit of work</h3>
+<table>
+<tr><th>Key</th><th><code>G_seg</code> genesis index → <strong>64s</strong> chunk files (schema v4)</th></tr>
+<tr><td>Save</td><td>Bucket blocks by <strong>64s</strong> → <code>segments/G_&lt;id&gt;/c_&lt;from&gt;.json.gz</code> + <code>meta.json</code></td></tr>
+<tr><td>Load</td><td>Stream present <code>c_*</code> files (partial G OK); seed only those grid keys; live open tip never disk-complete</td></tr>
+<tr><td>Network</td><td><code>try_fill_window_from_disk_(k)</code> before interval GET; live tip always <code>force_newest</code></td></tr>
+</table>
+<h3>Debug checklist</h3>
+<p>1. <strong>Folder appears on domain start</strong> (empty manifest) under</p>
+<p><code>%LOCALAPPDATA%\\AlephiumBlockViz\\cache\\mainnet\\</code></p>
+<p>2. <strong>Network panel → Disk cache</strong>: path, last event, on-disk counts.</p>
+<p>3. <strong><code>cache.log</code></strong> in that folder: save/load/fill/flush lines.</p>
+<p>4. Warm save after ~16+ blocks in a G (Steady); complete when all <strong>64s</strong> chunks present (10 per 640s G).</p>
+<p>5. <strong>Close app / switch domain</strong> → <code>flush</code> writes remaining windows.</p>
+<p>6. Restart: boot event + <code>loaded G=… from cache (skip net)</code> for complete G.</p>
+<h2>Intent</h2>
+<table>
+<tr><th>When</th><th>Behavior</th></tr>
+<tr><td>Segment becomes <strong>fully verifiable</strong> via adapter <strong>BFS walk</strong></td><td>Persist segment + block payloads to disk (per domain)</td></tr>
+<tr><td><strong>Startup</strong> or <strong>domain reload</strong></td><td><strong>Lazy-admit:</strong> schedule load ring (15 G) but <strong>decompress/admit only admit-ring</strong> near live (<code>ALPH_DISK_ADMIT_RING_*</code>, default 7). Far G stay on disk until camera approaches. Then network for live/holes/uncached</td></tr>
+<tr><td>Live tip (<code>k=0</code> open window)</td><td>Prefer network; <strong>never</strong> treat open live G as interval-complete from disk. Bootstrap may <strong>paint</strong> live-G blocks (bag-only confirmed), but must force-refresh the <strong>open 64s tip subsegment</strong> before IdentifyTips. Sequential frontiers are cleared after disk boot so <code>H_c</code> resolves from live data.</td></tr>
+</table>
+<p>This is a <strong>bootstrap</strong> layer, not a full archive and not a substitute for main-chain API trust without optional re-verify.</p>
+<h2>Terminology</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><strong>G_seg</strong></td><td>Genesis-aligned segment index (<code>G_live − k</code>)</td></tr>
+<tr><td><strong>Window</strong></td><td><code>[from_ms, to_ms)</code> = <code>genesis + G_seg·window</code> … + <code>ALPH_LOOKBACK_WINDOW_SECONDS</code></td></tr>
+<tr><td><strong>Verified</strong></td><td>Parallel BFS confirm (<code>N=2G−1</code>) has completed for that window’s frontier/bag such that blocks in the window are admitted and confirmation marks are stable enough to skip re-poll of the interval body</td></tr>
+<tr><td><strong>Cacheable</strong></td><td>Historical (closed) window preferred; live open edge stays network-first until the window freezes (<code>k≥1</code>)</td></tr>
+</table>
+<h2>Disk layout (schema <strong>v3</strong> — G directory + multi-chunk entries)</h2>
+<pre><code>%LOCALAPPDATA%/AlephiumBlockViz/cache/&lt;domain_id&gt;/
+  manifest.json                 # schema 3 index (RAM-cached after open)
+  cache.log                     # save/load/fill/flush events
+  segments/G_&lt;id&gt;/
+    meta.json                   # from_ms, to_ms, complete, block_count, chunk_count
+    c_&lt;chunk_from_ms&gt;.json.gz   # one entry per 64s subsegment: { blocks: [ … ] }</code></pre>
+<p><strong>Removed (v1):</strong> per-block <code>blocks/&lt;hh&gt;/&lt;hash&gt;.json.gz</code> (wiped on domain open).</p>
+<p><strong>Migrated (v2):</strong> flat <code>segments/G_&lt;id&gt;.json.gz</code> → v3 hierarchy on domain open.</p>
+<table>
+<tr><th>Field (manifest segment)</th><th>Role</th></tr>
+<tr><td><code>g_seg</code></td><td>Genesis segment id</td></tr>
+<tr><td><code>from_ms</code> / <code>to_ms</code></td><td>Window bounds</td></tr>
+<tr><td><code>complete</code></td><td>Safe to skip network body for this G (historical only)</td></tr>
+<tr><td><code>block_count</code></td><td>Blocks across chunk entries</td></tr>
+<tr><td><code>schema_version</code></td><td><strong>3</strong> (v2 packs auto-migrated)</td></tr>
+</table>
+<p><strong>Domain ids:</strong> <code>mainnet</code> / <code>testnet</code> / <code>debug</code> (match <code>NetworkDomain</code>).</p>
+<h2>Caps (reasonable space/time)</h2>
+<table>
+<tr><th>Cap</th><th>Suggested v1</th></tr>
+<tr><td>Max verified segments</td><td>32–64 (LRU by recency toward live)</td></tr>
+<tr><td>Max disk</td><td>e.g. 512 MB–1 GB hard stop</td></tr>
+<tr><td>Startup load</td><td>Most recent <strong>15</strong> verified segments (<code>ALPH_LOAD_RING_SEGMENTS</code>); <strong>chunked admit</strong> to avoid frame hitch</td></tr>
+<tr><td>Write</td><td>Async I/O on network/poll side — <strong>never</strong> render thread</td></tr>
+</table>
+<h2>Write path (when to cache)</h2>
+<pre><code>Trigger candidates (adapter network thread):
+  A) BFS Trace / Steady maintenance: window G is closed (k≥1 for that G)
+     AND interval chunks for G marked complete (load-once)
+     AND BFS confirm marks cover the segment’s frontier tips
+  B) Explicit “segment complete” after history ring fill + BFS pass
+
+Then:
+  1. Collect graph nodes with timestamp in [from_ms, to_ms)
+  2. Serialize detail_store payloads (gzip)
+  3. Write segments/G_&lt;id&gt;.json + update manifest
+  4. Enforce LRU: drop oldest G_seg files over cap</code></pre>
+<p><strong>Do not</strong> mark <code>verified</code> if:</p>
+<ul>
+<li>Only partial chunks loaded</li>
+<li>BFS never finished for that frontier</li>
+<li>Live open tip window still extending</li>
+</ul>
+<h2>Load path (startup / domain switch)</h2>
+<pre><code>1. Resolve cache root for domain
+2. Read manifest; skip if schema mismatch
+3. Pick recent verified segments (nearest G_live, up to startup N)
+4. For each segment (oldest→newest or newest-first for UI feel):
+     - Load block gzip → detail upsert + graph admit
+     - **Historical G (`G &lt; G_live`)**: mark interval keys fetched; skip network body
+     - **Live G (`G == G_live`)**: paint only; leave chunk load-once empty; `want_newest_refresh`
+     - Restore confirmation as **bag-only** (no sequential `H_c`); clear frontiers after boot
+5. Then start normal poll:
+     - Force open live 64s tip subsegment from network (even pre-Steady)
+     - Live tip / k=0 always network for open edge
+     - Ring holes only if not satisfied by cache
+     - Older uncached segments on demand (user pages minimap)</code></pre>
+<p><strong>Priority after bootstrap:</strong></p>
+<p>1. Live tip</p>
+<p>2. Camera ring uncached holes</p>
+<p>3. Older network segments only when paged</p>
+<h2>Integration map</h2>
+<table>
+<tr><th>Component</th><th>Role</th></tr>
+<tr><td>New <code>segment_disk_cache.*</code> (<code>network/alephium/</code> or <code>domain/</code>)</td><td>Manifest + gzip I/O + LRU</td></tr>
+<tr><td><code>AlephiumAdapter</code></td><td>On verified-window event → enqueue snapshot; on domain start → load cache before Steady flood</td></tr>
+<tr><td>Interval / <code>history_slots_fetched_</code></td><td>Seed from cache so load-once skips re-GET</td></tr>
+<tr><td><code>BlockScene</code> / detail store</td><td>Bulk admit API if needed (batch under one lock)</td></tr>
+<tr><td><code>network_poller</code></td><td>Domain switch: load cache then poll</td></tr>
+<tr><td>HUD (optional)</td><td>“Cache: N segments / M MB”</td></tr>
+</table>
+<h2>Non-goals (v1)</h2>
+<ul>
+<li>Full-chain archival</li>
+<li>Shared cache across machines</li>
+<li>UI file browser</li>
+<li>Trust without optional re-verify (cache is speed, not consensus)</li>
+<li>FakeChain disk (optional later; Debug can stay RAM-only)</li>
+</ul>
+<h2>Implementation PR split</h2>
+<table>
+<tr><th>PR</th><th>Scope</th></tr>
+<tr><td><strong>P1</strong></td><td>Manifest schema + write closed verified segments + gzip blocks</td></tr>
+<tr><td><strong>P2</strong></td><td>Startup/domain load priority + mark intervals fetched</td></tr>
+<tr><td><strong>P3</strong></td><td><strong>Done:</strong> 512 MiB cap, orphan GC, Network HUD line, save k=0 warm + k≥1, load diagnostics</td></tr>
+</table>
+<h2>Open decisions</h2>
+<p>1. Exact BFS completeness predicate (tips only vs all heights in window).</p>
+<p>2. Whether to store confirmation flags on disk or re-run BFS after admit.</p>
+<p>3. Startup N vs disk N (load fewer than retained).</p>
+<p>4. Compression library already available? (zlib via curl/vcpkg <code>z</code> DLL is present — prefer that).</p>
+<h2>Success metrics</h2>
+<ul>
+<li>Second launch of same domain shows cubes for recent history <strong>before</strong> first interval HTTP completes.</li>
+<li>Disk stays under cap.</li>
+<li>Live tip remains correct and not stuck on stale cache.</li>
+</ul>
+</main>
+</body>
+</html>
