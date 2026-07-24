@@ -80,26 +80,24 @@ Confidence \(C \in [0,1]\): weighted scores with **40%** soft band over budget.
 
 Baselines under `vnv/bench/baselines/` remain for stricter device-local median checks via `run_vnv.ps1 -Bench`.
 
-## Mesh + GPU cull + F2B sort (landed)
+## Mesh + task (amplification) + F2B + prepare (landed)
 
 | Decision | Rationale |
 |----------|-----------|
-| Main cubes use GPU frustum compact | Cuts shaded cubes under tight look |
-| Mesh path default when extension enabled | Same `frag.spv`; classic fallback |
-| Picker **not** on compact SSBO | `gl_InstanceIndex` ↔ `pick_map` |
-| Outline CPU frustum at upload | Skip off-screen tips before Sobel |
-| Opaque front-to-back sort (host) | Early-Z without depth prepass |
+| Task frustum (amplification default) | AABB cull in task; skip compute cull on that path |
+| Mesh face/cone cull | Emit front faces only |
+| Mesh-only + classic fallback | No task feature / no mesh |
+| Opaque F2B sort (host, N≥256) | Early-Z |
+| Prepare unlock + 50ms layout rate-limit | Snapshot under lock; rebuild off-lock |
 
-**How to compare:** F3 `Prepare` vs `Cubes*` while End-looking on a dense ring / history scroll. Benches above.
+**How to compare:** F3 `Prepare` vs `CubesTaskMesh` / `CubesMesh` on dense End view.
 
 ## Actionable backlog
 
-1. **Prepare unlock** — snapshot graph under lock, layout off-lock (network admits during rebuild).  
-2. **Layout amortize** — incremental place or rate-limit full rebuild while streaming.  
-3. **Admit budget** — max blocks/ms per poll drain (reduce gen churn).  
-4. **Mesh dispatch** — `DrawMeshTasksIndirectEXT` from cull count (minor once host fixed).  
-5. **Opaque blend-off / dual draw** — only if GPU shade becomes hot after Prepare is fixed.  
-6. **Debug drawer** — avoid per-frame full upload when arrows stable.  
-7. **Not planned:** secondary command buffers for network subsegments; depth prepass as first step.
+1. **Incremental layout** — place only ΔN when possible.  
+2. **Admit budget** — max blocks/ms per poll drain.  
+3. **Opaque blend-off / dual draw** — if GPU shade becomes hot after Prepare is fixed.  
+4. **Debug drawer** — avoid per-frame full upload when arrows stable.  
+5. **Not planned:** secondary command buffers for network subsegments; depth prepass as first step.
 
 Update this table after major host/network or graphics changes with fresh bench JSON.
