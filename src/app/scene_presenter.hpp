@@ -164,6 +164,9 @@ private:
     std::chrono::steady_clock::time_point clock0_{ std::chrono::steady_clock::now() };
     std::unordered_map<std::string, DepArrowAnim> tip_dep_anims_;
     std::unordered_map<std::string, float>        ephemeral_birth_sec_;
+    // First visible-ring admit → birth sec for scale pop-in (ease-out-back).
+    // Finished entries kept while live so cold re-draws do not re-pop.
+    std::unordered_map<std::string, float>        block_pop_birth_sec_;
 
     std::unordered_set<std::string> prev_live_nodes_;
     std::unordered_map<std::string, glm::vec3> prev_positions_;

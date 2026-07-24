@@ -31,7 +31,8 @@ The app owns the **host window** (Win32 on Windows, GLFW on Linux via `app/platf
 | Timeline minimap (overlay) | **High-level multi-segment overview** (~24 newest `#G_seg`, **640s** G); **Z-proportional** bins (match cubes/planes); optional **64s** ticks on hover/camera cell; **click** bin → teleport; Live / key **3** → tip. **Must update whenever timeline constants change** (see `Agents.md`) |
 | Camera view presets | **End** (1) / **Side** (2) / **V** toggle with pose memory. **3** = live tip. **L/R** = Z. Short **RMB** = deselect only (no reattach); RMB drag = pan |
 | Selection + deps | **First-order (1-hop) only** from selected root. Gold arrows **instant on click** (no grow). **R** / Replay deps re-grows hop-1 only. 1-hop ghosts for missing direct deps. |
-| Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade timings |
+| Style tokens | `style_blockflow.hpp` + JSON — `walk_trace` ≠ gold; hop/sobel fade; `block_pop_*` admit scale |
+| Motion easing | `motion_easing.hpp` — ease-out-back pop-in on first visible-ring admit (N-cap) |
 | `src/app/ui_snapshot.hpp` | Render-thread-safe UI bag (no live scene reads in overlay) |
 | `src/app/config.c` / `config.h` | Load URL array from `config.json` |
 | `src/app/app_identity.hpp` | App name + semver → `EngineCreateInfo.application` |

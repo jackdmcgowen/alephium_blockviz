@@ -1,6 +1,7 @@
 ﻿#include "app/pch.h"
 #include "app/scene_presenter.hpp"
 #include "app/style_blockflow.hpp"
+#include "app/motion_easing.hpp"
 
 #include "domain/alph_block.hpp"
 #include "graphics/camera.hpp"
@@ -1343,6 +1344,52 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return true;
     };
 
+    // Block admit pop-in: ease-out-back scale on first visible-ring draw only.
+    // Cap concurrent anims so cold start / dense history fill do not thrash.
+    const float pop_sec =
+        sty().block_pop_sec > 1e-3f ? sty().block_pop_sec : 0.28f;
+    const float pop_overshoot =
+        sty().block_pop_overshoot > 1.001f ? sty().block_pop_overshoot : 1.08f;
+    const int pop_max = std::max(
+        0, static_cast<int>(sty().block_pop_max_concurrent + 0.5f));
+    int active_pops = 0;
+    for (auto it = block_pop_birth_sec_.begin(); it != block_pop_birth_sec_.end();)
+    {
+        const float age = now - it->second;
+        const bool animating = age >= 0.f && age < pop_sec;
+        if (animating)
+            ++active_pops;
+        // Drop finished entries for blocks no longer live (re-admit may pop again).
+        if (!animating && live_nodes.count(it->first) == 0)
+            it = block_pop_birth_sec_.erase(it);
+        else
+            ++it;
+    }
+
+    auto pop_scale_for_ = [&](const std::string& hash) -> float {
+        auto it = block_pop_birth_sec_.find(hash);
+        if (it == block_pop_birth_sec_.end())
+        {
+            if (active_pops < pop_max)
+            {
+                block_pop_birth_sec_[hash] = now;
+                ++active_pops;
+                return 0.f;
+            }
+            // Over cap: appear fully grown; mark done so we do not retry next frame.
+            block_pop_birth_sec_[hash] = now - pop_sec;
+            return scale;
+        }
+        const float age = now - it->second;
+        if (age <= 0.f)
+            return 0.f;
+        if (age >= pop_sec)
+            return scale;
+        const float u = age / pop_sec;
+        float s = scale * motion::ease_out_back_overshoot(u, pop_overshoot);
+        return s > 0.f ? s : 0.f;
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -1360,6 +1407,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
             if (lat2 > rmax * rmax)
                 return false;
         }
+        // Frustum uses base scale so tiny pop-in does not flicker cull.
         const glm::vec3 half = in.instance_half_extents * scale;
         if (!force && in.frustum && !in.frustum->intersects_aabb(placed.pos, half))
             return false;
@@ -1382,7 +1430,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
-        out.instances.push_back(GpuInstance{ placed.pos, scale, color, alpha });
+        const float inst_scale = pop_scale_for_(placed.hash);
+        out.instances.push_back(GpuInstance{ placed.pos, inst_scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
     };

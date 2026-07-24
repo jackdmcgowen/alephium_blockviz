@@ -58,6 +58,8 @@
     <ClInclude Include="..\src\app\blockflow_overlay.hpp" />
     <ClInclude Include="..\src\app\camera_controller.hpp" />
     <ClInclude Include="..\src\app\scene_presenter.hpp" />
+    <ClInclude Include="..\src\app\motion_easing.hpp" />
+    <ClInclude Include="..\src\app\style_blockflow.hpp" />
     <ClInclude Include="..\src\app\ui_chrome.hpp" />
     <ClInclude Include="..\src\app\ui_snapshot.hpp" />
     <ClInclude Include="..\src\domain\alph_block.hpp" />

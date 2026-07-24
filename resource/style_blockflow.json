@@ -20,5 +20,8 @@
   "cyan_to_main_sec": 0.40,
   "secondary_alpha_sec": 0.50,
   "tip_replace_fade_sec": 0.32,
-  "bfs_alpha_scale": 0.55
+  "bfs_alpha_scale": 0.55,
+  "block_pop_sec": 0.28,
+  "block_pop_overshoot": 1.08,
+  "block_pop_max_concurrent": 48
 }

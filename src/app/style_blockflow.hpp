@@ -27,6 +27,11 @@ struct StyleBlockflow
     float sobel_intensity = 1.18f;
     float bfs_alpha_scale = 0.55f;
 
+    // Block admit pop-in (visible ring only; see motion_easing.hpp).
+    float block_pop_sec = 0.28f;           // duration 0 → overshoot → 1
+    float block_pop_overshoot = 1.08f;     // peak scale multiplier
+    float block_pop_max_concurrent = 48.f; // cap simultaneous pops (cold start)
+
     // RGBA (a = shaft / outline base; Sobel multiplies intensity separately).
     glm::vec4 select_gold{ 0.94f, 0.76f, 0.29f, 0.88f };
     glm::vec4 walk_trace{ 0.72f, 0.42f, 0.95f, 0.90f }; // multi-hop (≠ gold)
@@ -140,6 +145,9 @@ private:
         read_f_(root, "arrow_shaft_scale", arrow_shaft_scale);
         read_f_(root, "sobel_intensity", sobel_intensity);
         read_f_(root, "bfs_alpha_scale", bfs_alpha_scale);
+        read_f_(root, "block_pop_sec", block_pop_sec);
+        read_f_(root, "block_pop_overshoot", block_pop_overshoot);
+        read_f_(root, "block_pop_max_concurrent", block_pop_max_concurrent);
 
         glm::vec4 v;
         if (read_vec4_(cJSON_GetObjectItem(root, "select_gold"), v))

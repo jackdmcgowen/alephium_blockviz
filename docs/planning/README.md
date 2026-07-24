@@ -85,8 +85,8 @@ Scripts (on motion branch):
 
 | PR | Deliverable |
 |----|-------------|
-| **PR1** | HTML parity + hub + check script |
-| **PR2** | `motion_easing.hpp` + block pop-in overshoot |
+| **PR1** | HTML parity + hub + check script ✅ |
+| **PR2** | `motion_easing.hpp` + block pop-in overshoot ✅ |
 | **PR3** | Wave / shuffle bump + style tokens |
 | **PR4** | Arrow ease-out + death scale; legend docs |
 
