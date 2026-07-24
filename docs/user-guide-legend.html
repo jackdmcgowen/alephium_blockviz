@@ -33,11 +33,16 @@
     <tr><td><span class="swatch gray"></span>Gray translucent volume</td><td>History 64s network fill <strong>in flight</strong></td></tr>
     <tr><td>Dim / fading gray volume</td><td>Just admitted, or queued past the 4 full-α slots</td></tr>
     <tr><td>Minimap green bin</td><td>Live G; gold caret = camera Z</td></tr>
+    <tr><td>Pop-in scale (overshoot)</td><td>New block admitted on the <strong>visible ring</strong> (ease-out-back)</td></tr>
+    <tr><td>Y-wave (rare)</td><td>Network batch admit or history fill land — crest travels low→high Y; no idle breathing</td></tr>
+    <tr><td>Arrow grow (ease-out)</td><td>Selection / hover / Replay dep arrows lengthen with ease-out cubic (tip deps stay full length)</td></tr>
+    <tr><td>Death shrink + fade</td><td>Hard removal (not soft/disk eviction): scale→0 and α ease-in</td></tr>
   </table>
 
   <div class="callout">
     Multiple non-selection roles (green / cyan / orange) can outline in <strong>one</strong> Sobel pass.
     Selection gold still wins exclusively when a block is selected.
+    Motion is ring-only and event-driven — not continuous animation.
   </div>
 
   <p>Brand floats: <a href="brand/alephium_palette.md">docs/brand/alephium_palette.md</a></p>

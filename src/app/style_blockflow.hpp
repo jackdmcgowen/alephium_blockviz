@@ -32,11 +32,11 @@ struct StyleBlockflow
     float block_pop_overshoot = 1.08f;     // peak scale multiplier
     float block_pop_max_concurrent = 48.f; // cap simultaneous pops (cold start)
 
-    // Rare Z-staggered ring wave (network batch / history fill land).
-    float wave_duration_sec = 0.65f; // front travel older→newer (+ last pulse)
+    // Rare Y-staggered ring wave (network batch / history fill land).
+    float wave_duration_sec = 0.65f; // front travel low Y → high Y (+ last pulse)
     float wave_pulse_sec    = 0.28f; // per-block bump duration
     float wave_amplitude    = 0.10f; // peak scale add (1 + amp * env)
-    float wave_lift         = 0.40f; // peak radial outward bump (world units)
+    float wave_lift         = 0.40f; // peak world-Y bounce (world units)
     float wave_cooldown_sec = 10.f;  // min gap between waves (rare)
     float wave_min_admits   = 12.f;  // batch size floor to auto-trigger
     float wave_max_admits   = 96.f;  // skip cold-start floods

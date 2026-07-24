@@ -51,7 +51,7 @@ Principles: one hero motion per event; ease-out / ease-in-out; overshoot only on
 | Block admit (visible) | Scale 0 → ~1.08 → 1.0 | ease-out-back |
 | Tip advance | Scale pulse 1 → 1.12 → 1 | ease-in-out |
 | Selection | Brief gold pop + Sobel | ease-out |
-| Network wave | Staggered bump along Z (“the wave”) | ease-in-out, **rare** |
+| Network wave | Staggered bump along **Y** (“the wave”) | ease-in-out, **rare** |
 | Arrow grow | Path length `u` | ease-out cubic (not linear) |
 | Shape | Light squash/stretch on pop | ease-out-back |
 | Death | Scale down + alpha | ease-in |
@@ -87,8 +87,8 @@ Scripts (on motion branch):
 |----|-------------|
 | **PR1** | HTML parity + hub + check script ✅ |
 | **PR2** | `motion_easing.hpp` + block pop-in overshoot ✅ |
-| **PR3** | Wave / shuffle bump + style tokens ✅ |
-| **PR4** | Arrow ease-out + death scale; legend docs |
+| **PR3** | Wave / shuffle bump + style tokens ✅ (Y-stagger) |
+| **PR4** | Arrow ease-out + death scale; legend docs ✅ |
 
 Then squash/merge to `main` when ready; tag per AGENTS.md.
 

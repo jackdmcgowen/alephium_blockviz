@@ -124,7 +124,8 @@ float ScenePresenter::ephemeral_grow_u_(const std::string& key, float stagger_de
     if (age <= 0.f)
         return 0.f;
     const float g = grow_sec > 1e-4f ? grow_sec : kArrowGrowSec;
-    return std::clamp(age / g, 0.f, 1.f);
+    // Ease-out cubic: path length accelerates then settles (PR4).
+    return motion::ease_out_cubic(std::clamp(age / g, 0.f, 1.f));
 }
 
 void ScenePresenter::clear_selection_deps_()
@@ -1390,7 +1391,7 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return s > 0.f ? s : 0.f;
     };
 
-    // Active ring wave (PR3): Z-staggered ease-in-out bump; rare, drawn ring only.
+    // Active ring wave (PR3): Y-staggered ease-in-out bump; rare, drawn ring only.
     const float wave_dur =
         sty().wave_duration_sec > 1e-3f ? sty().wave_duration_sec : 0.65f;
     const float wave_pulse =
@@ -1407,10 +1408,10 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     const bool wave_live = ring_wave_.start_sec >= 0.f;
     const float wave_elapsed = wave_live ? (now - ring_wave_.start_sec) : 0.f;
 
-    auto wave_env_for_z_ = [&](float z) -> float {
+    auto wave_env_for_y_ = [&](float y) -> float {
         if (!wave_live || (wave_amp <= 0.f && wave_lift <= 0.f))
             return 0.f;
-        return motion::wave_envelope(wave_elapsed, z, ring_wave_.z_lo, ring_wave_.z_hi,
+        return motion::wave_envelope(wave_elapsed, y, ring_wave_.y_lo, ring_wave_.y_hi,
                                      wave_dur, wave_pulse);
     };
 
@@ -1455,20 +1456,11 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (alpha < 0.02f)
             return false;
 
-        const float env = wave_env_for_z_(placed.pos.z);
+        const float env = wave_env_for_y_(placed.pos.y);
         glm::vec3 pos = placed.pos;
+        // Pure +Y crest bounce (stagger also on Y → readable vertical wave).
         if (env > 1e-4f && wave_lift > 0.f)
-        {
-            // Radial outward "shuffle" bump in the polar plane (XY).
-            const float lat2 = pos.x * pos.x + pos.y * pos.y;
-            if (lat2 > 1e-6f)
-            {
-                const float inv_r = 1.f / std::sqrt(lat2);
-                const float lift  = wave_lift * env;
-                pos.x += pos.x * inv_r * lift;
-                pos.y += pos.y * inv_r * lift;
-            }
-        }
+            pos.y += wave_lift * env;
         float inst_scale = pop_scale_for_(placed.hash);
         if (env > 1e-4f && wave_amp > 0.f)
             inst_scale *= (1.f + wave_amp * env);
@@ -1587,9 +1579,27 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (!wave_live && cooled && have_vis_z && (fill_ok || batch_ok) &&
             !drawn.empty())
         {
+            float y_lo = 1.e9f;
+            float y_hi = -1.e9f;
+            for (const std::string& h : drawn)
+            {
+                auto it = layout_cache_.by_hash.find(h);
+                if (it == layout_cache_.by_hash.end())
+                    continue;
+                if (it->second >= layout.placements.size())
+                    continue;
+                const float y = layout.placements[it->second].pos.y;
+                y_lo = std::min(y_lo, y);
+                y_hi = std::max(y_hi, y);
+            }
+            if (y_hi - y_lo < 1e-3f)
+            {
+                y_lo = -kLayoutBaseRadius;
+                y_hi = kLayoutBaseRadius;
+            }
             ring_wave_.start_sec = now;
-            ring_wave_.z_lo      = vis_z_lo;
-            ring_wave_.z_hi      = vis_z_hi;
+            ring_wave_.y_lo      = y_lo;
+            ring_wave_.y_hi      = y_hi;
         }
         prev_drawn_hashes_ = drawn;
     }
@@ -1634,9 +1644,12 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         if (out.instances.size() >= kMaxInstances)
             break;
         const float t = std::clamp((now - db.birth_sec) / kDeathSec, 0.f, 1.f);
-        const float alpha = (1.f - t) * 0.9f;
+        // Ease-in: hold then accelerate shrink + fade (PR4).
+        const float u = motion::ease_in_cubic(t);
+        const float alpha = (1.f - u) * 0.9f;
+        const float death_scale = scale * (1.f - u);
         out.instances.push_back(
-            GpuInstance{ db.pos, scale, glm::vec3(1.f, 0.12f, 0.1f), alpha });
+            GpuInstance{ db.pos, death_scale, glm::vec3(1.f, 0.12f, 0.1f), alpha });
         out.pick_map.push_back(db.hash);
     }
 

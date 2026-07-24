@@ -73,17 +73,17 @@ inline float bump_in_out(float t) noexcept
     return ease_in_out_cubic(2.f - t * 2.f);
 }
 
-// Z-staggered wave envelope at block_z.
-// elapsed = now - wave_start; local_u 0 at z_hi (older) → 1 at z_lo (newer).
+// Axis-staggered traveling pulse (ring wave uses world Y: lo→hi upward).
+// elapsed = now - wave_start; local_u 0 at coord_lo → 1 at coord_hi.
 // Returns 0..1 amplitude; 0 outside the traveling pulse.
-inline float wave_envelope(float elapsed, float block_z, float z_lo, float z_hi,
+inline float wave_envelope(float elapsed, float coord, float coord_lo, float coord_hi,
                            float duration_sec, float pulse_sec) noexcept
 {
     if (elapsed < 0.f || duration_sec < 1e-4f || pulse_sec < 1e-4f)
         return 0.f;
-    const float zspan = z_hi - z_lo;
+    const float span = coord_hi - coord_lo;
     const float local =
-        zspan > 1e-3f ? clamp01((z_hi - block_z) / zspan) : 0.f;
+        span > 1e-3f ? clamp01((coord - coord_lo) / span) : 0.f;
     const float travel = std::max(0.f, duration_sec - pulse_sec);
     const float delay  = local * travel;
     const float age    = elapsed - delay;
