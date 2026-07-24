@@ -1,0 +1,354 @@
+{
+  "version": 1,
+  "status": "fail",
+  "generated_at": "2026-07-24T02:53:47Z",
+  "git_sha": "e82a270",
+  "config": "Debug",
+  "headless": true,
+  "suites": [
+    "bench",
+    "mod"
+  ],
+  "cases": [
+    {
+      "id": "mod_network",
+      "status": "pass",
+      "suite": "mod",
+      "kind": "exit_code",
+      "message": "exit 0",
+      "expected": null,
+      "actual": null,
+      "diff": null,
+      "report": null,
+      "headless": true
+    },
+    {
+      "id": "mod_domain",
+      "status": "pass",
+      "suite": "mod",
+      "kind": "exit_code",
+      "message": "exit 0",
+      "expected": null,
+      "actual": null,
+      "diff": null,
+      "report": null,
+      "headless": true
+    },
+    {
+      "id": "fake_steady_frame",
+      "status": "fail",
+      "suite": "bench",
+      "kind": "perf_baseline",
+      "message": "total_blocks=133 confidence=0.0 confidence soft-fail",
+      "expected": "vnv/bench/baselines/fake_steady_frame.json",
+      "actual": "vnv/bench/tests/out/fake_steady_frame/actual.json",
+      "diff": null,
+      "report": null,
+      "headless": true,
+      "metrics": {
+        "case": "fake_steady_frame",
+        "samples": 120,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "confidence": 0.0,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 0.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 19.8368,
+          "p95": 20.3517
+        },
+        "cpu_ms": {
+          "median": 19.7232,
+          "p95": 20.24
+        },
+        "gpu_ms": {
+          "median": 18.624,
+          "p95": 19.0808
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0473,
+            "gpu_p95": 0.0545
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0543,
+            "gpu_p95": 0.0618
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 18.8406,
+            "gpu_p95": 18.8406
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 2.5691,
+            "gpu_p95": 3.0935
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.015,
+            "cpu_p95": 0.0159,
+            "gpu_median": 18.624,
+            "gpu_p95": 19.0808
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0004,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Prepare": {
+            "cpu_median": 0.8826,
+            "cpu_p95": 0.9545,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0023,
+            "cpu_p95": 0.0027,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0191,
+            "cpu_p95": 0.0206,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 10.2245,
+            "gpu_p95": 10.2245
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 38.9599,
+            "gpu_p95": 38.9599
+          },
+          "SubmitPresent": {
+            "cpu_median": 18.7999,
+            "cpu_p95": 19.2963,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": "fake_mass_2k",
+      "status": "pass",
+      "suite": "bench",
+      "kind": "perf_baseline",
+      "message": "total_blocks=2061 confidence=0.75",
+      "expected": "vnv/bench/baselines/fake_mass_2k.json",
+      "actual": "vnv/bench/tests/out/fake_mass_2k/actual.json",
+      "diff": null,
+      "report": null,
+      "headless": true,
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 30,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "confidence": 0.75,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 0.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 41.0851,
+          "p95": 45.6069
+        },
+        "cpu_ms": {
+          "median": 40.9076,
+          "p95": 45.4273
+        },
+        "gpu_ms": {
+          "median": 31.4233,
+          "p95": 31.6892
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0451,
+            "gpu_p95": 0.0559
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0927,
+            "gpu_p95": 0.1203
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 2.061,
+            "gpu_p95": 2.3574
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0171,
+            "cpu_p95": 0.0209,
+            "gpu_median": 31.4233,
+            "gpu_p95": 31.6892
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0013,
+            "cpu_p95": 0.0015,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Prepare": {
+            "cpu_median": 9.24,
+            "cpu_p95": 13.5931,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0033,
+            "cpu_p95": 0.0035,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0213,
+            "cpu_p95": 0.0252,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 31.6332,
+            "cpu_p95": 31.8564,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": "fake_mass_4k",
+      "status": "pass",
+      "suite": "bench",
+      "kind": "perf_baseline",
+      "message": "total_blocks=4113 confidence=0.75",
+      "expected": "vnv/bench/baselines/fake_mass_4k.json",
+      "actual": "vnv/bench/tests/out/fake_mass_4k/actual.json",
+      "diff": null,
+      "report": null,
+      "headless": true,
+      "metrics": {
+        "case": "fake_mass_4k",
+        "samples": 25,
+        "total_blocks": 4113,
+        "bootstrap_heights": 256,
+        "lane_count": 16,
+        "confidence": 0.75,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 0.0
+        },
+        "budgets_ms": {
+          "frame": 90.0,
+          "cpu": 88.0,
+          "gpu": 6.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 51.3396,
+          "p95": 67.4279
+        },
+        "cpu_ms": {
+          "median": 51.085,
+          "p95": 67.159
+        },
+        "gpu_ms": {
+          "median": 31.3587,
+          "p95": 31.9196
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0456,
+            "gpu_p95": 0.0539
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0946,
+            "gpu_p95": 0.1396
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 2.0647,
+            "gpu_p95": 2.9757
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0174,
+            "cpu_p95": 0.0195,
+            "gpu_median": 31.3587,
+            "gpu_p95": 31.9196
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0011,
+            "cpu_p95": 0.0012,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Prepare": {
+            "cpu_median": 19.477,
+            "cpu_p95": 32.4531,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0041,
+            "cpu_p95": 0.0049,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0222,
+            "cpu_p95": 0.0293,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 31.639,
+            "cpu_p95": 32.213,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        }
+      }
+    }
+  ],
+  "note": "Combined run: mod + mass benches on lavapipe headless"
+}

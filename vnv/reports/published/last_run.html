@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>VnV Report — FAIL</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --text: #e7ecf3;
+  --muted: #8b9bb4;
+  --pass: #3dd68c;
+  --fail: #f07178;
+  --warn: #e6b450;
+  --border: #2a3548;
+  --improved: #7fd99a;
+  --regressed: #ff8b8b;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 1.5rem 2rem 3rem;
+  line-height: 1.45;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+h3 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+h4 { font-size: 0.95rem; color: var(--muted); }
+.sub { color: var(--muted); margin-bottom: 1.25rem; }
+.summary {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0 1.5rem;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1.1rem;
+  min-width: 7rem;
+}
+.card .n { font-size: 1.6rem; font-weight: 700; }
+.card.pass .n { color: var(--pass); }
+.card.fail .n { color: var(--fail); }
+.card.warn .n { color: var(--warn); }
+.card .l { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--border); padding: 0.4rem 0.55rem; text-align: left; }
+th { background: #121a26; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+tr.regressed td { background: rgba(240, 113, 120, 0.12); }
+tr.improved td { background: rgba(61, 214, 140, 0.1); }
+.badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-right: 0.35rem;
+  letter-spacing: 0.03em;
+}
+.badge.pass { background: rgba(61,214,140,0.2); color: var(--pass); }
+.badge.fail { background: rgba(240,113,120,0.2); color: var(--fail); }
+.badge.warn { background: rgba(230,180,80,0.2); color: var(--warn); }
+.badge.unknown { background: #333; color: #aaa; }
+.case {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  margin: 1rem 0;
+}
+.case.pass { border-left-color: var(--pass); }
+.case.fail { border-left-color: var(--fail); }
+.case.warn { border-left-color: var(--warn); }
+.meta, .msg { font-size: 0.85rem; color: var(--muted); }
+.desc { margin: 0.4rem 0 0.6rem; }
+code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.85em; }
+.muted { color: var(--muted); }
+.present { color: var(--pass); }
+.missing { color: var(--fail); }
+.improved { color: var(--improved); font-weight: 600; }
+.regressed { color: var(--regressed); font-weight: 600; }
+.same { color: var(--muted); }
+.imgs {
+  display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.75rem 0;
+}
+.imgs figure {
+  margin: 0; background: #0a0e14; border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.5rem; max-width: 420px;
+}
+.imgs figcaption { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.35rem; }
+.imgs img { max-width: 400px; max-height: 240px; width: auto; height: auto; display: block; border-radius: 3px; }
+pre {
+  background: #0a0e14;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  max-height: 28rem;
+}
+.report-txt { max-height: 12rem; }
+details { margin: 0.5rem 0; }
+summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.toc a { color: #7eb8ff; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.toc li { margin: 0.2rem 0; }
+footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VnV Report <span class="badge fail">FAIL</span></h1>
+  <p class="sub">
+    Generated 2026-07-24T02:53:47Z
+     · git <code>e82a270</code>
+     · config <code>Debug</code>
+     · headless=<code>True</code>
+     · suites: bench, mod
+  </p>
+  <p class='sub'>Compared against previous run: <code>2026-07-24T02:53:47Z</code> · e82a270</p>
+</header>
+
+<div class="summary">
+  <div class="card pass"><div class="n">4</div><div class="l">Passed</div></div>
+  <div class="card fail"><div class="n">1</div><div class="l">Failed</div></div>
+  <div class="card warn"><div class="n">0</div><div class="l">Warn / skip</div></div>
+  <div class="card"><div class="n">5</div><div class="l">Total cases</div></div>
+  
+</div>
+
+<h2>Case index</h2>
+<ul class="toc">
+<li><a href='#case-mod_network'><span class='badge pass'>pass</span> mod_network</a></li>
+<li><a href='#case-mod_domain'><span class='badge pass'>pass</span> mod_domain</a></li>
+<li><a href='#case-fake_steady_frame'><span class='badge fail'>fail</span> fake_steady_frame</a></li>
+<li><a href='#case-fake_mass_2k'><span class='badge pass'>pass</span> fake_mass_2k</a></li>
+<li><a href='#case-fake_mass_4k'><span class='badge pass'>pass</span> fake_mass_4k</a></li>
+</ul>
+
+<h2>Results</h2>
+<section class='case pass' id='case-mod_network'>
+<h3><span class='badge pass'>PASS</span> mod_network</h3>
+<p class='meta'>suite=<code>mod</code> kind=<code>exit_code</code></p>
+<p class='desc'>Unit tests for network layer (HTTP pool, adapters, fake transport).</p>
+<p class='msg'><code>exit 0</code></p>
+<p class='before-after'><strong>Before → after:</strong> <span class='muted'>no prior</span></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+</tbody></table>
+</section>
+<section class='case pass' id='case-mod_domain'>
+<h3><span class='badge pass'>PASS</span> mod_domain</h3>
+<p class='meta'>suite=<code>mod</code> kind=<code>exit_code</code></p>
+<p class='desc'>Unit tests for domain layer (BlockScene, graph, prune, lane math).</p>
+<p class='msg'><code>exit 0</code></p>
+<p class='before-after'><strong>Before → after:</strong> <span class='muted'>no prior</span></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+</tbody></table>
+</section>
+<section class='case fail' id='case-fake_steady_frame'>
+<h3><span class='badge fail'>FAIL</span> fake_steady_frame</h3>
+<p class='meta'>suite=<code>bench</code> kind=<code>perf_baseline</code></p>
+<p class='desc'>Fixed camera, default FakeChain density (8 heights × 16 lanes ≈ 128 blocks). Soft budgets 8/4/5 ms.</p>
+<p class='msg'><code>total_blocks=133 confidence=0.0 confidence soft-fail</code></p>
+<p class='before-after'><strong>Before → after:</strong> <span class='same'>fail → fail</span></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>expected (golden/baseline)</td><td><code>vnv/bench/baselines/fake_steady_frame.json</code></td><td class='present'>present (1476 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/fake_steady_frame/actual.json</code></td><td class='present'>present (1735 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class='regressed'><td>frame median (ms)</td><td class='num'>5.7466</td><td class='num'>19.8368</td><td class='num'>+14.0902</td></tr>
+<tr class='regressed'><td>frame p95 (ms)</td><td class='num'>7.7314</td><td class='num'>20.3517</td><td class='num'>+12.6203</td></tr>
+<tr class='regressed'><td>cpu median (ms)</td><td class='num'>5.616</td><td class='num'>19.7232</td><td class='num'>+14.1072</td></tr>
+<tr class='regressed'><td>gpu median (ms)</td><td class='num'>0.028</td><td class='num'>18.624</td><td class='num'>+18.5960</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>120</td><td class='num'>120</td><td class='num'>+0.0000</td></tr>
+</tbody></table>
+<h4>Before / after (previous run vs this run)</h4>
+<table class='metrics'><thead><tr><th>Metric</th><th>Before (prev actual)</th><th>After (this actual)</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>19.8368</td><td class='num'>19.8368</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>20.3517</td><td class='num'>20.3517</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>19.7232</td><td class='num'>19.7232</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>18.624</td><td class='num'>18.624</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>confidence</td><td class='num'>0.0</td><td class='num'>0.0</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>133</td><td class='num'>133</td><td class='num'>+0.0000</td></tr>
+<tr class=''><td>samples</td><td class='num'>120</td><td class='num'>120</td><td class='num'>+0.0000</td></tr>
+</tbody></table>
+<details><summary>Baseline JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_steady_frame&quot;,
+  &quot;samples&quot;: 120,
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 5.7466,
+    &quot;p95&quot;: 7.7314
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 5.616,
+    &quot;p95&quot;: 7.6188
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.028,
+    &quot;p95&quot;: 0.0296
+  },
+  &quot;scopes&quot;: {
+    &quot;Cubes&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0054
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0094,
+      &quot;gpu_p95&quot;: 0.0095
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0112,
+      &quot;gpu_p95&quot;: 0.0117
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.028,
+      &quot;gpu_p95&quot;: 0.0295
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0015,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 3.8379,
+      &quot;cpu_p95&quot;: 5.4589,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0092,
+      &quot;cpu_p95&quot;: 0.0133,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.3495,
+      &quot;cpu_p95&quot;: 0.4884,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0028,
+      &quot;gpu_p95&quot;: 0.0028
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0189,
+      &quot;gpu_p95&quot;: 0.0199
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 1.3322,
+      &quot;cpu_p95&quot;: 1.7093,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  }
+}</pre></details>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_steady_frame&quot;,
+  &quot;samples&quot;: 120,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;confidence&quot;: 0.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 0.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 19.8368,
+    &quot;p95&quot;: 20.3517
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 19.7232,
+    &quot;p95&quot;: 20.24
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 18.624,
+    &quot;p95&quot;: 19.0808
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0473,
+      &quot;gpu_p95&quot;: 0.0545
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0543,
+      &quot;gpu_p95&quot;: 0.0618
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 18.8406,
+      &quot;gpu_p95&quot;: 18.8406
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 2.5691,
+      &quot;gpu_p95&quot;: 3.0935
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.015,
+      &quot;cpu_p95&quot;: 0.0159,
+      &quot;gpu_median&quot;: 18.624,
+      &quot;gpu_p95&quot;: 19.0808
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0004,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8826,
+      &quot;cpu_p95&quot;: 0.9545,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0023,
+      &quot;cpu_p95&quot;: 0.0027,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0191,
+      &quot;cpu_p95&quot;: 0.0206,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 10.2245,
+      &quot;gpu_p95&quot;: 10.2245
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 38.9599,
+      &quot;gpu_p95&quot;: 38.9599
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 18.7999,
+      &quot;cpu_p95&quot;: 19.2963,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench</code> kind=<code>perf_baseline</code></p>
+<p class='desc'>Mass scene: bootstrap 128 heights × 16 lanes ≈ 2048 blocks. Soft budgets 50/48/4 ms. Measures Prepare/instance scaling.</p>
+<p class='msg'><code>total_blocks=2061 confidence=0.75</code></p>
+<p class='before-after'><strong>Before → after:</strong> <span class='muted'>no prior</span></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>expected (golden/baseline)</td><td><code>vnv/bench/baselines/fake_mass_2k.json</code></td><td class='missing'>missing (missing)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/fake_mass_2k/actual.json</code></td><td class='present'>present (1409 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>41.0851</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>45.6069</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>40.9076</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>31.4233</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.75</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>30</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 30,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;confidence&quot;: 0.75,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 0.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 41.0851,
+    &quot;p95&quot;: 45.6069
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 40.9076,
+    &quot;p95&quot;: 45.4273
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 31.4233,
+    &quot;p95&quot;: 31.6892
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0451,
+      &quot;gpu_p95&quot;: 0.0559
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0927,
+      &quot;gpu_p95&quot;: 0.1203
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 2.061,
+      &quot;gpu_p95&quot;: 2.3574
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0171,
+      &quot;cpu_p95&quot;: 0.0209,
+      &quot;gpu_median&quot;: 31.4233,
+      &quot;gpu_p95&quot;: 31.6892
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0013,
+      &quot;cpu_p95&quot;: 0.0015,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.24,
+      &quot;cpu_p95&quot;: 13.5931,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0033,
+      &quot;cpu_p95&quot;: 0.0035,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0213,
+      &quot;cpu_p95&quot;: 0.0252,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 31.6332,
+      &quot;cpu_p95&quot;: 31.8564,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-fake_mass_4k'>
+<h3><span class='badge pass'>PASS</span> fake_mass_4k</h3>
+<p class='meta'>suite=<code>bench</code> kind=<code>perf_baseline</code></p>
+<p class='desc'>Mass scene: bootstrap 256 heights × 16 lanes ≈ 4096 blocks. Soft budgets 90/88/6 ms. Large-scene stress.</p>
+<p class='msg'><code>total_blocks=4113 confidence=0.75</code></p>
+<p class='before-after'><strong>Before → after:</strong> <span class='muted'>no prior</span></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>expected (golden/baseline)</td><td><code>vnv/bench/baselines/fake_mass_4k.json</code></td><td class='missing'>missing (missing)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/fake_mass_4k/actual.json</code></td><td class='present'>present (1410 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>51.3396</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>67.4279</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>51.085</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>31.3587</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.75</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>4113</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>25</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_4k&quot;,
+  &quot;samples&quot;: 25,
+  &quot;total_blocks&quot;: 4113,
+  &quot;bootstrap_heights&quot;: 256,
+  &quot;lane_count&quot;: 16,
+  &quot;confidence&quot;: 0.75,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 0.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 90.0,
+    &quot;cpu&quot;: 88.0,
+    &quot;gpu&quot;: 6.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 51.3396,
+    &quot;p95&quot;: 67.4279
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 51.085,
+    &quot;p95&quot;: 67.159
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 31.3587,
+    &quot;p95&quot;: 31.9196
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0456,
+      &quot;gpu_p95&quot;: 0.0539
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0946,
+      &quot;gpu_p95&quot;: 0.1396
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 2.0647,
+      &quot;gpu_p95&quot;: 2.9757
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0174,
+      &quot;cpu_p95&quot;: 0.0195,
+      &quot;gpu_median&quot;: 31.3587,
+      &quot;gpu_p95&quot;: 31.9196
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0012,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 19.477,
+      &quot;cpu_p95&quot;: 32.4531,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0041,
+      &quot;cpu_p95&quot;: 0.0049,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0222,
+      &quot;cpu_p95&quot;: 0.0293,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 31.639,
+      &quot;cpu_p95&quot;: 32.213,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  }
+}</pre></details>
+</section>
+
+<h2>Catalog (not run this session)</h2>
+<table>
+<thead><tr><th>Id</th><th>Suite</th><th>Kind</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>fake_bfs_end_z</code></td><td>bench</td><td>perf_baseline</td><td>Dense 48×16 + tip selection (dependency walk / Sobel path).</td></tr>
+<tr><td><code>fake_overdraw_end_z</code></td><td>bench</td><td>perf_baseline</td><td>Dense bootstrap 48×16 ≈ 768 blocks; End camera looking down +Z (timeline overdraw).</td></tr>
+<tr><td><code>fake_overdraw_end_z_move</code></td><td>bench</td><td>perf_baseline</td><td>Dense 48×16; End camera with scroll-Z oscillation during sample (re-sort opaques).</td></tr>
+<tr><td><code>fake_overview</code></td><td>int</td><td>visual_golden</td><td>FakeChain overview camera; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_selection_sobel</code></td><td>int</td><td>visual_golden</td><td>Tip selection + Sobel edge overlay; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_side_cam</code></td><td>int</td><td>visual_golden</td><td>FakeChain side camera view; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_stress_instances</code></td><td>bench</td><td>perf_baseline</td><td>Same scene as steady; looser soft budgets (12/6/8 ms) for stress headroom.</td></tr>
+</tbody></table>
+
+<footer>
+  Generated by <code>scripts/generate_vnv_report.py</code> ·
+  Catalog: <code>vnv/manifest/case_catalog.json</code> ·
+  Results schema: cases[].id/status/kind/expected/actual + optional metrics
+</footer>
+</body>
+</html>

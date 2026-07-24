@@ -1,0 +1,24 @@
+{
+  "case": "fake_mass_4k",
+  "samples": 25,
+  "total_blocks": 4113,
+  "bootstrap_heights": 256,
+  "lane_count": 16,
+  "confidence": 0.7500,
+  "scores": { "frame": 1.0000, "cpu": 1.0000, "gpu": 0.0000 },
+  "budgets_ms": { "frame": 90.00, "cpu": 88.00, "gpu": 6.00, "soft_tol": 0.40 },
+  "frame_ms": { "median": 51.3396, "p95": 67.4279 },
+  "cpu_ms": { "median": 51.0850, "p95": 67.1590 },
+  "gpu_ms": { "median": 31.3587, "p95": 31.9196 },
+  "scopes": {
+    "CubesTaskMesh": { "cpu_median": 0.0000, "cpu_p95": 0.0000, "gpu_median": 0.0456, "gpu_p95": 0.0539 },
+    "DebugMesh": { "cpu_median": 0.0000, "cpu_p95": 0.0000, "gpu_median": 0.0946, "gpu_p95": 0.1396 },
+    "ImGui": { "cpu_median": 0.0000, "cpu_p95": 0.0000, "gpu_median": 2.0647, "gpu_p95": 2.9757 },
+    "MainColorDepth": { "cpu_median": 0.0174, "cpu_p95": 0.0195, "gpu_median": 31.3587, "gpu_p95": 31.9196 },
+    "MeshArenaUpload": { "cpu_median": 0.0011, "cpu_p95": 0.0012, "gpu_median": 0.0000, "gpu_p95": 0.0000 },
+    "Prepare": { "cpu_median": 19.4770, "cpu_p95": 32.4531, "gpu_median": 0.0000, "gpu_p95": 0.0000 },
+    "PublishUpload": { "cpu_median": 0.0041, "cpu_p95": 0.0049, "gpu_median": 0.0000, "gpu_p95": 0.0000 },
+    "RecordMain": { "cpu_median": 0.0222, "cpu_p95": 0.0293, "gpu_median": 0.0000, "gpu_p95": 0.0000 },
+    "SubmitPresent": { "cpu_median": 31.6390, "cpu_p95": 32.2130, "gpu_median": 0.0000, "gpu_p95": 0.0000 }
+  }
+}

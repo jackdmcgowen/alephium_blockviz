@@ -74,6 +74,8 @@ vnv/int/tests/**/out/
 vnv/int/tests/visual/out/
 vnv/bench/tests/out/
 vnv/reports/
+!vnv/reports/published/
+!vnv/reports/published/**
 tests/visual/out/
 
 # OS junk
