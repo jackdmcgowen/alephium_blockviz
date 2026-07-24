@@ -29,8 +29,23 @@ struct EngineCreateInfo
     // Requires width/height. Screenshots use GPU readback (not desktop blit).
     bool     headless          = false;
 
+    // Physical device selection (multi-GPU). -1 / null = auto (prefer discrete).
+    // Env fallbacks (if fields left default): BLOCKVIZ_DEVICE_INDEX,
+    // BLOCKVIZ_DEVICE_NAME, BLOCKVIZ_DEVICE_UUID.
+    int         physical_device_index = -1;
+    const char* physical_device_name  = nullptr; // substring of deviceName
+    const char* physical_device_uuid  = nullptr; // 32 hex chars (dashes optional)
+
     // Host-owned application identity → VkApplicationInfo application fields
     SoftwareIdentity application{};
+};
+
+// Hints for pick_physical_device (copied from EngineCreateInfo + env).
+struct DevicePickHint
+{
+    int         index = -1;
+    const char* name  = nullptr;
+    const char* uuid  = nullptr;
 };
 
 struct CameraUBO

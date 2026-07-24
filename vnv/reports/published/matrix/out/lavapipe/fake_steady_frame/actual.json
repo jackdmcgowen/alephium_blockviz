@@ -1,0 +1,117 @@
+{
+  "case": "fake_steady_frame",
+  "samples": 15,
+  "total_blocks": 131,
+  "bootstrap_heights": 0,
+  "lane_count": 16,
+  "device_index": 0,
+  "device_name": "llvmpipe (LLVM 20.1.2, 128 bits)",
+  "device_type": "cpu",
+  "device_uuid": "6d65736132352e322e382d3075627500",
+  "headless": true,
+  "confidence": 0.0,
+  "scores": {
+    "frame": 0.0,
+    "cpu": 0.0,
+    "gpu": 0.0
+  },
+  "budgets_ms": {
+    "frame": 8.0,
+    "cpu": 4.0,
+    "gpu": 5.0,
+    "soft_tol": 0.4
+  },
+  "frame_ms": {
+    "median": 19.7154,
+    "p95": 19.9337
+  },
+  "cpu_ms": {
+    "median": 19.6034,
+    "p95": 19.8183
+  },
+  "gpu_ms": {
+    "median": 18.5134,
+    "p95": 18.5713
+  },
+  "scopes": {
+    "CubesTaskMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0446,
+      "gpu_p95": 0.05
+    },
+    "DebugMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.04,
+      "gpu_p95": 0.0451
+    },
+    "EdgeOverlay": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 18.9064,
+      "gpu_p95": 18.9064
+    },
+    "ImGui": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 2.5565,
+      "gpu_p95": 2.7118
+    },
+    "MainColorDepth": {
+      "cpu_median": 0.0147,
+      "cpu_p95": 0.0152,
+      "gpu_median": 18.5134,
+      "gpu_p95": 18.5713
+    },
+    "MeshArenaUpload": {
+      "cpu_median": 0.0003,
+      "cpu_p95": 0.0004,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "Prepare": {
+      "cpu_median": 0.872,
+      "cpu_p95": 1.0256,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "PublishUpload": {
+      "cpu_median": 0.0025,
+      "cpu_p95": 0.0029,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "RecordMain": {
+      "cpu_median": 0.0187,
+      "cpu_p95": 0.0191,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "SelectionDepth": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 10.1378,
+      "gpu_p95": 10.1378
+    },
+    "SobelAsyncCMP": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 32.8764,
+      "gpu_p95": 32.8764
+    },
+    "SubmitPresent": {
+      "cpu_median": 18.685,
+      "cpu_p95": 18.7737,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    }
+  },
+  "matrix": {
+    "matrix_tag": "lavapipe",
+    "nvidia_index": -1,
+    "nvidia_name": "llvmpipe",
+    "nvidia_uuid": "lavapipe",
+    "exit_code": 3
+  }
+}

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <ctime>
@@ -201,12 +202,55 @@ void GraphicsSystem::init()
     if (info.enable_validation)
         create_debug_messenger(instance);
     surface = create_platform_surface(instance, hwnd_, hInst);
-    physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps);
+
+    // Device pick: explicit EngineCreateInfo fields, else BLOCKVIZ_DEVICE_* env.
+    DevicePickHint pick{};
+    pick.index = info.physical_device_index;
+    pick.name  = info.physical_device_name;
+    pick.uuid  = info.physical_device_uuid;
+    if (pick.index < 0)
+    {
+        if (const char* e = std::getenv("BLOCKVIZ_DEVICE_INDEX"))
+            pick.index = std::atoi(e);
+    }
+    if (!pick.name || !pick.name[0])
+    {
+        if (const char* e = std::getenv("BLOCKVIZ_DEVICE_NAME"))
+            pick.name = e;
+    }
+    if (!pick.uuid || !pick.uuid[0])
+    {
+        if (const char* e = std::getenv("BLOCKVIZ_DEVICE_UUID"))
+            pick.uuid = e;
+    }
+    physicalDevice = pick_physical_device(instance, &deviceProps, &deviceMemProps, &pick);
     log_engine_startup(deviceProps, engine_id);
     query_optional_device_features(physicalDevice, device_optional_features_);
     log_optional_device_features(device_optional_features_);
+    // NVIDIA proprietary does not implement VK_EXT_headless_surface. When the
+    // instance enables headless via a Mesa ICD but the picked device is NVIDIA,
+    // swapchain surface queries SEGV in libnvidia-eglcore. Fail early with guidance.
+    if (headless_ && deviceProps.vendorID == 0x10DEu)
+    {
+        const char* allow = std::getenv("BLOCKVIZ_ALLOW_NVIDIA_HEADLESS");
+        if (!allow || allow[0] == '\0' || allow[0] == '0')
+        {
+            throw std::runtime_error(
+                "Headless + NVIDIA is unsupported (no VK_EXT_headless_surface on "
+                "proprietary ICD; mixed Mesa headless surface crashes). "
+                "Use a windowed DISPLAY (or xvfb-run), or lavapipe "
+                "(VK_ICD_FILENAMES=.../lvp_icd.json), or multi-GPU matrix with "
+                "CUDA_VISIBLE_DEVICES + windowed present. "
+                "Override with BLOCKVIZ_ALLOW_NVIDIA_HEADLESS=1 only for experiments.");
+        }
+        std::printf("[gfx] WARN: BLOCKVIZ_ALLOW_NVIDIA_HEADLESS set — continuing (may SEGV)\n");
+    }
+    // Headless: pass null surface into create_device so queue selection skips
+    // vkGetPhysicalDeviceSurfaceSupportKHR (avoids NVIDIA present-query SEGV).
+    // Swapchain still uses the real headless surface created above (Mesa/lavapipe).
+    const VkSurfaceKHR queue_surface = headless_ ? VK_NULL_HANDLE : surface;
     // PR2 cull + classic always; PR3 enables mesh extension when hardware supports it.
-    create_device(instance, physicalDevice, surface, &device, &queues_,
+    create_device(instance, physicalDevice, queue_surface, &device, &queues_,
                  /*enable_mesh_shaders=*/device_optional_features_.mesh_path_usable(),
                  &mesh_shaders_enabled_);
     buffer_manager_.reset(device, &deviceMemProps);

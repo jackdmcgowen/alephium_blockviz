@@ -1,0 +1,30 @@
+{
+  "case": "fake_steady_frame",
+  "status_note": "skipped_nvidia_headless",
+  "matrix": {
+    "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
+    "nvidia_index": 4,
+    "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+    "nvidia_uuid": "GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e",
+    "exit_code": 0,
+    "skipped": true,
+    "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
+  },
+  "confidence": 1.0,
+  "device_name": "NVIDIA GeForce RTX 3070 Ti",
+  "device_index": 4,
+  "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
+  "frame_ms": {
+    "median": null,
+    "p95": null
+  },
+  "cpu_ms": {
+    "median": null,
+    "p95": null
+  },
+  "gpu_ms": {
+    "median": null,
+    "p95": null
+  },
+  "total_blocks": null
+}

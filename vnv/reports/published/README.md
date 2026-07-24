@@ -18,3 +18,18 @@ Regenerate locally:
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
 ./scripts/run_vnv.sh --bench --mass --headless --report
 ```
+
+## Multi-GPU matrix
+
+See [matrix/](matrix/) — discovered **7× NVIDIA** + lavapipe.
+
+| Reality | Detail |
+|---------|--------|
+| NVIDIA proprietary | No `VK_EXT_headless_surface` — matrix marks rows **warn/skipped** without DISPLAY/xvfb |
+| lavapipe | Headless runs; soft budgets may confidence-fail on software |
+| Unlock real multi-GPU | `sudo apt install xvfb` then `xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless --report` |
+
+```bash
+./build/bin/bench_frame_profiler --list-devices --headless
+./scripts/run_bench_matrix.sh --list-only
+```

@@ -26,12 +26,24 @@ VkSurfaceKHR create_platform_surface(VkInstance instance, void* window, void* pl
 void destroy_surface(VkInstance instance, VkSurfaceKHR surface);
 
   //device.cpp
+// Prefer discrete GPU; optional index / name substring / UUID via DevicePickHint.
+// On match failure with an explicit hint, throws. Logs skip reasons.
 VkPhysicalDevice pick_physical_device(
     VkInstance instance,
     VkPhysicalDeviceProperties* device_props,
-    VkPhysicalDeviceMemoryProperties* device_mem_props);
+    VkPhysicalDeviceMemoryProperties* device_mem_props,
+    const DevicePickHint* hint = nullptr);
+
+// Print enumerated devices (index, name, type, UUID, meets requirements) to stdout.
+// Returns device count (including skipped). Creates no logical device.
+uint32_t list_physical_devices(VkInstance instance);
+
+// Format deviceUUID (16 bytes) as 32 lowercase hex chars (no dashes). out must hold ≥33.
+void format_device_uuid_hex(const uint8_t uuid[VK_UUID_SIZE], char* out, size_t out_n);
 
 // Creates device with _3D / TX / CMP queues (see QueueType). surface used for present support.
+// When surface is VK_NULL_HANDLE (headless path), skips WSI present-family query — required
+// to avoid NVIDIA SEGV on vkGetPhysicalDeviceSurfaceSupportKHR with headless surfaces.
 // When enable_mesh_shaders is true and the device supports VK_EXT_mesh_shader + meshShader,
 // enables the extension/feature (required for mesh cube PSO). Sets *mesh_enabled when armed.
 void create_device(

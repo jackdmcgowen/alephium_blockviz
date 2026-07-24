@@ -14,15 +14,21 @@
 #include "domain/alph_block.hpp"
 #include "domain/block_scene.hpp"
 #include "engine/engine.hpp"
+#include "engine/engine_identity.hpp"
+#include "graphics/gpu_prv_lib.h"
 #include "graphics/gpu_pub_lib.h"
+#include "graphics/platform/gpu_platform.hpp"
 #include "network/fake/fake_chain_simulator.hpp"
 #include "network/network_domain.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -78,7 +84,12 @@ static void print_usage()
         "  --bootstrap-heights N  Override FakeChain bootstrap heights (0=default)\n"
         "  --width N --height N\n"
         "  --headless        VK_EXT_headless_surface (no DISPLAY/window)\n"
-        "  --list\n"
+        "  --device <sel>    Physical device: index, name substring, or UUID hex\n"
+        "  --list-devices    Enumerate Vulkan GPUs and exit\n"
+        "  --list            List case ids\n"
+        "\n"
+        "Env: BLOCKVIZ_DEVICE_INDEX / BLOCKVIZ_DEVICE_NAME / BLOCKVIZ_DEVICE_UUID\n"
+        "Multi-GPU isolation: CUDA_VISIBLE_DEVICES=N NVIDIA_VISIBLE_DEVICES=N\n"
         "\n"
         "Cases:\n"
         "  fake_steady_frame          fixed camera, default FakeChain density (8×16)\n"
@@ -88,6 +99,76 @@ static void print_usage()
         "  fake_bfs_end_z             dense + selection tip (dep walk / Sobel)\n"
         "  fake_mass_2k               mass scene ~2048 blocks (128×16 lanes)\n"
         "  fake_mass_4k               mass scene ~4096 blocks (256×16 lanes)\n");
+}
+
+// Parse --device: pure digits with small value → index; 32-hex → UUID; else name.
+// Note: "3090" is a model substring, not an index (indices are typically 0..N-1).
+static void apply_device_selector(const std::string& sel, EngineCreateInfo& ci,
+                                  std::string& name_storage, std::string& uuid_storage)
+{
+    if (sel.empty())
+        return;
+    bool all_digit = true;
+    for (char c : sel)
+    {
+        if (c < '0' || c > '9')
+        {
+            all_digit = false;
+            break;
+        }
+    }
+    if (all_digit)
+    {
+        const int v = std::atoi(sel.c_str());
+        // Only treat as index when it looks like an enum ordinal (0..63).
+        if (v >= 0 && v < 64 && sel.size() <= 2)
+        {
+            ci.physical_device_index = v;
+            return;
+        }
+        // else fall through as name (e.g. --device 3090)
+    }
+    // UUID: strip dashes, check 32 hex
+    std::string hex;
+    for (char c : sel)
+    {
+        if (c == '-' || c == ' ' || c == '{' || c == '}')
+            continue;
+        hex.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    bool is_uuid = (hex.size() == 32);
+    if (is_uuid)
+    {
+        for (char c : hex)
+        {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                is_uuid = false;
+                break;
+            }
+        }
+    }
+    if (is_uuid)
+    {
+        uuid_storage = hex;
+        ci.physical_device_uuid = uuid_storage.c_str();
+    }
+    else
+    {
+        name_storage = sel;
+        ci.physical_device_name = name_storage.c_str();
+    }
+}
+
+static int run_list_devices(bool headless)
+{
+    gpu_platform_configure_headless(headless, BENCH_WDW_W, BENCH_WDW_H);
+    SoftwareIdentity app = app_identity::make();
+    SoftwareIdentity eng = blockviz_engine::identity();
+    VkInstance instance = create_instance(app, eng, /*enable_validation=*/false);
+    const uint32_t n = list_physical_devices(instance);
+    destroy_instance(instance);
+    return n > 0 ? 0 : 1;
 }
 
 static bool is_known_case(const std::string& id)
@@ -176,7 +257,11 @@ int main(int argc, char** argv)
     int height = BENCH_WDW_H;
     int bootstrap_heights_cli = -1; // -1 = use case default
     bool list_only = false;
+    bool list_devices = false;
     bool headless = false;
+    std::string device_sel;
+    std::string device_name_storage;
+    std::string device_uuid_storage;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -196,8 +281,12 @@ int main(int argc, char** argv)
             width = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--height") == 0 && i + 1 < argc)
             height = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--device") == 0 && i + 1 < argc)
+            device_sel = argv[++i];
         else if (std::strcmp(argv[i], "--headless") == 0)
             headless = true;
+        else if (std::strcmp(argv[i], "--list-devices") == 0)
+            list_devices = true;
         else if (std::strcmp(argv[i], "--list") == 0)
             list_only = true;
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
@@ -212,6 +301,9 @@ int main(int argc, char** argv)
             return 2;
         }
     }
+
+    if (list_devices)
+        return run_list_devices(headless);
 
     if (list_only)
     {
@@ -269,6 +361,80 @@ int main(int argc, char** argv)
     create_info.headless = headless;
     create_info.width = static_cast<uint32_t>(width);
     create_info.height = static_cast<uint32_t>(height);
+    apply_device_selector(device_sel, create_info, device_name_storage, device_uuid_storage);
+
+    // Capture device identity for actual JSON (same pick rules as GraphicsSystem).
+    std::string json_device_name;
+    std::string json_device_uuid;
+    std::string json_device_type;
+    int json_device_index = -1;
+    try
+    {
+        gpu_platform_configure_headless(headless, static_cast<uint32_t>(width),
+                                        static_cast<uint32_t>(height));
+        VkInstance tmp = create_instance(create_info.application, blockviz_engine::identity(),
+                                         /*enable_validation=*/false);
+        DevicePickHint hint{};
+        hint.index = create_info.physical_device_index;
+        hint.name  = create_info.physical_device_name;
+        hint.uuid  = create_info.physical_device_uuid;
+        if (hint.index < 0)
+            if (const char* e = std::getenv("BLOCKVIZ_DEVICE_INDEX"))
+                hint.index = std::atoi(e);
+        if (!hint.name || !hint.name[0])
+            if (const char* e = std::getenv("BLOCKVIZ_DEVICE_NAME"))
+                hint.name = e;
+        if (!hint.uuid || !hint.uuid[0])
+            if (const char* e = std::getenv("BLOCKVIZ_DEVICE_UUID"))
+                hint.uuid = e;
+        VkPhysicalDeviceProperties props{};
+        VkPhysicalDeviceMemoryProperties mem{};
+        VkPhysicalDevice pd = pick_physical_device(tmp, &props, &mem, &hint);
+        json_device_name = props.deviceName;
+        switch (props.deviceType)
+        {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   json_device_type = "discrete"; break;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: json_device_type = "integrated"; break;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:            json_device_type = "cpu"; break;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    json_device_type = "virtual"; break;
+        default:                                     json_device_type = "other"; break;
+        }
+        uint8_t uuid[VK_UUID_SIZE]{};
+        {
+            VkPhysicalDeviceIDProperties idp{};
+            idp.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+            VkPhysicalDeviceProperties2 p2{};
+            p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            p2.pNext = &idp;
+            vkGetPhysicalDeviceProperties2(pd, &p2);
+            std::memcpy(uuid, idp.deviceUUID, VK_UUID_SIZE);
+        }
+        char uuid_hex[33]{};
+        format_device_uuid_hex(uuid, uuid_hex, sizeof(uuid_hex));
+        json_device_uuid = uuid_hex;
+        // Recover index among enumerated devices
+        uint32_t n = 0;
+        vkEnumeratePhysicalDevices(tmp, &n, nullptr);
+        std::vector<VkPhysicalDevice> devs(n);
+        if (n)
+            vkEnumeratePhysicalDevices(tmp, &n, devs.data());
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            if (devs[i] == pd)
+            {
+                json_device_index = static_cast<int>(i);
+                break;
+            }
+        }
+        destroy_instance(tmp);
+    }
+    catch (const std::exception& e)
+    {
+        std::printf("[bench] device pick probe failed: %s\n", e.what());
+        FakeChainSimulator::set_bootstrap_heights_override(0);
+        return 1;
+    }
+
     if (!app_platform_create_window(&create_info, "Blockviz Bench Tests",
                                     static_cast<uint32_t>(width),
                                     static_cast<uint32_t>(height)))
@@ -534,6 +700,11 @@ int main(int argc, char** argv)
     std::fprintf(f, "  \"total_blocks\": %d,\n", total_blocks_at_sample);
     std::fprintf(f, "  \"bootstrap_heights\": %d,\n", bootstrap_heights);
     std::fprintf(f, "  \"lane_count\": %d,\n", BlockScene::kLaneCount);
+    std::fprintf(f, "  \"device_index\": %d,\n", json_device_index);
+    std::fprintf(f, "  \"device_name\": \"%s\",\n", json_device_name.c_str());
+    std::fprintf(f, "  \"device_type\": \"%s\",\n", json_device_type.c_str());
+    std::fprintf(f, "  \"device_uuid\": \"%s\",\n", json_device_uuid.c_str());
+    std::fprintf(f, "  \"headless\": %s,\n", headless ? "true" : "false");
     std::fprintf(f, "  \"confidence\": %.4f,\n", confidence);
     std::fprintf(f, "  \"scores\": { \"frame\": %.4f, \"cpu\": %.4f, \"gpu\": %.4f },\n",
                  s_frame, s_cpu, s_gpu);

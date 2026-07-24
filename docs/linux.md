@@ -108,6 +108,9 @@ Requires a Vulkan ICD (Mesa lavapipe is fine). Golden policy: [vnv/int/tests/vis
 
 - Mesa: `vulkan-tools` → `vulkaninfo` should list a device (RADV/ANV/lavapipe)
 - NVIDIA: proprietary driver + Vulkan ICD
+- Multi-GPU: `./build/bin/bench_frame_profiler --list-devices --headless` then
+  `./scripts/run_bench_matrix.sh --report` (isolates each card via `CUDA_VISIBLE_DEVICES`)
+- Device pick: `--device <index|name|uuid>` or `BLOCKVIZ_DEVICE_INDEX` / `_NAME` / `_UUID`
 - Validation: `vulkan-validationlayers` for Debug logs in `build/debug.log`
 
 ## Platform sources linked on Linux
