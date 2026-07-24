@@ -95,9 +95,9 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     )
     if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
       CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}")
-    elif [[ -f vcpkg/scripts/buildsystems/vcpkg.cmake ]]; then
-      if [[ -d vcpkg/installed/x64-linux || -d vcpkg/installed/x64-windows ]]; then
-        CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${REPO_ROOT}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+    elif [[ -f lib/vcpkg/scripts/buildsystems/vcpkg.cmake ]]; then
+      if [[ -d lib/vcpkg/installed/x64-linux || -d lib/vcpkg/installed/x64-windows ]]; then
+        CMAKE_ARGS+=(-DCMAKE_TOOLCHAIN_FILE="${REPO_ROOT}/lib/vcpkg/scripts/buildsystems/vcpkg.cmake")
         CMAKE_ARGS+=(-DVCPKG_TARGET_TRIPLET="${VCPKG_TARGET_TRIPLET:-x64-linux}")
       fi
     fi

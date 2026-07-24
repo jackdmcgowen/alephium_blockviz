@@ -9,7 +9,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SRC_ROOT "${REPO_ROOT}/src")
-set(IMGUI_ROOT "${REPO_ROOT}/imgui")
+set(IMGUI_ROOT "${REPO_ROOT}/lib/imgui")
 
 option(BLOCKVIZ_BUILD_APP "Build product executable" ON)
 option(BLOCKVIZ_BUILD_VNV "Build mod_* VnV executables (CPU-only)" ON)
@@ -62,8 +62,8 @@ endif()
 find_program(GLSLC_EXECUTABLE NAMES glslc
   HINTS
     "$ENV{VULKAN_SDK}/bin"
-    "${REPO_ROOT}/vcpkg/installed/x64-linux/tools/glslang"
-    "${REPO_ROOT}/vcpkg/installed/x64-windows/tools/glslang"
+    "${REPO_ROOT}/lib/vcpkg/installed/x64-linux/tools/glslang"
+    "${REPO_ROOT}/lib/vcpkg/installed/x64-windows/tools/glslang"
 )
 if(NOT GLSLC_EXECUTABLE)
   message(WARNING "glslc not found — pre-build .spv must already exist under src/graphics/shaders/")

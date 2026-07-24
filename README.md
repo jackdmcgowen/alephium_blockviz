@@ -72,7 +72,7 @@ Layered libraries — living goals and plans:
 ### Windows (MSVC)
 
 1. Install [Vulkan SDK](https://vulkan.lunarg.com/) and MSVC (VS 2022+).
-2. `git submodule update --init --recursive` (Dear ImGui + vcpkg).
+2. `git submodule update --init --recursive` (vendored under `lib/imgui` + `lib/vcpkg`).
 3. From the repo root:
 
 ```bat
@@ -89,7 +89,7 @@ See **[docs/linux.md](docs/linux.md)** (packages or vcpkg, Ninja, run from repo 
 ```bash
 ./install_deps.sh   # optional vcpkg path
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/lib/vcpkg/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_TARGET_TRIPLET=x64-linux
 cmake --build build
 ./build/bin/alephium_visualizer

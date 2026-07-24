@@ -36,14 +36,14 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(SolutionDir)..\vnv;$(SolutionDir)..\src;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\vnv;$(SolutionDir)..\src;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(SolutionDir)..\vnv;$(SolutionDir)..\src;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\vnv;$(SolutionDir)..\src;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -60,7 +60,7 @@
       <AdditionalDependencies>cjson.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\cjson.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\lib\vcpkg\installed\x64-windows\bin\cjson.dll" "$(OutDir)"</Command>
       <Message>Copy cjson.dll for tests</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -83,7 +83,7 @@
       <AdditionalDependencies>cjson.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\cjson.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\lib\vcpkg\installed\x64-windows\bin\cjson.dll" "$(OutDir)"</Command>
       <Message>Copy cjson.dll for tests</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>

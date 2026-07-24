@@ -33,13 +33,14 @@
   libvulkan-dev vulkan-tools glslang-tools libglfw3-dev \
   libcurl4-openssl-dev libcjson-dev libglm-dev zlib1g-dev</code></pre>
 <h3>vcpkg (no root; works in this repo)</h3>
-<pre><code>git submodule update --init --recursive
+<p>Vendored at <strong><code>lib/vcpkg</code></strong> (submodule). ImGui is <strong><code>lib/imgui</code></strong>.</p>
+<pre><code>git submodule update --init --recursive lib/imgui lib/vcpkg
 ./install_deps.sh</code></pre>
-<p>Manifest (<code>vcpkg.json</code>) pulls: curl, cjson, glm, zlib, glfw3, vulkan-headers, glslang.</p>
+<p>Manifest (repo-root <code>vcpkg.json</code>) pulls: curl, cjson, glm, zlib, glfw3, vulkan-headers, glslang.</p>
 <h2>Configure &amp; build</h2>
 <p>From <strong>repo root</strong>:</p>
 <pre><code>cmake -S . -B build -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=&quot;$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake&quot; \
+  -DCMAKE_TOOLCHAIN_FILE=&quot;$PWD/lib/vcpkg/scripts/buildsystems/vcpkg.cmake&quot; \
   -DVCPKG_TARGET_TRIPLET=x64-linux \
   -DCMAKE_BUILD_TYPE=Debug
 

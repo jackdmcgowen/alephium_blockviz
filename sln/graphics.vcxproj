@@ -66,14 +66,14 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\lib\imgui;$(SolutionDir)..\lib\imgui\backends;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(VULKAN_SDK)\Include;$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\lib\imgui;$(SolutionDir)..\lib\imgui\backends;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -154,7 +154,7 @@
     <ClCompile Include="..\src\graphics\frame\frame_loop.cpp" />
     <ClCompile Include="..\src\graphics\frame\screenshot.cpp" />
     <ClCompile Include="..\src\graphics\frame\swapchain_targets.cpp" />
-    <ClCompile Include="..\imgui\backends\imgui_impl_vulkan.cpp">
+    <ClCompile Include="..\lib\imgui\backends\imgui_impl_vulkan.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>

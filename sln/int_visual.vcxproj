@@ -36,15 +36,15 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\lib\imgui;$(SolutionDir)..\lib\imgui\backends;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration);$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)..\build\$(ProjectName)\$(Configuration)\int\</IntDir>
-    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\imgui;$(SolutionDir)..\imgui\backends;$(SolutionDir)..\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration);$(SolutionDir)..\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <IncludePath>$(SolutionDir)..\src;$(SolutionDir)..\src\graphics;$(SolutionDir)..\lib\imgui;$(SolutionDir)..\lib\imgui\backends;$(SolutionDir)..\lib\vcpkg\installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\Lib;$(SolutionDir)..\build\blockviz_engine\$(Configuration);$(SolutionDir)..\build\graphics\$(Configuration);$(SolutionDir)..\build\network\$(Configuration);$(SolutionDir)..\lib\vcpkg\installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <LocalDebuggerWorkingDirectory>$(SolutionDir)..\</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -63,7 +63,7 @@
       <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;z.lib;gdiplus.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\lib\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -86,7 +86,7 @@
       <AdditionalDependencies>blockviz_engine.lib;graphics.lib;network.lib;glm.lib;vulkan-1.lib;libcurl.lib;cjson.lib;z.lib;gdiplus.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(SolutionDir)..\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(SolutionDir)..\lib\vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -100,19 +100,19 @@
     <ClCompile Include="..\src\domain\block_graph.cpp" />
     <ClCompile Include="..\src\domain\block_scene.cpp" />
     <ClCompile Include="..\src\domain\layout.cpp" />
-    <ClCompile Include="..\imgui\imgui.cpp">
+    <ClCompile Include="..\lib\imgui\imgui.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\imgui\imgui_draw.cpp">
+    <ClCompile Include="..\lib\imgui\imgui_draw.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\imgui\imgui_tables.cpp">
+    <ClCompile Include="..\lib\imgui\imgui_tables.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\imgui\imgui_widgets.cpp">
+    <ClCompile Include="..\lib\imgui\imgui_widgets.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\imgui\backends\imgui_impl_win32.cpp">
+    <ClCompile Include="..\lib\imgui\backends\imgui_impl_win32.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>

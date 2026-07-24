@@ -19,12 +19,14 @@ sudo apt-get install -y build-essential cmake ninja-build python3 \
 
 ### vcpkg (no root; works in this repo)
 
+Vendored at **`lib/vcpkg`** (submodule). ImGui is **`lib/imgui`**.
+
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive lib/imgui lib/vcpkg
 ./install_deps.sh
 ```
 
-Manifest (`vcpkg.json`) pulls: curl, cjson, glm, zlib, glfw3, vulkan-headers, glslang.
+Manifest (repo-root `vcpkg.json`) pulls: curl, cjson, glm, zlib, glfw3, vulkan-headers, glslang.
 
 ## Configure & build
 
@@ -32,7 +34,7 @@ From **repo root**:
 
 ```bash
 cmake -S . -B build -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/lib/vcpkg/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_TARGET_TRIPLET=x64-linux \
   -DCMAKE_BUILD_TYPE=Debug
 

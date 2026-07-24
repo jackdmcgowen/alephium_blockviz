@@ -5,7 +5,7 @@ Scans sln/*.vcxproj ClCompile entries that use PrecompiledHeader=Use (or inherit
 project default Use) and verifies the source starts with:
   #include "<area>/pch.h"
 
-Excludes: pch.cpp creators, imgui/, pure .c files, and files marked NotUsing.
+Excludes: pch.cpp creators, lib/imgui/, pure .c files, and files marked NotUsing.
 
 Usage:
   python3 scripts/check_pch.py

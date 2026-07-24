@@ -40,11 +40,11 @@
     <ClCompile Include="..\src\domain\block_graph.cpp"><Filter>Source Files\domain</Filter></ClCompile>
     <ClCompile Include="..\src\domain\block_scene.cpp"><Filter>Source Files\domain</Filter></ClCompile>
     <ClCompile Include="..\src\domain\layout.cpp"><Filter>Source Files\domain</Filter></ClCompile>
-    <ClCompile Include="..\imgui\backends\imgui_impl_win32.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
-    <ClCompile Include="..\imgui\imgui.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
-    <ClCompile Include="..\imgui\imgui_tables.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
-    <ClCompile Include="..\imgui\imgui_widgets.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
-    <ClCompile Include="..\imgui\imgui_draw.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
+    <ClCompile Include="..\lib\imgui\backends\imgui_impl_win32.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_tables.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_widgets.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_draw.cpp"><Filter>Source Files\imgui</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\app\config.h"><Filter>Header Files\app</Filter></ClInclude>

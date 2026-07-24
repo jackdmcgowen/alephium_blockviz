@@ -93,4 +93,4 @@ install_deps.bat
 # Run from repo root so config.json and resource/ resolve
 ```
 
-Deps: vcpkg manifest (`curl`, `cjson`, `glm`); Vulkan SDK; MSVC.
+Deps: `lib/vcpkg` + root `vcpkg.json` (`curl`, `cjson`, `glm`, …); `lib/imgui`; Vulkan SDK; MSVC.
