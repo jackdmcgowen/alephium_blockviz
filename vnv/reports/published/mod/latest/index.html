@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>VnV Report — PASS</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --text: #e7ecf3;
+  --muted: #8b9bb4;
+  --pass: #3dd68c;
+  --fail: #f07178;
+  --warn: #e6b450;
+  --border: #2a3548;
+  --improved: #7fd99a;
+  --regressed: #ff8b8b;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 1.5rem 2rem 3rem;
+  line-height: 1.45;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+h3 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+h4 { font-size: 0.95rem; color: var(--muted); }
+.sub { color: var(--muted); margin-bottom: 1.25rem; }
+.summary {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0 1.5rem;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1.1rem;
+  min-width: 7rem;
+}
+.card .n { font-size: 1.6rem; font-weight: 700; }
+.card.pass .n { color: var(--pass); }
+.card.fail .n { color: var(--fail); }
+.card.warn .n { color: var(--warn); }
+.card .l { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--border); padding: 0.4rem 0.55rem; text-align: left; }
+th { background: #121a26; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+tr.regressed td { background: rgba(240, 113, 120, 0.12); }
+tr.improved td { background: rgba(61, 214, 140, 0.1); }
+.badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-right: 0.35rem;
+  letter-spacing: 0.03em;
+}
+.badge.pass { background: rgba(61,214,140,0.2); color: var(--pass); }
+.badge.fail { background: rgba(240,113,120,0.2); color: var(--fail); }
+.badge.warn { background: rgba(230,180,80,0.2); color: var(--warn); }
+.badge.unknown { background: #333; color: #aaa; }
+.case {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  margin: 1rem 0;
+}
+.case.pass { border-left-color: var(--pass); }
+.case.fail { border-left-color: var(--fail); }
+.case.warn { border-left-color: var(--warn); }
+.meta, .msg { font-size: 0.85rem; color: var(--muted); }
+.desc { margin: 0.4rem 0 0.6rem; }
+code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.85em; }
+.muted { color: var(--muted); }
+.present { color: var(--pass); }
+.missing { color: var(--fail); }
+.improved { color: var(--improved); font-weight: 600; }
+.regressed { color: var(--regressed); font-weight: 600; }
+.same { color: var(--muted); }
+.imgs {
+  display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.75rem 0;
+}
+.imgs figure {
+  margin: 0; background: #0a0e14; border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.5rem; max-width: 420px;
+}
+.imgs figcaption { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.35rem; }
+.imgs img { max-width: 400px; max-height: 240px; width: auto; height: auto; display: block; border-radius: 3px; }
+pre {
+  background: #0a0e14;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  max-height: 28rem;
+}
+.report-txt { max-height: 12rem; }
+details { margin: 0.5rem 0; }
+summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.toc a { color: #7eb8ff; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.toc li { margin: 0.2rem 0; }
+footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VnV Report <span class="badge pass">PASS</span></h1>
+  <p class="sub">
+    Generated 2026-07-24T03:58:46Z
+     · git <code>7f5b2aa</code>
+     · config <code>Debug</code>
+     · headless=<code>False</code>
+     · suites: mod
+  </p>
+  
+</header>
+
+<div class="summary">
+  <div class="card pass"><div class="n">2</div><div class="l">Passed</div></div>
+  <div class="card fail"><div class="n">0</div><div class="l">Failed</div></div>
+  <div class="card warn"><div class="n">0</div><div class="l">Warn / skip</div></div>
+  <div class="card"><div class="n">2</div><div class="l">Total cases</div></div>
+  
+</div>
+
+<h2>Case index</h2>
+<ul class="toc">
+<li><a href='#case-mod_domain'><span class='badge pass'>pass</span> mod_domain</a></li>
+<li><a href='#case-mod_network'><span class='badge pass'>pass</span> mod_network</a></li>
+</ul>
+
+<h2>Results</h2>
+<section class='case pass' id='case-mod_domain'>
+<h3><span class='badge pass'>PASS</span> mod_domain</h3>
+<p class='meta'>suite=<code>mod</code> kind=<code>exit_code</code></p>
+<p class='desc'>Unit tests for domain layer (BlockScene, graph, prune, lane math).</p>
+<p class='msg'><code>exit 0</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>artifacts/cases/mod_domain/stdout.txt</code></td><td class='present'>present (1295 bytes)</td></tr>
+</tbody></table>
+</section>
+<section class='case pass' id='case-mod_network'>
+<h3><span class='badge pass'>PASS</span> mod_network</h3>
+<p class='meta'>suite=<code>mod</code> kind=<code>exit_code</code></p>
+<p class='desc'>Unit tests for network layer (HTTP pool, adapters, fake transport).</p>
+<p class='msg'><code>exit 0</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>artifacts/cases/mod_network/stdout.txt</code></td><td class='present'>present (1403 bytes)</td></tr>
+</tbody></table>
+</section>
+
+<h2>Catalog (not run this session)</h2>
+<table>
+<thead><tr><th>Id</th><th>Suite</th><th>Kind</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>fake_bfs_end_z</code></td><td>bench</td><td>perf_baseline</td><td>Dense 48×16 + tip selection (dependency walk / Sobel path).</td></tr>
+<tr><td><code>fake_mass_2k</code></td><td>bench</td><td>perf_baseline</td><td>Mass scene: bootstrap 128 heights × 16 lanes ≈ 2048 blocks. Soft budgets 50/48/4 ms. Measures Prepare/instance scaling.</td></tr>
+<tr><td><code>fake_mass_4k</code></td><td>bench</td><td>perf_baseline</td><td>Mass scene: bootstrap 256 heights × 16 lanes ≈ 4096 blocks. Soft budgets 90/88/6 ms. Large-scene stress.</td></tr>
+<tr><td><code>fake_overdraw_end_z</code></td><td>bench</td><td>perf_baseline</td><td>Dense bootstrap 48×16 ≈ 768 blocks; End camera looking down +Z (timeline overdraw).</td></tr>
+<tr><td><code>fake_overdraw_end_z_move</code></td><td>bench</td><td>perf_baseline</td><td>Dense 48×16; End camera with scroll-Z oscillation during sample (re-sort opaques).</td></tr>
+<tr><td><code>fake_overview</code></td><td>int</td><td>visual_golden</td><td>FakeChain overview camera; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_selection_sobel</code></td><td>int</td><td>visual_golden</td><td>Tip selection + Sobel edge overlay; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_side_cam</code></td><td>int</td><td>visual_golden</td><td>FakeChain side camera view; GPU screenshot vs golden PNG.</td></tr>
+<tr><td><code>fake_steady_frame</code></td><td>bench</td><td>perf_baseline</td><td>Fixed camera, default FakeChain density (8 heights × 16 lanes ≈ 128 blocks). Soft budgets 8/4/5 ms.</td></tr>
+<tr><td><code>fake_stress_instances</code></td><td>bench</td><td>perf_baseline</td><td>Same scene as steady; looser soft budgets (12/6/8 ms) for stress headroom.</td></tr>
+</tbody></table>
+
+<footer>
+  Generated by <code>scripts/generate_vnv_report.py</code> ·
+  Catalog: <code>vnv/manifest/case_catalog.json</code> ·
+  Results schema: cases[].id/status/kind/expected/actual + optional metrics
+</footer>
+</body>
+</html>

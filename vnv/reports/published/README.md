@@ -1,35 +1,18 @@
-# Published VnV run (Linux)
+# Published VnV snapshots (remote review)
 
-Snapshot from branch `feature/linux-testing-reports` on the Linux workstation.
+Mirrors runtime layout under `vnv/reports/{mod,int,bench}/` (see [../README.md](../README.md)).
 
-| Artifact | Description |
-|----------|-------------|
-| [last_run.html](last_run.html) | Full HTML report (pass/fail, metrics, before/after) |
-| [last_run.json](last_run.json) | Machine-readable results |
-| [previous_run.json](previous_run.json) | Prior run for before/after |
-| `bench/*.actual.json` | Bench actuals (steady, mass_2k ~2061 blocks, mass_4k ~4113 blocks) |
-| `int/fake_overview/` | Headless visual capture (actual PNG) |
+| Path | Contents |
+|------|----------|
+| [mod/latest/](mod/latest/) | Unit suite report + `artifacts.zip` |
+| [int/](int/) | Visual captures (legacy snapshot; regenerate via `run_vnv.sh --int`) |
+| [bench/](bench/) | Single-process bench actuals (legacy flat files) |
+| [bench/matrix/](matrix/) → prefer regenerating into `vnv/reports/bench/matrix/` | Multi-GPU matrix |
 
-**Driver:** lavapipe (llvmpipe) via `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`  
-**Note:** Soft budgets are discrete-GPU tuned; `fake_steady_frame` may soft-fail confidence on software raster while mass cases pass.
-
-Regenerate locally:
-```bash
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
-./scripts/run_vnv.sh --bench --mass --headless --report
-```
-
-## Multi-GPU matrix
-
-See [matrix/](matrix/) — discovered **7× NVIDIA** + lavapipe.
-
-| Reality | Detail |
-|---------|--------|
-| NVIDIA proprietary | No `VK_EXT_headless_surface` — matrix marks rows **warn/skipped** without DISPLAY/xvfb |
-| lavapipe | Headless runs; soft budgets may confidence-fail on software |
-| Unlock real multi-GPU | `sudo apt install xvfb` then `xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless --report` |
+**Hardware note:** multi-GPU farm uses PCIe ×1 risers; soft budgets are advisory.
 
 ```bash
-./build/bin/bench_frame_profiler --list-devices --headless
-./scripts/run_bench_matrix.sh --list-only
+./scripts/run_vnv.sh --mod
+xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless --include-lavapipe
+# then copy latest → published/ for PR review if desired
 ```

@@ -151,8 +151,22 @@ def before_after_status(before_cases: dict[str, Any], case_id: str, status: str)
     return f"<span>{esc(prev_s)} → {esc(cur_s)}</span>"
 
 
+def resolve_artifact(path: str | None, run_dir: Path, repo: Path) -> Path | None:
+    """Resolve artifact path: absolute, else relative to run_dir, else repo root."""
+    if not path:
+        return None
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    cand = run_dir / p
+    if cand.is_file() or cand.exists():
+        return cand
+    return repo / p
+
+
 def render_case_section(
     repo: Path,
+    run_dir: Path,
     case_result: dict[str, Any],
     catalog_by_id: dict[str, Any],
     before_cases: dict[str, Any],
@@ -200,7 +214,7 @@ def render_case_section(
     ):
         if not p:
             continue
-        pp = repo / p if not Path(p).is_absolute() else Path(p)
+        pp = resolve_artifact(str(p), run_dir, repo) or Path(p)
         exists = "present" if pp.is_file() else "missing"
         parts.append(
             f"<tr><td>{esc(role)}</td><td><code>{esc(p)}</code></td>"
@@ -214,7 +228,7 @@ def render_case_section(
         for label, p in (("Expected (golden)", expected_path), ("Actual", actual_path), ("Diff", diff_path)):
             if not p:
                 continue
-            pp = repo / p if not Path(p).is_absolute() else Path(p)
+            pp = resolve_artifact(str(p), run_dir, repo) or Path(p)
             uri = try_embed_image(pp)
             if uri:
                 parts.append(
@@ -234,8 +248,8 @@ def render_case_section(
         parts.append("</div>")
         # Text report from compare_images
         if report_path:
-            rp = repo / report_path if not Path(report_path).is_absolute() else Path(report_path)
-            if rp.is_file():
+            rp = resolve_artifact(str(report_path), run_dir, repo)
+            if rp and rp.is_file():
                 try:
                     text = rp.read_text(encoding="utf-8", errors="replace")
                 except OSError:
@@ -248,11 +262,11 @@ def render_case_section(
         exp_obj = None
         act_obj = None
         if expected_path:
-            ep = repo / expected_path if not Path(expected_path).is_absolute() else Path(expected_path)
-            exp_obj = load_json(ep) if ep.is_file() else None
+            ep = resolve_artifact(str(expected_path), run_dir, repo)
+            exp_obj = load_json(ep) if ep and ep.is_file() else None
         if actual_path:
-            ap = repo / actual_path if not Path(actual_path).is_absolute() else Path(actual_path)
-            act_obj = load_json(ap) if ap.is_file() else None
+            ap = resolve_artifact(str(actual_path), run_dir, repo)
+            act_obj = load_json(ap) if ap and ap.is_file() else None
         # Prefer metrics embedded in run result
         if case_result.get("metrics"):
             act_obj = case_result["metrics"]
@@ -273,8 +287,8 @@ def render_case_section(
         if prev and (prev.get("metrics") or prev.get("actual")):
             prev_act = prev.get("metrics")
             if not prev_act and prev.get("actual"):
-                pap = repo / prev["actual"] if not Path(prev["actual"]).is_absolute() else Path(prev["actual"])
-                prev_act = load_json(pap)
+                pap = resolve_artifact(str(prev["actual"]), run_dir, repo)
+                prev_act = load_json(pap) if pap else None
             if isinstance(prev_act, dict) and isinstance(act_obj, dict):
                 parts.append("<h4>Before / after (previous run vs this run)</h4>")
                 parts.append(
@@ -415,7 +429,9 @@ def build_html(
     results: dict[str, Any],
     catalog: dict[str, Any] | None,
     before: dict[str, Any] | None,
+    run_dir: Path | None = None,
 ) -> str:
+    run_dir = run_dir or repo
     cases = results.get("cases") or []
     catalog_by_id: dict[str, Any] = {}
     if catalog and isinstance(catalog.get("cases"), list):
@@ -452,7 +468,7 @@ def build_html(
             f"<li><a href='#case-{esc(cid)}'><span class='badge {status_class(st)}'>"
             f"{esc(st)}</span> {esc(cid)}</a></li>"
         )
-        sections.append(render_case_section(repo, c, catalog_by_id, before_cases))
+        sections.append(render_case_section(repo, run_dir, c, catalog_by_id, before_cases))
 
     # Catalog appendix for cases not run
     catalog_appendix = []
@@ -534,19 +550,37 @@ def build_html(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Generate HTML VnV report from run JSON")
-    ap.add_argument("--results", required=True, help="Path to last_run.json (or any results JSON)")
+    ap.add_argument("--results", default="", help="Path to run.json (or any results JSON)")
+    ap.add_argument("--run-dir", default="", help="Run directory (default: parent of --results)")
     ap.add_argument("--before", default="", help="Optional previous run JSON for before/after")
     ap.add_argument("--catalog", default="vnv/manifest/case_catalog.json")
-    ap.add_argument("--out", default="vnv/reports/last_run.html")
+    ap.add_argument("--out", default="", help="Output HTML (default: <run-dir>/index.html)")
     ap.add_argument("--repo-root", default="", help="Repo root (default: parent of scripts/)")
+    ap.add_argument("--zip", action="store_true", help="Also pack artifacts.zip via vnv_pack_report.py")
     args = ap.parse_args()
 
     script_dir = Path(__file__).resolve().parent
     repo = Path(args.repo_root).resolve() if args.repo_root else script_dir.parent
 
-    results_path = Path(args.results)
+    if args.run_dir:
+        run_dir = Path(args.run_dir)
+        if not run_dir.is_absolute():
+            run_dir = repo / run_dir
+        results_path = run_dir / "run.json" if not args.results else Path(args.results)
+    else:
+        if not args.results:
+            print("ERROR: need --results or --run-dir", file=sys.stderr)
+            return 2
+        results_path = Path(args.results)
+        if not results_path.is_absolute():
+            results_path = repo / results_path
+        run_dir = results_path.parent
+
     if not results_path.is_absolute():
-        results_path = repo / results_path
+        results_path = (run_dir / results_path).resolve() if not results_path.is_absolute() else results_path
+        if not results_path.is_file():
+            results_path = (repo / Path(args.results)).resolve() if args.results else results_path
+
     results = load_json(results_path)
     if not isinstance(results, dict):
         print(f"ERROR: results not found or invalid: {results_path}", file=sys.stderr)
@@ -564,19 +598,29 @@ def main() -> int:
         before_path = Path(args.before)
         if not before_path.is_absolute():
             before_path = repo / before_path
+        if not before_path.is_file() and (run_dir / "previous.json").is_file():
+            before_path = run_dir / "previous.json"
         before = load_json(before_path)
         if not isinstance(before, dict):
             print(f"WARN: --before unreadable: {before_path}", file=sys.stderr)
             before = None
+    elif (run_dir / "previous.json").is_file():
+        before = load_json(run_dir / "previous.json")
 
-    out_path = Path(args.out)
+    out_path = Path(args.out) if args.out else (run_dir / "index.html")
     if not out_path.is_absolute():
-        out_path = repo / out_path
+        out_path = repo / out_path if args.out else (run_dir / "index.html")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    html_doc = build_html(repo, results, catalog, before)
+    html_doc = build_html(repo, results, catalog, before, run_dir=run_dir)
     out_path.write_text(html_doc, encoding="utf-8")
     print(f"Wrote {out_path} ({out_path.stat().st_size} bytes)")
+
+    if args.zip:
+        import subprocess
+
+        pack = script_dir / "vnv_pack_report.py"
+        subprocess.check_call([sys.executable, str(pack), "--run-dir", str(run_dir)])
     return 0
 
 

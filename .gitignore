@@ -73,7 +73,9 @@ vnv/mod/tests/**/out/
 vnv/int/tests/**/out/
 vnv/int/tests/visual/out/
 vnv/bench/tests/out/
-vnv/reports/
+# Runtime reports (mod/int/bench/<run_id>); keep README + optional published/
+vnv/reports/**
+!vnv/reports/README.md
 !vnv/reports/published/
 !vnv/reports/published/**
 tests/visual/out/

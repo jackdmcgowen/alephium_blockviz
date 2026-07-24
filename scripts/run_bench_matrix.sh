@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Multi-GPU bench matrix: one process per GPU (CUDA/NVIDIA_VISIBLE_DEVICES isolation).
+# Multi-GPU bench matrix: one process per GPU (--device UUID isolation).
 #
 #   ./scripts/run_bench_matrix.sh
 #   ./scripts/run_bench_matrix.sh --cases fake_steady_frame,fake_mass_2k
 #   ./scripts/run_bench_matrix.sh --gpus 0,1,2 --parallel 3 --report
 #   ./scripts/run_bench_matrix.sh --include-lavapipe --samples 20
-#   ./scripts/run_bench_matrix.sh --list-only   # discover GPUs, no run
+#   ./scripts/run_bench_matrix.sh --list-only
 #
-# Requires: built bench_frame_profiler, nvidia-smi (for NVIDIA rows).
+# Reports (uniform layout):
+#   vnv/reports/bench/matrix/<run_id>/
+#     index.html  matrix_table.html  run.json  artifacts.zip
+#     artifacts/cells/<gpu_tag>/<case>/actual.json
 #
-# Present modes:
-#   --headless (default): works for lavapipe; NVIDIA proprietary has NO
-#     VK_EXT_headless_surface — those jobs are skipped unless DISPLAY is set
-#     and you pass --no-headless (windowed).
-#   --no-headless: needs DISPLAY or xvfb-run (install xvfb).
-#   --include-lavapipe: always add a software row.
+# Present: --headless (lavapipe); NVIDIA needs --no-headless + DISPLAY/xvfb-run.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+# shellcheck source=vnv_report_layout.sh
+source "${REPO_ROOT}/scripts/vnv_report_layout.sh"
 
 BUILD_DIR="${BLOCKVIZ_BUILD_DIR:-build}"
 CONFIG="Debug"
@@ -28,12 +28,12 @@ PARALLEL=1
 SAMPLES=""          # empty = harness defaults
 WARMUP_MS=""
 INCLUDE_LVP=0
-REPORT=0
+REPORT=1            # always write report tree; --report kept for compat
 SKIP_BUILD=0
 HEADLESS=1
-OUT_ROOT="vnv/bench/tests/out/matrix"
-RESULTS_JSON="vnv/reports/matrix_run.json"
-RESULTS_HTML="vnv/reports/matrix_run.html"
+OUT_ROOT=""         # set after begin_run
+RESULTS_JSON=""
+RESULTS_HTML=""
 
 usage() {
   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
@@ -129,7 +129,14 @@ if [[ "$LIST_ONLY" -eq 1 ]]; then
 fi
 
 IFS=',' read -r -a CASE_ARR <<< "$CASES"
-mkdir -p "$OUT_ROOT" vnv/reports
+
+# Uniform report run under bench/matrix
+vnv_report_begin_run "bench/matrix"
+OUT_ROOT="${REPORT_ARTIFACTS_DIR}/cells"
+RESULTS_JSON="${REPORT_JSON}"
+RESULTS_HTML="${REPORT_HTML}"
+MATRIX_TABLE="${REPORT_RUN_DIR}/matrix_table.html"
+mkdir -p "$OUT_ROOT"
 
 # Build job list: tag|env_prefix|extra_args|case
 JOBS_FILE="$(mktemp)"
@@ -309,8 +316,8 @@ else
   done
 fi
 
-# Aggregate JSON + optional HTML
-python3 - "$OUT_ROOT" "$RESULTS_JSON" "$failures" <<'PY'
+# Aggregate JSON + HTML (always)
+python3 - "$OUT_ROOT" "$RESULTS_JSON" "$failures" "$REPORT_RUN_ID" <<'PY'
 import json, sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -318,21 +325,28 @@ from datetime import datetime, timezone
 out_root = Path(sys.argv[1])
 results_path = Path(sys.argv[2])
 failures = int(sys.argv[3])
+run_id = sys.argv[4] if len(sys.argv) > 4 else ""
 
 cases = []
+run_dir = results_path.parent
 for actual in sorted(out_root.glob("*/*/actual.json")):
     tag = actual.parent.parent.name
     case_id = actual.parent.name
+    # path relative to run dir
+    try:
+        rel_actual = actual.resolve().relative_to(run_dir.resolve()).as_posix()
+    except ValueError:
+        rel_actual = str(actual)
     try:
         metrics = json.loads(actual.read_text())
     except Exception as e:
         cases.append({
             "id": f"{tag}/{case_id}",
             "status": "fail",
-            "suite": "bench_matrix",
+            "suite": "bench",
             "kind": "perf_baseline",
             "message": f"bad json: {e}",
-            "actual": str(actual),
+            "actual": rel_actual,
             "matrix_tag": tag,
         })
         continue
@@ -350,8 +364,6 @@ for actual in sorted(out_root.glob("*/*/actual.json")):
         status = "warn"
         msg = mx.get("reason") or "skipped (NVIDIA headless)"
     elif conf is not None and conf != "" and float(conf) < 0.4:
-        # Soft budgets are desktop×16-oriented. On PCIe×1 risers + Xvfb present-sync,
-        # frame wall often fails conf while GPU is fine — treat as warn, keep metrics.
         if dtype in ("discrete", "integrated") and gpu_med is not None and gpu_med < 5.0:
             status = "warn"
             msg += " (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)"
@@ -359,11 +371,9 @@ for actual in sorted(out_root.glob("*/*/actual.json")):
             status = "fail"
             msg += " (confidence soft-fail)"
     elif mx.get("exit_code") not in (None, 0) and status == "pass":
-        # harness exit 3 = soft conf only; already classified above
         if int(mx.get("exit_code", 0)) not in (0, 3):
             status = "fail"
             msg += f" exit={mx.get('exit_code')}"
-    # Hard fail only if harness crashed (no metrics / zero samples) without skip
     if not mx.get("skipped") and metrics.get("samples") in (0, None) and metrics.get("frame_ms") is None:
         if metrics.get("status_note") != "skipped_nvidia_headless":
             status = "fail"
@@ -371,11 +381,11 @@ for actual in sorted(out_root.glob("*/*/actual.json")):
     cases.append({
         "id": f"{tag}/{case_id}",
         "status": status,
-        "suite": "bench_matrix",
+        "suite": "bench",
         "kind": "perf_baseline",
         "message": msg,
         "expected": None,
-        "actual": str(actual).replace("\\", "/"),
+        "actual": rel_actual,
         "matrix_tag": tag,
         "case": case_id,
         "metrics": metrics,
@@ -393,13 +403,15 @@ elif n_warn:
 else:
     overall = "pass"
 doc = {
-    "version": 1,
+    "version": 2,
+    "suite": "bench/matrix",
+    "run_id": run_id,
     "status": overall,
     "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "kind": "bench_matrix",
     "hardware_note": "PCIe x1 risers; soft budgets advisory (relative multi-GPU farm)",
-    "out_root": str(out_root),
-    "suites": ["bench_matrix"],
+    "out_root": "artifacts/cells",
+    "suites": ["bench"],
     "cases": cases,
     "matrix_summary": {
         "jobs": len(cases),
@@ -413,13 +425,13 @@ results_path.write_text(json.dumps(doc, indent=2) + "\n")
 print(f"Wrote {results_path} ({len(cases)} cells, status={doc['status']})")
 PY
 
-if [[ "$REPORT" -eq 1 ]]; then
-  python3 scripts/generate_vnv_report.py \
-    --results "$RESULTS_JSON" \
-    --catalog vnv/manifest/case_catalog.json \
-    --out "$RESULTS_HTML"
-  # Also emit a compact matrix table HTML
-  python3 - "$RESULTS_JSON" "vnv/reports/matrix_table.html" <<'PY'
+# Always emit HTML + matrix table + zip
+python3 scripts/generate_vnv_report.py \
+  --run-dir "$REPORT_RUN_DIR" \
+  --results "$RESULTS_JSON" \
+  --catalog vnv/manifest/case_catalog.json \
+  --out "$RESULTS_HTML"
+python3 - "$RESULTS_JSON" "$MATRIX_TABLE" <<'PY'
 import json, sys, html
 from pathlib import Path
 doc = json.loads(Path(sys.argv[1]).read_text())
@@ -491,15 +503,16 @@ and relative ranking across cards. Isolation uses Vulkan <code>--device</code> U
 <tbody>
 {''.join(rows)}
 </tbody></table>
-<p><a href="matrix_run.html" style="color:#7eb8ff">Full report</a></p>
+<p><a href="index.html" style="color:#7eb8ff">Full report</a></p>
 </body></html>
 """
 out.write_text(body)
 print(f"Wrote {out}")
 PY
-  echo "Matrix report: $RESULTS_HTML"
-  echo "Matrix table:  vnv/reports/matrix_table.html"
-fi
+vnv_report_finalize
+echo "Matrix report: $RESULTS_HTML"
+echo "Matrix table:  $MATRIX_TABLE"
+echo "Matrix zip:    $REPORT_ZIP"
 
 echo ""
 if [[ "$failures" -eq 0 ]]; then

@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "suite": "mod",
+  "run_id": "20260724T035846Z_7f5b2aa",
+  "status": "pass",
+  "generated_at": "2026-07-24T03:58:46Z",
+  "git_sha": "7f5b2aa",
+  "config": "Debug",
+  "headless": false,
+  "suites": [
+    "mod"
+  ],
+  "cases": [
+    {
+      "id": "mod_domain",
+      "status": "pass",
+      "suite": "mod",
+      "kind": "exit_code",
+      "message": "exit 0",
+      "expected": null,
+      "actual": "artifacts/cases/mod_domain/stdout.txt",
+      "diff": null,
+      "report": null,
+      "headless": false
+    },
+    {
+      "id": "mod_network",
+      "status": "pass",
+      "suite": "mod",
+      "kind": "exit_code",
+      "message": "exit 0",
+      "expected": null,
+      "actual": "artifacts/cases/mod_network/stdout.txt",
+      "diff": null,
+      "report": null,
+      "headless": false
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+mod_domain: BlockScene / detail store
+
+== add_block + mark_confirmed ==
+ok: first add returns true
+ok: duplicate add returns false
+ok: graph contains hash
+ok: total_blocks == 1
+ok: confirmed_height lane0 == 10
+ok: confirmed tip hash
+ok: is_confirmed_locked
+ok: frontier ids size 1
+
+== remove_block erases confirmed ==
+ok: height before remove
+ok: remove returns true
+ok: gone from graph
+ok: confirmed erased on remove
+
+== re-admit re-marks confirmed (poll path) ==
+ok: re-admit add true
+ok: re-admit mark_confirmed
+ok: tip restored
+
+== AlphDetailStore slim + pin ==
+ok: store size 1
+ok: not slim initially
+ok: pinned not slimmed
+ok: still full when pinned
+ok: unpinned slimmed once
+ok: is_slim after prune
+ok: txn_count survives slim
+ok: txns cleared
+ok: full after re-upsert
+
+== scene detail_store slim via scene ==
+ok: detail full on add
+ok: pin protects
+ok: slim when unpinned
+
+== graph lane mapping ==
+ok: lane 14 for 3->2
+ok: height 1
+
+== prune time + protect frontier ==
+ok: pruned at least old block
+ok: old dropped
+ok: frontier tip protected
+ok: tip still confirmed
+
+== ALPH out sum + slim preserve ==
+ok: txn sum 1.5 ALPH atto
+ok: display 1.5
+ok: block sum 3.5 ALPH
+ok: slim clears txns
+ok: alph_out survives slim
+ok: cmp length
+ok: double 1.5 → atto
+
+mod_domain: 40 passed, 0 failed

@@ -279,25 +279,22 @@ See [bench/README.md](bench/README.md).
 
 ### HTML reports (pass/fail, goldens, before/after)
 
-`run_vnv.sh` always writes `vnv/reports/last_run.json` (rotating previous → `previous_run.json`).  
-Pass **`--report`** to also emit `vnv/reports/last_run.html` via `scripts/generate_vnv_report.py`.
+Layout authority: **[reports/README.md](reports/README.md)**.  
+Each suite writes `vnv/reports/{mod,int,bench}/<run_id>/` with `index.html`, `run.json`, `artifacts.zip`.
 
 | Feature | Source |
 |---------|--------|
-| Pass/fail per case | `last_run.json` → `cases[].status` |
+| Pass/fail per case | `run.json` → `cases[].status` |
 | Descriptions | `vnv/manifest/case_catalog.json` |
-| Expected vs actual | Goldens (`*.png`) / baselines (`*.json`) vs `out/**/actual.*` |
-| Before/after | `previous_run.json` metrics and status transitions |
-| Embedded images | Visual cases: expected / actual / diff thumbnails when small |
+| Expected vs actual | Paths under `artifacts/cases/…` (relative to run dir) |
+| Before/after | `previous.json` (copy of prior suite `run.json`) |
+| Offline rebuild | Unzip `artifacts.zip` → `generate_vnv_report.py --run-dir …` |
 
 ```bash
-./scripts/run_vnv.sh --mod --report
-./scripts/run_vnv.sh --all --headless --report
-./scripts/run_vnv.sh --report-only   # regenerate HTML from existing JSON
-python3 scripts/generate_vnv_report.py \
-  --results vnv/reports/last_run.json \
-  --before vnv/reports/previous_run.json \
-  --out vnv/reports/compare.html
+./scripts/run_vnv.sh --mod
+./scripts/run_vnv.sh --all --headless
+./scripts/run_vnv.sh --report-only --suite int
+python3 scripts/generate_vnv_report.py --run-dir vnv/reports/bench/latest --zip
 ```
 
 Hygiene (not tests, but required when touching app/build):

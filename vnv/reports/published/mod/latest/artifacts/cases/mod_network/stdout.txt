@@ -1,0 +1,42 @@
+mod_network: HttpIoPool (fake transport)
+
+== enqueue block hash + drain ==
+[http_io] pool started workers=2 url=http://test.local
+ok: pool.enqueue_block_hash("abc")
+ok: res.size() == 1
+ok: res[0].ok
+ok: res[0].kind == HttpIoPool::Kind::BlockHash
+ok: res[0].hash == "abc"
+ok: network_test_fake()->call_count() >= 1
+
+== parallel interval jobs ==
+[http_io] pool started workers=4 url=http://test.local
+ok: pool.enqueue_interval(1000, 2000, false)
+ok: pool.enqueue_interval(2000, 3000, false)
+ok: pool.enqueue_interval(3000, 4000, false)
+ok: res.size() == 3
+ok: max_c >= 2
+ok: r.kind == HttpIoPool::Kind::Interval && r.ok
+ok: r.kind == HttpIoPool::Kind::Interval && r.ok
+ok: r.kind == HttpIoPool::Kind::Interval && r.ok
+
+== interval dedupe / inflight ==
+[http_io] pool started workers=2 url=http://test.local
+ok: pool.enqueue_interval(5000, 6000, false)
+ok: !pool.enqueue_interval(5000, 6000, false)
+ok: !pool.enqueue_interval(5000, 6000, false)
+ok: pool.enqueue_interval(5000, 6000, true)
+
+== stop joins clean ==
+[http_io] pool started workers=3 url=http://test.local
+ok: pool.in_flight() == 0
+ok: pool.pending_jobs() == 0
+
+== inflight interval cap ==
+[http_io] pool started workers=4 url=http://test.local
+ok: pool.enqueue_interval(10, 20, false)
+ok: pool.enqueue_interval(20, 30, false)
+ok: !pool.enqueue_interval(30, 40, false)
+ok: pool.enqueue_interval(30, 40, false)
+
+mod_network: 24 passed, 0 failed

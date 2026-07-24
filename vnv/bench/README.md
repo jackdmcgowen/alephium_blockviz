@@ -30,7 +30,7 @@ Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timesta
 | Update | `run_vnv.ps1 -Bench -UpdateBaselines` on a golden machine |
 | Non-goals | Cross-machine absolute ms in free CI; replace `scripts/bench_build.ps1` |
 | Bottlenecks | [docs/perf-bottlenecks.md](../../docs/perf-bottlenecks.md) |
-| Reports | `./scripts/run_vnv.sh --bench --mass --headless --report` → `vnv/reports/last_run.html` |
+| Reports | `./scripts/run_vnv.sh --bench --mass --headless` → `vnv/reports/bench/<run_id>/` |
 
 ## Layout
 
@@ -109,10 +109,11 @@ xvfb-run -a ./build/bin/bench_frame_profiler --device 2 --case fake_mass_2k
 # Full matrix: one process per GPU via --device UUID (+ optional lavapipe)
 # Prefer --parallel 1 on a single Xvfb; CUDA_VISIBLE_DEVICES alone does not isolate Vulkan.
 xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless --include-lavapipe \
-  --cases fake_steady_frame,fake_mass_2k --parallel 1 --report --samples 40
+  --cases fake_steady_frame,fake_mass_2k --parallel 1 --samples 40
 
-# Outputs: vnv/bench/tests/out/matrix/<tag>/<case>/actual.json
-#          vnv/reports/matrix_run.json + matrix_run.html + matrix_table.html
+# Outputs: vnv/reports/bench/matrix/<run_id>/
+#          index.html  matrix_table.html  run.json  artifacts.zip
+#          artifacts/cells/<gpu_tag>/<case>/actual.json
 ```
 
 Env: `BLOCKVIZ_DEVICE_INDEX` / `BLOCKVIZ_DEVICE_NAME` / `BLOCKVIZ_DEVICE_UUID`.
