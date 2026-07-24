@@ -10,7 +10,7 @@ namespace blockviz_engine
 inline constexpr const char* kName         = "BlockvizEngine";
 inline constexpr uint32_t    kVersionMajor = 1;
 inline constexpr uint32_t    kVersionMinor = 4;
-inline constexpr uint32_t    kVersionPatch = 2;
+inline constexpr uint32_t    kVersionPatch = 3;
 
 inline SoftwareIdentity identity()
 {
