@@ -39,6 +39,12 @@ public:
     // Side preset: eye offset from timeline axis (layout base_radius≈20).
     static constexpr float kSideRadius = 70.f;
     static constexpr float kSidePitch  = 0.10f;
+    // Side framing (1080p landscape): look/pan bias so live tip sits mid-content
+    // instead of the far edge (empty half-screen). +Z is timeline past (mps=1).
+    // Look: larger Z component aims along the trail. Pan.z: eye slightly into past
+    // relative to scroll_z (tip at ~scroll when Live) → tip shifts toward frame center.
+    static constexpr float kSideLookZBias   = 0.42f;
+    static constexpr float kSidePanZOffset  = 28.f;
     // Up/Down in Side: orbit rate (rad/s while key held).
     static constexpr float kOrbitRadPerSec = 1.15f;
     static constexpr float kViewBlendSec   = 0.40f;
@@ -418,9 +424,11 @@ private:
             // Orbit around Z: eye on circle in XY looking at timeline axis.
             const float c = std::cos(orbit_rad_);
             const float s = std::sin(orbit_rad_);
-            pan_target_ = glm::vec3(kSideRadius * c, kSideRadius * s, 0.f);
-            // Look toward origin in XY (and slight pitch for readability).
-            const glm::vec3 dir = glm::normalize(glm::vec3(-c, -s, 0.05f));
+            // pan.z > 0 places eye slightly into past when scroll_z tracks the tip.
+            pan_target_ = glm::vec3(kSideRadius * c, kSideRadius * s, kSidePanZOffset);
+            // Toward axis in XY + bias along +Z (past) so trail fills frame and tip
+            // is mid-content on 16:9 (not glued to one edge).
+            const glm::vec3 dir = glm::normalize(glm::vec3(-c, -s, kSideLookZBias));
             dir_to_yaw_pitch_(dir, yaw_target_, pitch_target_);
             pitch_target_ = std::clamp(pitch_target_ + kSidePitch * 0.25f, kPitchMin, kPitchMax);
         }
