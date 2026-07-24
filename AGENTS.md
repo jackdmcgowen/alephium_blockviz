@@ -1,5 +1,21 @@
 # Agent instructions (alephium_blockviz)
 
+## Submodules — do not modify
+
+Vendored third-party trees live under **`lib/`** (git submodules):
+
+| Path | Role |
+|------|------|
+| `lib/imgui` | Dear ImGui |
+| `lib/vcpkg` | vcpkg tool + ports |
+
+**Do not** edit, reformat, commit into, rebase, bump, or “fix” files inside `lib/imgui` or `lib/vcpkg` unless the user **explicitly** asks to update a submodule pin.
+
+- Init only: `git submodule update --init --recursive`
+- Deps install: root `install_deps.bat` / `install_deps.sh` (writes under `lib/vcpkg/installed/`, gitignored)
+- Product / docs / build path changes may *reference* `lib/…`; they must not change submodule content
+- If a task seems to require changing ImGui or vcpkg internals, **stop and ask** — pin updates are deliberate
+
 ## Required: version tags whenever `main` is pushed
 
 **Anytime `main` is updated on the remote** (merge, fast-forward, direct push, or force-with-lease), you **must** create and push annotated release tags that match the identities in source **before considering the main push complete**.

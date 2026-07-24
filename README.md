@@ -72,7 +72,7 @@ Layered libraries — living goals and plans:
 ### Windows (MSVC)
 
 1. Install [Vulkan SDK](https://vulkan.lunarg.com/) and MSVC (VS 2022+).
-2. `git submodule update --init --recursive` (vendored under `lib/imgui` + `lib/vcpkg`).
+2. `git submodule update --init --recursive` (vendored under `lib/imgui` + `lib/vcpkg` — **do not edit submodule trees**).
 3. From the repo root:
 
 ```bat
