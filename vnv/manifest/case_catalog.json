@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "description": "VnV case catalog: ids, tiers, descriptions, expected artifacts (goldens/baselines).",
+  "cases": [
+    {
+      "id": "mod_domain",
+      "tier": "unit",
+      "suite": "mod",
+      "project": "mod_domain",
+      "description": "Unit tests for domain layer (BlockScene, graph, prune, lane math).",
+      "kind": "exit_code",
+      "expected": null,
+      "actual": null
+    },
+    {
+      "id": "mod_network",
+      "tier": "unit",
+      "suite": "mod",
+      "project": "mod_network",
+      "description": "Unit tests for network layer (HTTP pool, adapters, fake transport).",
+      "kind": "exit_code",
+      "expected": null,
+      "actual": null
+    },
+    {
+      "id": "fake_overview",
+      "tier": "system_functional",
+      "suite": "int",
+      "project": "int_visual",
+      "description": "FakeChain overview camera; GPU screenshot vs golden PNG.",
+      "kind": "visual_golden",
+      "expected": "vnv/int/tests/visual/goldens/fake_overview.png",
+      "expected_headless": "vnv/int/tests/visual/goldens/linux_headless/fake_overview.png",
+      "actual": "vnv/int/tests/visual/out/fake_overview/actual.png",
+      "diff": "vnv/int/tests/visual/out/fake_overview/diff.png",
+      "report": "vnv/int/tests/visual/out/fake_overview/report.txt"
+    },
+    {
+      "id": "fake_side_cam",
+      "tier": "system_functional",
+      "suite": "int",
+      "project": "int_visual",
+      "description": "FakeChain side camera view; GPU screenshot vs golden PNG.",
+      "kind": "visual_golden",
+      "expected": "vnv/int/tests/visual/goldens/fake_side_cam.png",
+      "expected_headless": "vnv/int/tests/visual/goldens/linux_headless/fake_side_cam.png",
+      "actual": "vnv/int/tests/visual/out/fake_side_cam/actual.png",
+      "diff": "vnv/int/tests/visual/out/fake_side_cam/diff.png",
+      "report": "vnv/int/tests/visual/out/fake_side_cam/report.txt"
+    },
+    {
+      "id": "fake_selection_sobel",
+      "tier": "system_functional",
+      "suite": "int",
+      "project": "int_visual",
+      "description": "Tip selection + Sobel edge overlay; GPU screenshot vs golden PNG.",
+      "kind": "visual_golden",
+      "expected": "vnv/int/tests/visual/goldens/fake_selection_sobel.png",
+      "expected_headless": "vnv/int/tests/visual/goldens/linux_headless/fake_selection_sobel.png",
+      "actual": "vnv/int/tests/visual/out/fake_selection_sobel/actual.png",
+      "diff": "vnv/int/tests/visual/out/fake_selection_sobel/diff.png",
+      "report": "vnv/int/tests/visual/out/fake_selection_sobel/report.txt"
+    },
+    {
+      "id": "fake_steady_frame",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Fixed camera, default FakeChain density (8 heights × 16 lanes ≈ 128 blocks). Soft budgets 8/4/5 ms.",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 0,
+      "approx_blocks": 128,
+      "expected": "vnv/bench/baselines/fake_steady_frame.json",
+      "actual": "vnv/bench/tests/out/fake_steady_frame/actual.json"
+    },
+    {
+      "id": "fake_stress_instances",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Same scene as steady; looser soft budgets (12/6/8 ms) for stress headroom.",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 0,
+      "approx_blocks": 128,
+      "expected": "vnv/bench/baselines/fake_stress_instances.json",
+      "actual": "vnv/bench/tests/out/fake_stress_instances/actual.json"
+    },
+    {
+      "id": "fake_overdraw_end_z",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Dense bootstrap 48×16 ≈ 768 blocks; End camera looking down +Z (timeline overdraw).",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 48,
+      "approx_blocks": 768,
+      "expected": "vnv/bench/baselines/fake_overdraw_end_z.json",
+      "actual": "vnv/bench/tests/out/fake_overdraw_end_z/actual.json"
+    },
+    {
+      "id": "fake_overdraw_end_z_move",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Dense 48×16; End camera with scroll-Z oscillation during sample (re-sort opaques).",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 48,
+      "approx_blocks": 768,
+      "expected": "vnv/bench/baselines/fake_overdraw_end_z_move.json",
+      "actual": "vnv/bench/tests/out/fake_overdraw_end_z_move/actual.json"
+    },
+    {
+      "id": "fake_bfs_end_z",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Dense 48×16 + tip selection (dependency walk / Sobel path).",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 48,
+      "approx_blocks": 768,
+      "expected": "vnv/bench/baselines/fake_bfs_end_z.json",
+      "actual": "vnv/bench/tests/out/fake_bfs_end_z/actual.json"
+    },
+    {
+      "id": "fake_mass_2k",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Mass scene: bootstrap 128 heights × 16 lanes ≈ 2048 blocks. Soft budgets 50/48/4 ms. Measures Prepare/instance scaling.",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 128,
+      "approx_blocks": 2048,
+      "expected": "vnv/bench/baselines/fake_mass_2k.json",
+      "actual": "vnv/bench/tests/out/fake_mass_2k/actual.json"
+    },
+    {
+      "id": "fake_mass_4k",
+      "tier": "system_bench",
+      "suite": "bench",
+      "project": "bench_frame_profiler",
+      "description": "Mass scene: bootstrap 256 heights × 16 lanes ≈ 4096 blocks. Soft budgets 90/88/6 ms. Large-scene stress.",
+      "kind": "perf_baseline",
+      "bootstrap_heights": 256,
+      "approx_blocks": 4096,
+      "expected": "vnv/bench/baselines/fake_mass_4k.json",
+      "actual": "vnv/bench/tests/out/fake_mass_4k/actual.json"
+    }
+  ]
+}

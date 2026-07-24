@@ -274,6 +274,30 @@ See [bench/README.md](bench/README.md).
 ./scripts/run_vnv.sh --all
 ./scripts/run_vnv.sh --int --headless
 ./scripts/run_vnv.sh --bench
+./scripts/run_vnv.sh --bench --mass --headless --report   # ~2k/4k blocks + HTML
+```
+
+### HTML reports (pass/fail, goldens, before/after)
+
+`run_vnv.sh` always writes `vnv/reports/last_run.json` (rotating previous → `previous_run.json`).  
+Pass **`--report`** to also emit `vnv/reports/last_run.html` via `scripts/generate_vnv_report.py`.
+
+| Feature | Source |
+|---------|--------|
+| Pass/fail per case | `last_run.json` → `cases[].status` |
+| Descriptions | `vnv/manifest/case_catalog.json` |
+| Expected vs actual | Goldens (`*.png`) / baselines (`*.json`) vs `out/**/actual.*` |
+| Before/after | `previous_run.json` metrics and status transitions |
+| Embedded images | Visual cases: expected / actual / diff thumbnails when small |
+
+```bash
+./scripts/run_vnv.sh --mod --report
+./scripts/run_vnv.sh --all --headless --report
+./scripts/run_vnv.sh --report-only   # regenerate HTML from existing JSON
+python3 scripts/generate_vnv_report.py \
+  --results vnv/reports/last_run.json \
+  --before vnv/reports/previous_run.json \
+  --out vnv/reports/compare.html
 ```
 
 Hygiene (not tests, but required when touching app/build):

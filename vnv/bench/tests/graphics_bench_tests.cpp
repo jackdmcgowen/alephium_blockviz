@@ -75,29 +75,49 @@ static void print_usage()
         "  --warmup-ms N     Warmup milliseconds (default 2000)\n"
         "  --samples N       Frames to sample after warmup (default 120)\n"
         "  --sample-ms N     Wall time between snapshot polls (default 16)\n"
+        "  --bootstrap-heights N  Override FakeChain bootstrap heights (0=default)\n"
         "  --width N --height N\n"
         "  --headless        VK_EXT_headless_surface (no DISPLAY/window)\n"
         "  --list\n"
         "\n"
         "Cases:\n"
-        "  fake_steady_frame          fixed camera, default FakeChain density\n"
+        "  fake_steady_frame          fixed camera, default FakeChain density (8×16)\n"
         "  fake_stress_instances      looser soft budgets (same scene)\n"
-        "  fake_overdraw_end_z        dense bootstrap, End look down +Z\n"
+        "  fake_overdraw_end_z        dense bootstrap 48×16, End look down +Z\n"
         "  fake_overdraw_end_z_move   dense + scroll Z during sample\n"
-        "  fake_bfs_end_z             dense + selection tip (dep walk / Sobel)\n");
+        "  fake_bfs_end_z             dense + selection tip (dep walk / Sobel)\n"
+        "  fake_mass_2k               mass scene ~2048 blocks (128×16 lanes)\n"
+        "  fake_mass_4k               mass scene ~4096 blocks (256×16 lanes)\n");
 }
 
 static bool is_known_case(const std::string& id)
 {
     return id == "fake_steady_frame" || id == "fake_stress_instances" ||
            id == "fake_overdraw_end_z" || id == "fake_overdraw_end_z_move" ||
-           id == "fake_bfs_end_z";
+           id == "fake_bfs_end_z" || id == "fake_mass_2k" || id == "fake_mass_4k";
 }
 
 static bool is_dense_case(const std::string& id)
 {
     return id == "fake_overdraw_end_z" || id == "fake_overdraw_end_z_move" ||
            id == "fake_bfs_end_z";
+}
+
+static bool is_mass_case(const std::string& id)
+{
+    return id == "fake_mass_2k" || id == "fake_mass_4k";
+}
+
+// Bootstrap heights for density overrides (× BlockScene::kLaneCount = block count).
+static int case_bootstrap_heights(const std::string& id)
+{
+    if (id == "fake_mass_2k")
+        return 128;
+    if (id == "fake_mass_4k")
+        return 256;
+    if (is_dense_case(id))
+        return 48;
+    return 0; // default FakeChain kBootstrapHeights
 }
 
 // End preset: look along +Z into polar ring (timeline depth overdraw).
@@ -154,6 +174,7 @@ int main(int argc, char** argv)
     int sample_ms = 16;
     int width = BENCH_WDW_W;
     int height = BENCH_WDW_H;
+    int bootstrap_heights_cli = -1; // -1 = use case default
     bool list_only = false;
     bool headless = false;
 
@@ -169,6 +190,8 @@ int main(int argc, char** argv)
             samples = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--sample-ms") == 0 && i + 1 < argc)
             sample_ms = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--bootstrap-heights") == 0 && i + 1 < argc)
+            bootstrap_heights_cli = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--width") == 0 && i + 1 < argc)
             width = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--height") == 0 && i + 1 < argc)
@@ -197,6 +220,8 @@ int main(int argc, char** argv)
         std::printf("fake_overdraw_end_z\n");
         std::printf("fake_overdraw_end_z_move\n");
         std::printf("fake_bfs_end_z\n");
+        std::printf("fake_mass_2k\n");
+        std::printf("fake_mass_4k\n");
         return 0;
     }
 
@@ -209,19 +234,24 @@ int main(int argc, char** argv)
         return 2;
     }
     const bool dense = is_dense_case(case_id);
+    const bool mass = is_mass_case(case_id);
+    const bool heavy = dense || mass;
     const bool moving = (case_id == "fake_overdraw_end_z_move");
     const bool bfs = (case_id == "fake_bfs_end_z");
     // Only raise defaults when caller left stock sample count (120).
-    if ((case_id == "fake_stress_instances" || dense) && samples == 120)
-        samples = 160;
+    if ((case_id == "fake_stress_instances" || heavy) && samples == 120)
+        samples = mass ? 80 : 160;
     if (dense && warmup_ms == 2000)
         warmup_ms = 3500;
+    if (mass && warmup_ms == 2000)
+        warmup_ms = (case_id == "fake_mass_4k") ? 8000 : 6000;
     if (samples < 8)
         samples = 8;
 
-    constexpr int kDenseBootstrapHeights = 48;
-    if (dense)
-        FakeChainSimulator::set_bootstrap_heights_override(kDenseBootstrapHeights);
+    const int bootstrap_heights =
+        (bootstrap_heights_cli >= 0) ? bootstrap_heights_cli : case_bootstrap_heights(case_id);
+    if (bootstrap_heights > 0)
+        FakeChainSimulator::set_bootstrap_heights_override(bootstrap_heights);
     else
         FakeChainSimulator::set_bootstrap_heights_override(0);
 
@@ -257,11 +287,14 @@ int main(int argc, char** argv)
     BlockScene scene;
     CameraController camera;
     camera.set_aspect(static_cast<float>(width) / static_cast<float>(height > 0 ? height : 1));
+    // Dense overdraw cases look down +Z; mass cases use a fixed overview into the volume.
     if (dense)
         apply_end_camera_down_z(camera, -48.f);
     else
     {
-        camera.set_scroll_z(-48.f);
+        // Mass: pull back further so more of the tall chain is in view.
+        const float scroll = mass ? -120.f : -48.f;
+        camera.set_scroll_z(scroll);
         camera.add_look_delta(0.f, 180.f);
         for (int i = 0; i < 30; ++i)
             camera.tick(1.f / 30.f);
@@ -297,25 +330,33 @@ int main(int argc, char** argv)
 
     app_platform_show_window(create_info.window);
 
-    std::printf("[bench] case=%s warmup_ms=%d samples=%d out=%s dense=%d\n",
-                case_id.c_str(), warmup_ms, samples, out_path.c_str(), dense ? 1 : 0);
-    if (dense)
+    std::printf("[bench] case=%s warmup_ms=%d samples=%d out=%s dense=%d mass=%d bootstrap_h=%d\n",
+                case_id.c_str(), warmup_ms, samples, out_path.c_str(), dense ? 1 : 0, mass ? 1 : 0,
+                bootstrap_heights);
+    int total_blocks_at_sample = 0;
+    if (heavy && bootstrap_heights > 0)
     {
-        const int want = kDenseBootstrapHeights * BlockScene::kLaneCount;
-        wait_min_blocks(scene, want / 2, warmup_ms);
-        std::printf("[bench] total_blocks=%d (want~%d)\n", scene.total_blocks(), want);
+        const int want = bootstrap_heights * BlockScene::kLaneCount;
+        // Wait until most of the bootstrap is in the scene (mass can take longer).
+        const int wait_ms = mass ? (warmup_ms + 4000) : warmup_ms;
+        wait_min_blocks(scene, want / 2, wait_ms);
+        total_blocks_at_sample = scene.total_blocks();
+        std::printf("[bench] total_blocks=%d (want~%d)\n", total_blocks_at_sample, want);
     }
     pump_for_ms(warmup_ms);
+    total_blocks_at_sample = scene.total_blocks();
 
     if (dense)
         apply_end_camera_down_z(camera, -48.f);
     else
     {
-        camera.set_scroll_z(-48.f);
+        const float scroll = mass ? -120.f : -48.f;
+        camera.set_scroll_z(scroll);
         for (int i = 0; i < 10; ++i)
             camera.tick(1.f / 30.f);
     }
     pump_for_ms(400);
+    total_blocks_at_sample = scene.total_blocks();
 
     if (bfs)
     {
@@ -438,7 +479,7 @@ int main(int argc, char** argv)
             return 0.f;
         return 1.f - over;
     };
-    // Budgets: steady tighter; stress/dense allow higher frame time.
+    // Budgets: steady tighter; stress/dense/mass allow higher frame time.
     float budget_frame = 8.0f;
     float budget_cpu = 4.0f;
     float budget_gpu = 5.0f;
@@ -467,6 +508,19 @@ int main(int argc, char** argv)
         budget_cpu = 28.0f;
         budget_gpu = 3.0f;
     }
+    else if (case_id == "fake_mass_2k")
+    {
+        // ~2k blocks: Prepare scales with instance count; soft gate only.
+        budget_frame = 50.0f;
+        budget_cpu = 48.0f;
+        budget_gpu = 4.0f;
+    }
+    else if (case_id == "fake_mass_4k")
+    {
+        budget_frame = 90.0f;
+        budget_cpu = 88.0f;
+        budget_gpu = 6.0f;
+    }
     const float s_frame = metric_score(frame_med, budget_frame);
     const float s_cpu = metric_score(cpu_med, budget_cpu);
     const float s_gpu = metric_score(gpu_med, budget_gpu);
@@ -477,6 +531,9 @@ int main(int argc, char** argv)
     std::fprintf(f, "{\n");
     std::fprintf(f, "  \"case\": \"%s\",\n", case_id.c_str());
     std::fprintf(f, "  \"samples\": %d,\n", got);
+    std::fprintf(f, "  \"total_blocks\": %d,\n", total_blocks_at_sample);
+    std::fprintf(f, "  \"bootstrap_heights\": %d,\n", bootstrap_heights);
+    std::fprintf(f, "  \"lane_count\": %d,\n", BlockScene::kLaneCount);
     std::fprintf(f, "  \"confidence\": %.4f,\n", confidence);
     std::fprintf(f, "  \"scores\": { \"frame\": %.4f, \"cpu\": %.4f, \"gpu\": %.4f },\n",
                  s_frame, s_cpu, s_gpu);
@@ -504,9 +561,10 @@ int main(int argc, char** argv)
     std::fprintf(f, "}\n");
     std::fclose(f);
 
-    std::printf("[bench] wrote %s (samples=%d frame_med=%.3f cpu_med=%.3f gpu_med=%.3f "
-                "confidence=%.3f)\n",
-                out_path.c_str(), got, frame_med, cpu_med, gpu_med, confidence);
+    std::printf("[bench] wrote %s (samples=%d total_blocks=%d frame_med=%.3f cpu_med=%.3f "
+                "gpu_med=%.3f confidence=%.3f)\n",
+                out_path.c_str(), got, total_blocks_at_sample, frame_med, cpu_med, gpu_med,
+                confidence);
     // Serious regression only: confidence < 0.4 fails harness exit (opt-in CI).
     if (confidence < 0.4f)
     {

@@ -26,18 +26,21 @@ Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timesta
 | Baseline | `vnv/bench/baselines/<id>.json` |
 | Pass rule | Baseline compare: `median <= baseline * (1 + tol)` (tol **15%**); **and** harness soft-budget **confidence** ∈ [0,1] |
 | Confidence | Weighted frame/cpu/gpu vs soft budgets; warn &lt; 0.7, fail &lt; 0.4 |
-| Cases | `fake_steady_frame`, `fake_stress_instances`, `fake_overdraw_end_z`, `fake_overdraw_end_z_move`, `fake_bfs_end_z` |
+| Cases | `fake_steady_frame`, `fake_stress_instances`, dense overdraw/bfs, **mass** `fake_mass_2k` / `fake_mass_4k` |
 | Update | `run_vnv.ps1 -Bench -UpdateBaselines` on a golden machine |
 | Non-goals | Cross-machine absolute ms in free CI; replace `scripts/bench_build.ps1` |
 | Bottlenecks | [docs/perf-bottlenecks.md](../../docs/perf-bottlenecks.md) |
+| Reports | `./scripts/run_vnv.sh --bench --mass --headless --report` → `vnv/reports/last_run.html` |
 
 ## Layout
 
 | Path | Role |
 |------|------|
 | `baselines/<case>.json` | Committed median/p95 budget |
-| `tests/graphics_bench_tests.cpp` | Harness → `bench_frame_profiler.exe` |
+| `tests/graphics_bench_tests.cpp` | Harness → `bench_frame_profiler` |
 | `tests/out/<case>/actual.json` | Last run (gitignored) |
+| `../reports/` | Run JSON + HTML (gitignored); see `scripts/generate_vnv_report.py` |
+| `../manifest/case_catalog.json` | Case ids + descriptions for reports |
 
 ## Cases
 
@@ -48,11 +51,40 @@ Performance regression using **`FrameTimingSnapshot`** (CPU scopes + GPU timesta
 | `fake_overdraw_end_z` | Dense bootstrap **48×16** | End, look **down +Z** | 28 / 26 / 2 |
 | `fake_overdraw_end_z_move` | Dense 48×16 | End + **scroll Z** per sample | 30 / 28 / 2 |
 | `fake_bfs_end_z` | Dense + **tip selection** | End down +Z | 30 / 28 / 3 |
+| `fake_mass_2k` | Mass bootstrap **128×16 ≈ 2048** blocks | Fixed, pulled back | 50 / 48 / 4 |
+| `fake_mass_4k` | Mass bootstrap **256×16 ≈ 4096** blocks | Fixed, pulled back | 90 / 88 / 6 |
 
-Dense cases call `FakeChainSimulator::set_bootstrap_heights_override(48)` before start (default Debug stays 8).
+Dense cases call `FakeChainSimulator::set_bootstrap_heights_override(48)`; mass uses 128 / 256 (default Debug stays 8). CLI override: `--bootstrap-heights N`.
+
+Actual JSON also records `total_blocks`, `bootstrap_heights`, and `lane_count`.
 
 - 1280×720, profiler on, validation off  
-- Warmup ~2s steady / ~3.5s dense; ~120–160 samples  
+- Warmup ~2s steady / ~3.5s dense / ~6–8s mass; ~80–160 samples  
 - Tracks frame/cpu/gpu + scopes (`Prepare`, `MainColorDepth`, `Cubes*`, …)
+
+### Linux mass + HTML report
+
+```bash
+# Steady only (default --bench)
+./scripts/run_vnv.sh --bench --headless --report
+
+# Thousands of blocks + HTML with expected/actual + before/after
+./scripts/run_vnv.sh --bench --mass --headless --report
+
+# Or selective cases:
+BENCH_CASES_OVERRIDE="fake_mass_2k fake_mass_4k" ./scripts/run_vnv.sh --bench --headless --report --skip-build
+```
+
+**Headless drivers:** if NVIDIA SEGV’s in `vkGetPhysicalDeviceSurfaceSupportKHR` under
+`VK_EXT_headless_surface`, force lavapipe (software) for CI/smoke:
+
+```bash
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+```
+
+Soft budgets are tuned for discrete GPUs; lavapipe may fail the confidence gate on
+`fake_steady_frame` while mass cases (looser budgets + `total_blocks` scale) still pass.
+Commit baselines from a representative GPU machine with `--update-baselines`.
 
 How to add a case: [TESTING.md § System · bench](../TESTING.md#tier-c--system--bench-detail).

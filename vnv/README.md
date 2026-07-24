@@ -83,8 +83,14 @@ Full test authoring rules: [TESTING.md](TESTING.md).
 ./scripts/run_vnv.sh --int           # system functional (DISPLAY + GPU)
 ./scripts/run_vnv.sh --int --headless
 ./scripts/run_vnv.sh --bench         # system · bench (opt-in)
+./scripts/run_vnv.sh --bench --mass  # + fake_mass_2k / fake_mass_4k (~2k/4k blocks)
 ./scripts/run_vnv.sh --all           # unit + system functional
+./scripts/run_vnv.sh --mod --report  # also write vnv/reports/last_run.html
+./scripts/run_vnv.sh --report-only   # regenerate HTML from last_run.json
 ```
+
+HTML reports (pass/fail, catalog descriptions, expected/actual goldens, before/after):  
+`scripts/generate_vnv_report.py` + catalog `manifest/case_catalog.json`. Details in [TESTING.md](TESTING.md).
 
 CI: `.github/workflows/linux-ci.yml`. See [docs/linux.md](../docs/linux.md).
 
@@ -97,4 +103,5 @@ Working directory must be **repo root**.
 | Unit layout | [mod/README.md](mod/README.md) |
 | System · functional | [int/README.md](int/README.md) · [int/tests/visual/](int/tests/visual/README.md) |
 | System · bench | [bench/README.md](bench/README.md) |
+| Case catalog / reports | [manifest/case_catalog.json](manifest/case_catalog.json) · `vnv/reports/` (gitignored) |
 | Integration (future suites) | [integration/README.md](integration/README.md) |

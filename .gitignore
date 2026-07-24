@@ -73,6 +73,7 @@ vnv/mod/tests/**/out/
 vnv/int/tests/**/out/
 vnv/int/tests/visual/out/
 vnv/bench/tests/out/
+vnv/reports/
 tests/visual/out/
 
 # OS junk
