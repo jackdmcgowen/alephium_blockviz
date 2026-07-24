@@ -26,13 +26,16 @@ struct DeviceOptionalFeatures
 {
     bool mesh_shader_ext = false; // VK_EXT_mesh_shader present
     bool mesh_shader     = false; // VkPhysicalDeviceMeshShaderFeaturesEXT::meshShader
-    bool task_shader     = false; // ::taskShader
-    // Convenience: product path may use mesh when both ext + meshShader (task optional).
+    bool task_shader     = false; // ::taskShader (D3D amplification)
+    // Mesh without task is usable; prefer task+mesh when task_path_usable().
     bool mesh_path_usable() const { return mesh_shader_ext && mesh_shader; }
+    bool task_path_usable() const { return mesh_path_usable() && task_shader; }
 
     uint32_t max_mesh_output_vertices   = 0;
     uint32_t max_mesh_output_primitives = 0;
     uint32_t max_mesh_work_group_invocations = 0;
+    uint32_t max_task_work_group_invocations = 0;
+    uint32_t max_task_payload_size = 0;
 };
 
 bool physical_device_meets_requirements(VkPhysicalDevice pd,

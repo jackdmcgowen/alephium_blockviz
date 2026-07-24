@@ -67,16 +67,16 @@ render thread (frame_loop.cpp):
   present (non-Sobel path)
 ```
 
-### Cube draw paths (PR1–PR4)
+### Cube draw paths
 
-| Path | When | Draw |
-|------|------|------|
-| **Classic + GPU cull** | Always available | `InstanceCullPass` → `vkCmdDrawIndexedIndirect` on compact SSBO |
-| **Classic no cull** | Cull pass not ready / zero instances | `vkCmdDrawIndexed` on host instance buffer |
-| **Mesh + GPU cull** | `VK_EXT_mesh_shader` enabled, `prefer_mesh_cube` (default on) | Cull → `vkCmdDrawMeshTasksEXT`; mesh shader clamps by `draw.instanceCount` |
-| **Mesh no cull** | Mesh ready, cull skipped | `DrawMeshTasksEXT(host_count)` over full instance SSBO |
+| Path | When | Frustum | Mesh work |
+|------|------|---------|-----------|
+| **Classic + compute cull** | Always available | `InstanceCullPass` compact | `DrawIndexedIndirect` |
+| **Classic no cull** | Cull not ready | — | `DrawIndexed` |
+| **Task+mesh (amplification)** | `taskShader` + mesh (preferred default) | **Task shader** AABB | Mesh face/cone cull → emit faces |
+| **Mesh-only** | Mesh without task | Compute cull + count clamp | Full cube meshlet |
 
-Toggle: `GraphicsSystem::set_prefer_mesh_cube(bool)` (fallback classic kept forever).
+Toggle: `GraphicsSystem::set_prefer_mesh_cube(bool)`. Amplification (Vulkan task = D3D amplification) is **on by default** when hardware reports `taskShader`.
 
 ### Buffer roles (pick / outline vs main cull)
 

@@ -203,8 +203,8 @@ void create_device(
     if (arm_mesh)
     {
         meshFeatures.meshShader = VK_TRUE;
-        // Task optional; PR3 is mesh-only (one WG per instance).
-        meshFeatures.taskShader = VK_FALSE;
+        // Amplification (task) on by default when hardware reports taskShader.
+        meshFeatures.taskShader = opt.task_shader ? VK_TRUE : VK_FALSE;
         meshFeatures.pNext = &vulkan12Features;
     }
 
@@ -239,7 +239,10 @@ void create_device(
     if (mesh_enabled)
         *mesh_enabled = arm_mesh;
     if (arm_mesh)
-        std::printf("[engine] mesh_shaders=enabled (VK_EXT_mesh_shader + meshShader)\n");
+    {
+        std::printf("[engine] mesh_shaders=enabled (VK_EXT_mesh_shader + meshShader%s)\n",
+                    opt.task_shader ? " + taskShader/amplification" : "");
+    }
 }
 
 void destroy_device(VkDevice device)

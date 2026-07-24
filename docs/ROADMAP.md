@@ -5,7 +5,7 @@ Historical designs are archives, not the backlog: [modularization](graphics-modu
 Platform / Linux layout: [platform.md](platform.md) · [linux.md](linux.md).
 
 **Last updated:** 2026-07-23 (mesh/cull graphics path shipped 1.4.0)  
-**Versions:** app **1.4.3** · engine **1.4.3** (see identity headers / tags on `main`)
+**Versions:** app **1.4.4** · engine **1.4.4** (see identity headers / tags on `main`)
 
 | Status | Meaning |
 |--------|---------|

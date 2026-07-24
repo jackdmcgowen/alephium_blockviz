@@ -198,8 +198,11 @@ private:
         std::unordered_map<int, std::vector<size_t>> by_g;
         // hash → placement index (force-draw without full scan)
         std::unordered_map<std::string, size_t> by_hash;
+        float last_rebuild_sec = -1.e9f; // rate-limit full rebuild while gen thrashing
     };
     LayoutCache layout_cache_;
+    // Min seconds between full layout rebuilds when graph keeps admitting (dense mainnet).
+    static constexpr float kMinLayoutRebuildSec = 0.05f;
 
     // Selection first-order dep fan.
     SelectionDepTrace sel_dep_;

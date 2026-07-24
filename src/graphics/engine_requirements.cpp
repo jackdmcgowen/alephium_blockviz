@@ -114,6 +114,8 @@ void query_optional_device_features(VkPhysicalDevice pd, DeviceOptionalFeatures&
     out.max_mesh_output_vertices = mesh_p.maxMeshOutputVertices;
     out.max_mesh_output_primitives = mesh_p.maxMeshOutputPrimitives;
     out.max_mesh_work_group_invocations = mesh_p.maxMeshWorkGroupInvocations;
+    out.max_task_work_group_invocations = mesh_p.maxTaskWorkGroupInvocations;
+    out.max_task_payload_size = mesh_p.maxTaskPayloadSize;
 }
 
 void log_engine_startup(const VkPhysicalDeviceProperties& props,
@@ -136,17 +138,24 @@ void log_engine_startup(const VkPhysicalDeviceProperties& props,
 
 void log_optional_device_features(const DeviceOptionalFeatures& opt)
 {
-    // "available" = hardware can do mesh; create_device may set "enabled" on the log line after.
-    std::printf("[engine] mesh_shaders=%s (ext=%s meshFeature=%s taskFeature=%s)\n",
+    // "available" = hardware can do mesh; task = amplification path preferred when enabled.
+    std::printf("[engine] mesh_shaders=%s (ext=%s meshFeature=%s taskFeature=%s amp=%s)\n",
                 opt.mesh_path_usable() ? "available" : "off",
                 opt.mesh_shader_ext ? "yes" : "no",
                 opt.mesh_shader ? "yes" : "no",
-                opt.task_shader ? "yes" : "no");
+                opt.task_shader ? "yes" : "no",
+                opt.task_path_usable() ? "prefer" : "off");
     if (opt.mesh_shader_ext)
     {
         std::printf("[engine] mesh limits: maxOutVerts=%u maxOutPrims=%u maxWorkGroupInvoc=%u\n",
                     opt.max_mesh_output_vertices,
                     opt.max_mesh_output_primitives,
                     opt.max_mesh_work_group_invocations);
+        if (opt.task_shader)
+        {
+            std::printf("[engine] task limits: maxWorkGroupInvoc=%u maxPayload=%u\n",
+                        opt.max_task_work_group_invocations,
+                        opt.max_task_payload_size);
+        }
     }
 }

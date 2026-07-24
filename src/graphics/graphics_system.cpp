@@ -239,6 +239,8 @@ void GraphicsSystem::init()
         pci.graphics_family = queues_.family_index(QueueType::_3D);
         pci.compute_family = queues_.family_index(QueueType::CMP);
         pci.enable_mesh_cube = mesh_shaders_enabled_;
+        pci.enable_mesh_task = mesh_shaders_enabled_ &&
+                               device_optional_features_.task_path_usable();
         pci.frame_ubo_buffer = frame_resources_.uniform_buffer();
         pci.frame_ubo_range = sizeof(UniformBufferObject);
         main_scene_pass_.create(pci);
@@ -470,6 +472,8 @@ void GraphicsSystem::resize_internal()
         pci.graphics_family = queues_.family_index(QueueType::_3D);
         pci.compute_family = queues_.family_index(QueueType::CMP);
         pci.enable_mesh_cube = mesh_shaders_enabled_;
+        pci.enable_mesh_task = mesh_shaders_enabled_ &&
+                               device_optional_features_.task_path_usable();
         pci.frame_ubo_buffer = frame_resources_.uniform_buffer();
         pci.frame_ubo_range = sizeof(UniformBufferObject);
         main_scene_pass_.recreate(pci);
@@ -648,22 +652,31 @@ void GraphicsSystem::record_command_buffer(VkCommandBuffer buffer, uint32_t imag
     rp.transition_color_to_present = !defer_present && !capture_screenshot;
     rp.profiler = prof;
 
-    // PR2: GPU frustum cull → compact SSBO + classic DrawIndexedIndirect / mesh clamp.
-    // PR3: mesh cube path when device enabled + prefer flag + PSO ready.
-    // PR4: picker always uses pre-cull instance_buffer (pick_map IDs); outline is
-    //      filtered at upload (cpu frustum), not via main compact SSBO.
+    // Task+mesh (amplification): frustum in task shader — skip compute cull.
+    // Mesh-only / classic: InstanceCullPass compact + indirect / mesh clamp.
+    // Picker always uses pre-cull instance_buffer (pick_map IDs).
+    rp.use_task_mesh_path =
+        prefer_mesh_cube_ && mesh_shaders_enabled_ && main_scene_pass_.task_mesh_ready();
     rp.use_mesh_cube_path =
-        prefer_mesh_cube_ && mesh_shaders_enabled_ && main_scene_pass_.mesh_cube_ready();
+        prefer_mesh_cube_ && mesh_shaders_enabled_ && main_scene_pass_.mesh_cube_ready() &&
+        !rp.use_task_mesh_path;
     if (frame_resources_.cull_buffers_ready())
         rp.cull_draw_args_buffer = frame_resources_.cull_draw_args_buffer();
 
+    const Frustum fr = frustum_from_matrix(g_viewProj);
+    if (rp.use_task_mesh_path)
+    {
+        for (int i = 0; i < 6; ++i)
+            rp.cull_planes[i] = fr.planes[i];
+        rp.cull_half_extent = 1.05f;
+    }
+
     const bool use_cull =
-        instance_cull_pass_.ready() && frame_resources_.cull_buffers_ready() &&
-        instanceCount > 0;
+        !rp.use_task_mesh_path && instance_cull_pass_.ready() &&
+        frame_resources_.cull_buffers_ready() && instanceCount > 0;
     if (use_cull)
     {
         frame_resources_.reset_cull_draw_args(rp.index_count);
-        const Frustum fr = frustum_from_matrix(g_viewProj);
         frame_graph::InstanceCullRecordParams cull{};
         cull.cmd = buffer;
         cull.in_instances = frame_resources_.instance_buffer();

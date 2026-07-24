@@ -885,41 +885,68 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                                    ? scene_.genesis_ms()
                                    : ALPH_GENESIS_TIMESTAMP_MS_FALLBACK;
     const uint64_t graph_gen = scene_.graph_generation();
+    const float now_layout = now_sec_();
 
-    // Rebuild layout only when graph or timeline mapping changes (camera-only frames reuse).
-    if (layout_cache_.graph_gen != graph_gen || layout_cache_.origin_ms != timeline_origin_ms ||
-        layout_cache_.genesis_ms != genesis_ms || layout_cache_.window_ms != window_ms)
+    // Rebuild layout when graph/timeline mapping changes. Rate-limit under admit thrash.
+    const bool mapping_dirty =
+        layout_cache_.graph_gen != graph_gen || layout_cache_.origin_ms != timeline_origin_ms ||
+        layout_cache_.genesis_ms != genesis_ms || layout_cache_.window_ms != window_ms;
+    const bool rate_ok =
+        layout_cache_.last_rebuild_sec < 0.f ||
+        (now_layout - layout_cache_.last_rebuild_sec) >= kMinLayoutRebuildSec;
+    // Always rebuild on first frame or origin/genesis/window change; gen-only thrash rate-limited.
+    const bool force_mapping =
+        layout_cache_.origin_ms != timeline_origin_ms ||
+        layout_cache_.genesis_ms != genesis_ms || layout_cache_.window_ms != window_ms ||
+        layout_cache_.layout.placements.empty();
+
+    if (mapping_dirty && (force_mapping || rate_ok))
     {
+        // Snapshot under lock, then unlock so network admits can proceed during layout.
         const std::vector<GraphNode> graph_nodes = scene_.nodes_snapshot_unsorted();
+        const int64_t snap_origin = timeline_origin_ms;
+        const int64_t snap_genesis = genesis_ms;
+        const int64_t snap_window = window_ms;
+        const uint64_t snap_gen = graph_gen;
+        lock.unlock();
+
         LayoutParams layout_params;
         layout_params.meters_per_second = meters_per_second;
         layout_params.base_radius = kLayoutBaseRadius;
         layout_params.lane_count = 16;
-        layout_params.timeline_origin_ms = timeline_origin_ms;
+        layout_params.timeline_origin_ms = snap_origin;
 
-        layout_cache_.layout = layout_.build(graph_nodes, layout_params);
-        layout_cache_.live_nodes.clear();
-        layout_cache_.live_nodes.reserve(graph_nodes.size());
-        layout_cache_.by_g.clear();
-        layout_cache_.by_hash.clear();
-        layout_cache_.by_hash.reserve(layout_cache_.layout.placements.size() * 2 + 1);
+        LayoutResult built = layout_.build(graph_nodes, layout_params);
+        std::unordered_set<std::string> live;
+        live.reserve(graph_nodes.size());
+        std::unordered_map<int, std::vector<size_t>> by_g;
+        std::unordered_map<std::string, size_t> by_hash;
+        by_hash.reserve(built.placements.size() * 2 + 1);
 
         auto g_of = [&](int64_t ts_ms) -> int {
-            if (window_ms <= 0 || ts_ms <= genesis_ms)
+            if (snap_window <= 0 || ts_ms <= snap_genesis)
                 return 0;
-            return static_cast<int>((ts_ms - genesis_ms) / window_ms);
+            return static_cast<int>((ts_ms - snap_genesis) / snap_window);
         };
-        for (size_t i = 0; i < layout_cache_.layout.placements.size(); ++i)
+        for (size_t i = 0; i < built.placements.size(); ++i)
         {
-            const PlacedBlock& p = layout_cache_.layout.placements[i];
-            layout_cache_.live_nodes.insert(p.hash);
-            layout_cache_.by_hash[p.hash] = i;
-            layout_cache_.by_g[g_of(p.timestamp_ms)].push_back(i);
+            const PlacedBlock& p = built.placements[i];
+            live.insert(p.hash);
+            by_hash[p.hash] = i;
+            by_g[g_of(p.timestamp_ms)].push_back(i);
         }
-        layout_cache_.graph_gen = graph_gen;
-        layout_cache_.origin_ms = timeline_origin_ms;
-        layout_cache_.genesis_ms = genesis_ms;
-        layout_cache_.window_ms = window_ms;
+
+        lock.lock();
+        // Commit snapshot layout (one-frame lag vs newer admits is OK for FPS).
+        layout_cache_.layout = std::move(built);
+        layout_cache_.live_nodes = std::move(live);
+        layout_cache_.by_g = std::move(by_g);
+        layout_cache_.by_hash = std::move(by_hash);
+        layout_cache_.graph_gen = snap_gen;
+        layout_cache_.origin_ms = snap_origin;
+        layout_cache_.genesis_ms = snap_genesis;
+        layout_cache_.window_ms = snap_window;
+        layout_cache_.last_rebuild_sec = now_layout;
     }
 
     const LayoutResult& layout = layout_cache_.layout;
@@ -1493,8 +1520,8 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
     }
 
     // Early-Z friendly draw order: opaque near→far, then translucent (pick_map locked).
-    // Sobel indices are rebuilt from the reordered pick_map below.
-    if (in.has_camera_eye && !out.instances.empty())
+    // Skip micro lists — sort cost not worth it under a few hundred instances.
+    if (in.has_camera_eye && out.instances.size() >= 256)
         sort_instances_front_to_back_opaque_(out.instances, out.pick_map, in.camera_eye);
 
     // Sobel outlines: app assigns colors; graphics draws all in one pass.
