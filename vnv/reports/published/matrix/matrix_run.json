@@ -1,342 +1,1930 @@
 {
   "version": 1,
   "status": "fail",
-  "generated_at": "2026-07-24T03:28:07Z",
+  "generated_at": "2026-07-24T03:40:47Z",
   "kind": "bench_matrix",
+  "hardware_note": "PCIe x1 risers; soft budgets advisory (relative multi-GPU farm); isolation via --device UUID + Xvfb",
   "out_root": "vnv/bench/tests/out/matrix",
   "suites": [
     "bench_matrix"
   ],
   "cases": [
     {
-      "id": "gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
-      "status": "warn",
+      "id": "gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k",
+      "status": "pass",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti",
+      "actual": "vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json",
       "matrix_tag": "gpu0_NVIDIA_GeForce_RTX_3070_Ti",
-      "case": "fake_steady_frame",
+      "case": "fake_mass_2k",
       "metrics": {
-        "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 0,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "85315f57303502ee90b8f3e478e5546e",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.973,
+          "p95": 50.3483
+        },
+        "cpu_ms": {
+          "median": 42.9018,
+          "p95": 50.2777
+        },
+        "gpu_ms": {
+          "median": 0.4081,
+          "p95": 0.4098
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0092
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0572,
+            "cpu_p95": 0.0612,
+            "gpu_median": 0.4081,
+            "gpu_p95": 0.4098
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0011,
+            "cpu_p95": 0.0013,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.011,
+            "cpu_p95": 0.0115,
+            "gpu_median": 0.0034,
+            "gpu_p95": 0.0036
+          },
+          "Prepare": {
+            "cpu_median": 9.2953,
+            "cpu_p95": 16.7696,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0035,
+            "cpu_p95": 0.0041,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0841,
+            "cpu_p95": 0.0903,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.4192,
+            "cpu_p95": 34.2023,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu0_NVIDIA_GeForce_RTX_3070_Ti",
           "nvidia_index": 0,
           "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
           "nvidia_uuid": "GPU-85315f57-3035-02ee-90b8-f3e478e5546e",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3070 Ti",
-        "device_index": 0,
-        "device_uuid": "85315f57303502ee90b8f3e478e5546e",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3070 Ti",
       "device_uuid": "85315f57303502ee90b8f3e478e5546e",
       "device_index": 0
     },
     {
-      "id": "gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame",
+      "id": "gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu0_NVIDIA_GeForce_RTX_3070_Ti",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 0,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "85315f57303502ee90b8f3e478e5546e",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.591,
+          "p95": 35.3393
+        },
+        "cpu_ms": {
+          "median": 34.5358,
+          "p95": 37.3603
+        },
+        "gpu_ms": {
+          "median": 0.4539,
+          "p95": 0.4559
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0072
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0015,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0174,
+            "gpu_p95": 0.0248
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0528,
+            "cpu_p95": 1.0502,
+            "gpu_median": 0.4539,
+            "gpu_p95": 0.4559
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0004,
+            "cpu_p95": 0.0006,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0106,
+            "cpu_p95": 0.0189,
+            "gpu_median": 0.003,
+            "gpu_p95": 0.0037
+          },
+          "Prepare": {
+            "cpu_median": 0.891,
+            "cpu_p95": 0.9974,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0026,
+            "cpu_p95": 0.0028,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.078,
+            "cpu_p95": 1.0914,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0117,
+            "gpu_p95": 0.0117
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0225,
+            "gpu_p95": 0.0225
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.5098,
+            "cpu_p95": 34.2727,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu0_NVIDIA_GeForce_RTX_3070_Ti",
+          "nvidia_index": 0,
+          "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+          "nvidia_uuid": "GPU-85315f57-3035-02ee-90b8-f3e478e5546e",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3070 Ti",
+      "device_uuid": "85315f57303502ee90b8f3e478e5546e",
+      "device_index": 0
+    },
+    {
+      "id": "gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3080",
+      "actual": "vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 1,
+        "device_name": "NVIDIA GeForce RTX 3080",
+        "device_type": "discrete",
+        "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.8876,
+          "p95": 50.2631
+        },
+        "cpu_ms": {
+          "median": 42.8142,
+          "p95": 50.1727
+        },
+        "gpu_ms": {
+          "median": 0.4033,
+          "p95": 0.4062
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0143
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0565,
+            "cpu_p95": 0.0651,
+            "gpu_median": 0.4033,
+            "gpu_p95": 0.4062
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0011,
+            "cpu_p95": 0.0013,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0107,
+            "cpu_p95": 0.0118,
+            "gpu_median": 0.0033,
+            "gpu_p95": 0.0037
+          },
+          "Prepare": {
+            "cpu_median": 9.2397,
+            "cpu_p95": 16.7205,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0034,
+            "cpu_p95": 0.0039,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0832,
+            "cpu_p95": 0.0921,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3232,
+            "cpu_p95": 34.2261,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
           "nvidia_index": 1,
           "nvidia_name": "NVIDIA GeForce RTX 3080",
           "nvidia_uuid": "GPU-a014772c-d176-9e44-ca93-58d80b375cf9",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3080",
-        "device_index": 1,
-        "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3080",
       "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
       "device_index": 1
     },
     {
-      "id": "gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame",
+      "id": "gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu2_NVIDIA_GeForce_RTX_3090",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3080 (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 1,
+        "device_name": "NVIDIA GeForce RTX 3080",
+        "device_type": "discrete",
+        "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.5478,
+          "p95": 35.4851
+        },
+        "cpu_ms": {
+          "median": 34.5067,
+          "p95": 37.3507
+        },
+        "gpu_ms": {
+          "median": 0.4508,
+          "p95": 0.4526
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0072
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.001,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0072
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0205,
+            "gpu_p95": 0.0329
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0541,
+            "cpu_p95": 1.0162,
+            "gpu_median": 0.4508,
+            "gpu_p95": 0.4526
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0005,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0113,
+            "cpu_p95": 0.0191,
+            "gpu_median": 0.003,
+            "gpu_p95": 0.0034
+          },
+          "Prepare": {
+            "cpu_median": 0.8826,
+            "cpu_p95": 1.3422,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0024,
+            "cpu_p95": 0.0027,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0805,
+            "cpu_p95": 1.0583,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0121,
+            "gpu_p95": 0.0121
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0184,
+            "gpu_p95": 0.0184
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.4521,
+            "cpu_p95": 34.3611,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
+          "nvidia_index": 1,
+          "nvidia_name": "NVIDIA GeForce RTX 3080",
+          "nvidia_uuid": "GPU-a014772c-d176-9e44-ca93-58d80b375cf9",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3080",
+      "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
+      "device_index": 1
+    },
+    {
+      "id": "gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3090",
+      "actual": "vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu2_NVIDIA_GeForce_RTX_3090",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 2,
+        "device_name": "NVIDIA GeForce RTX 3090",
+        "device_type": "discrete",
+        "device_uuid": "7fb5d8ed75295bce4fc6f518af1cc447",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.8037,
+          "p95": 50.344
+        },
+        "cpu_ms": {
+          "median": 42.7296,
+          "p95": 50.2648
+        },
+        "gpu_ms": {
+          "median": 0.4012,
+          "p95": 0.403
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0041,
+            "gpu_p95": 0.0041
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0128,
+            "gpu_p95": 0.0563
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0584,
+            "cpu_p95": 0.0614,
+            "gpu_median": 0.4012,
+            "gpu_p95": 0.403
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0011,
+            "cpu_p95": 0.0013,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0114,
+            "cpu_p95": 0.0121,
+            "gpu_median": 0.0033,
+            "gpu_p95": 0.0037
+          },
+          "Prepare": {
+            "cpu_median": 9.2093,
+            "cpu_p95": 16.7566,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0038,
+            "cpu_p95": 0.0046,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0872,
+            "cpu_p95": 0.096,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3121,
+            "cpu_p95": 33.6047,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu2_NVIDIA_GeForce_RTX_3090",
           "nvidia_index": 2,
           "nvidia_name": "NVIDIA GeForce RTX 3090",
           "nvidia_uuid": "GPU-7fb5d8ed-7529-5bce-4fc6-f518af1cc447",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3090",
-        "device_index": 2,
-        "device_uuid": "7fb5d8ed75295bce4fc6f518af1cc447",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3090",
       "device_uuid": "7fb5d8ed75295bce4fc6f518af1cc447",
       "device_index": 2
     },
     {
-      "id": "gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
+      "id": "gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu3_NVIDIA_GeForce_RTX_3070_Ti",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3090 (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu2_NVIDIA_GeForce_RTX_3090",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 2,
+        "device_name": "NVIDIA GeForce RTX 3090",
+        "device_type": "discrete",
+        "device_uuid": "7fb5d8ed75295bce4fc6f518af1cc447",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.4792,
+          "p95": 35.4345
+        },
+        "cpu_ms": {
+          "median": 34.4426,
+          "p95": 37.3452
+        },
+        "gpu_ms": {
+          "median": 0.4496,
+          "p95": 0.451
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0072
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.002,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0061
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0102,
+            "gpu_p95": 0.0513
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0521,
+            "cpu_p95": 1.0172,
+            "gpu_median": 0.4496,
+            "gpu_p95": 0.451
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0005,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0107,
+            "cpu_p95": 0.0169,
+            "gpu_median": 0.0031,
+            "gpu_p95": 0.0035
+          },
+          "Prepare": {
+            "cpu_median": 0.8759,
+            "cpu_p95": 1.3444,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0025,
+            "cpu_p95": 0.0028,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0786,
+            "cpu_p95": 1.0688,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.013,
+            "gpu_p95": 0.013
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0174,
+            "gpu_p95": 0.0174
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3875,
+            "cpu_p95": 34.3444,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu2_NVIDIA_GeForce_RTX_3090",
+          "nvidia_index": 2,
+          "nvidia_name": "NVIDIA GeForce RTX 3090",
+          "nvidia_uuid": "GPU-7fb5d8ed-7529-5bce-4fc6-f518af1cc447",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3090",
+      "device_uuid": "7fb5d8ed75295bce4fc6f518af1cc447",
+      "device_index": 2
+    },
+    {
+      "id": "gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti",
+      "actual": "vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu3_NVIDIA_GeForce_RTX_3070_Ti",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 3,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "5ea4ce5001d4e21dc2af27784b1151d2",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.9571,
+          "p95": 50.4417
+        },
+        "cpu_ms": {
+          "median": 42.8714,
+          "p95": 50.366
+        },
+        "gpu_ms": {
+          "median": 0.4008,
+          "p95": 0.4022
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0092
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0077,
+            "gpu_p95": 0.0092
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0571,
+            "cpu_p95": 0.0585,
+            "gpu_median": 0.4008,
+            "gpu_p95": 0.4022
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.001,
+            "cpu_p95": 0.0012,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0108,
+            "cpu_p95": 0.0114,
+            "gpu_median": 0.0032,
+            "gpu_p95": 0.0035
+          },
+          "Prepare": {
+            "cpu_median": 9.3072,
+            "cpu_p95": 16.772,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0037,
+            "cpu_p95": 0.0041,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0837,
+            "cpu_p95": 0.0854,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.4115,
+            "cpu_p95": 33.6712,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu3_NVIDIA_GeForce_RTX_3070_Ti",
           "nvidia_index": 3,
           "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
           "nvidia_uuid": "GPU-5ea4ce50-01d4-e21d-c2af-27784b1151d2",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3070 Ti",
-        "device_index": 3,
-        "device_uuid": "5ea4ce5001d4e21dc2af27784b1151d2",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3070 Ti",
       "device_uuid": "5ea4ce5001d4e21dc2af27784b1151d2",
       "device_index": 3
     },
     {
-      "id": "gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
+      "id": "gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu3_NVIDIA_GeForce_RTX_3070_Ti",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 3,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "5ea4ce5001d4e21dc2af27784b1151d2",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.4692,
+          "p95": 35.4613
+        },
+        "cpu_ms": {
+          "median": 34.4304,
+          "p95": 37.2769
+        },
+        "gpu_ms": {
+          "median": 0.4476,
+          "p95": 0.4521
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.002,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0072
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0092
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0545,
+            "cpu_p95": 0.9955,
+            "gpu_median": 0.4476,
+            "gpu_p95": 0.4521
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0004,
+            "cpu_p95": 0.0006,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0114,
+            "cpu_p95": 0.019,
+            "gpu_median": 0.0029,
+            "gpu_p95": 0.0038
+          },
+          "Prepare": {
+            "cpu_median": 0.8826,
+            "cpu_p95": 1.3374,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0025,
+            "cpu_p95": 0.0028,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0815,
+            "cpu_p95": 1.0359,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0141,
+            "gpu_p95": 0.0141
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0225,
+            "gpu_p95": 0.0225
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.378,
+            "cpu_p95": 34.3389,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu3_NVIDIA_GeForce_RTX_3070_Ti",
+          "nvidia_index": 3,
+          "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+          "nvidia_uuid": "GPU-5ea4ce50-01d4-e21d-c2af-27784b1151d2",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3070 Ti",
+      "device_uuid": "5ea4ce5001d4e21dc2af27784b1151d2",
+      "device_index": 3
+    },
+    {
+      "id": "gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti",
+      "actual": "vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 4,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.9294,
+          "p95": 50.7589
+        },
+        "cpu_ms": {
+          "median": 42.8254,
+          "p95": 50.6319
+        },
+        "gpu_ms": {
+          "median": 0.4042,
+          "p95": 0.4051
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0102
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0564,
+            "cpu_p95": 0.058,
+            "gpu_median": 0.4042,
+            "gpu_p95": 0.4051
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.001,
+            "cpu_p95": 0.0013,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0107,
+            "cpu_p95": 0.0112,
+            "gpu_median": 0.0031,
+            "gpu_p95": 0.0036
+          },
+          "Prepare": {
+            "cpu_median": 9.2566,
+            "cpu_p95": 16.9349,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0036,
+            "cpu_p95": 0.0041,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0825,
+            "cpu_p95": 0.0853,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3911,
+            "cpu_p95": 33.7428,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
           "nvidia_index": 4,
           "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
           "nvidia_uuid": "GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3070 Ti",
-        "device_index": 4,
-        "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3070 Ti",
       "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
       "device_index": 4
     },
     {
-      "id": "gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
+      "id": "gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu5_NVIDIA_GeForce_RTX_3070_Ti",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 4,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.5138,
+          "p95": 35.4383
+        },
+        "cpu_ms": {
+          "median": 34.498,
+          "p95": 37.4666
+        },
+        "gpu_ms": {
+          "median": 0.4496,
+          "p95": 0.4512
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0072
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.001,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0061
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0056,
+            "gpu_p95": 0.0164
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0535,
+            "cpu_p95": 1.0434,
+            "gpu_median": 0.4496,
+            "gpu_p95": 0.4512
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0005,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0109,
+            "cpu_p95": 0.02,
+            "gpu_median": 0.0031,
+            "gpu_p95": 0.0035
+          },
+          "Prepare": {
+            "cpu_median": 0.8831,
+            "cpu_p95": 1.3665,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0026,
+            "cpu_p95": 0.0028,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0795,
+            "cpu_p95": 1.0948,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0136,
+            "gpu_p95": 0.0136
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0215,
+            "gpu_p95": 0.0215
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.4219,
+            "cpu_p95": 34.3941,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
+          "nvidia_index": 4,
+          "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+          "nvidia_uuid": "GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3070 Ti",
+      "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
+      "device_index": 4
+    },
+    {
+      "id": "gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti",
+      "actual": "vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu5_NVIDIA_GeForce_RTX_3070_Ti",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 5,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "998d3512c0380dd2fb44906110eb10d1",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.8957,
+          "p95": 50.2371
+        },
+        "cpu_ms": {
+          "median": 42.8008,
+          "p95": 50.1688
+        },
+        "gpu_ms": {
+          "median": 0.4046,
+          "p95": 0.4054
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0164,
+            "gpu_p95": 0.0184
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0581,
+            "cpu_p95": 0.0637,
+            "gpu_median": 0.4046,
+            "gpu_p95": 0.4054
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.001,
+            "cpu_p95": 0.0012,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0112,
+            "cpu_p95": 0.0122,
+            "gpu_median": 0.0032,
+            "gpu_p95": 0.0036
+          },
+          "Prepare": {
+            "cpu_median": 9.2532,
+            "cpu_p95": 16.7858,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0036,
+            "cpu_p95": 0.0042,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0845,
+            "cpu_p95": 0.0922,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3277,
+            "cpu_p95": 33.4909,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu5_NVIDIA_GeForce_RTX_3070_Ti",
           "nvidia_index": 5,
           "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
           "nvidia_uuid": "GPU-998d3512-c038-0dd2-fb44-906110eb10d1",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3070 Ti",
-        "device_index": 5,
-        "device_uuid": "998d3512c0380dd2fb44906110eb10d1",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3070 Ti",
       "device_uuid": "998d3512c0380dd2fb44906110eb10d1",
       "device_index": 5
     },
     {
-      "id": "gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
+      "id": "gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
       "status": "warn",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless",
-      "expected": null,
-      "actual": "vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
-      "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu5_NVIDIA_GeForce_RTX_3070_Ti",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "status_note": "skipped_nvidia_headless",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 5,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "998d3512c0380dd2fb44906110eb10d1",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.4753,
+          "p95": 35.4279
+        },
+        "cpu_ms": {
+          "median": 34.4281,
+          "p95": 37.3523
+        },
+        "gpu_ms": {
+          "median": 0.4495,
+          "p95": 0.4523
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0067,
+            "gpu_p95": 0.0072
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.002,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0061,
+            "gpu_p95": 0.0061
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0093
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0563,
+            "cpu_p95": 1.022,
+            "gpu_median": 0.4495,
+            "gpu_p95": 0.4523
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0005,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0107,
+            "cpu_p95": 0.0175,
+            "gpu_median": 0.003,
+            "gpu_p95": 0.0039
+          },
+          "Prepare": {
+            "cpu_median": 0.8825,
+            "cpu_p95": 1.3461,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0027,
+            "cpu_p95": 0.003,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0834,
+            "cpu_p95": 1.0671,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0153,
+            "gpu_p95": 0.0153
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0236,
+            "gpu_p95": 0.0236
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3802,
+            "cpu_p95": 34.3526,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu5_NVIDIA_GeForce_RTX_3070_Ti",
+          "nvidia_index": 5,
+          "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+          "nvidia_uuid": "GPU-998d3512-c038-0dd2-fb44-906110eb10d1",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3070 Ti",
+      "device_uuid": "998d3512c0380dd2fb44906110eb10d1",
+      "device_index": 5
+    },
+    {
+      "id": "gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti",
+      "actual": "vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json",
+      "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 6,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
+        "headless": false,
+        "confidence": 1.0,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.828,
+          "p95": 50.3272
+        },
+        "cpu_ms": {
+          "median": 42.7299,
+          "p95": 50.2488
+        },
+        "gpu_ms": {
+          "median": 0.4,
+          "p95": 0.4021
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0092
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0051,
+            "gpu_p95": 0.0051
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0082
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0549,
+            "cpu_p95": 0.056,
+            "gpu_median": 0.4,
+            "gpu_p95": 0.4021
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0011,
+            "cpu_p95": 0.0013,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0105,
+            "cpu_p95": 0.0109,
+            "gpu_median": 0.003,
+            "gpu_p95": 0.0034
+          },
+          "Prepare": {
+            "cpu_median": 9.2433,
+            "cpu_p95": 16.7893,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0033,
+            "cpu_p95": 0.0038,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0829,
+            "cpu_p95": 0.0855,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.3058,
+            "cpu_p95": 33.5746,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
         "matrix": {
           "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
           "nvidia_index": 6,
           "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
           "nvidia_uuid": "GPU-b791d7c3-3275-4b96-74d4-1cc606ee0cc4",
-          "exit_code": 0,
-          "skipped": true,
-          "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-        },
-        "confidence": 1.0,
-        "device_name": "NVIDIA GeForce RTX 3070 Ti",
-        "device_index": 6,
-        "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
-        "frame_ms": {
-          "median": null,
-          "p95": null
-        },
-        "cpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "gpu_ms": {
-          "median": null,
-          "p95": null
-        },
-        "total_blocks": null
+          "exit_code": 0
+        }
       },
       "device_name": "NVIDIA GeForce RTX 3070 Ti",
       "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
       "device_index": 6
     },
     {
+      "id": "gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame",
+      "status": "warn",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe\u00d71/Xvfb advisory \u2014 GPU median healthy)",
+      "actual": "vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json",
+      "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
+      "case": "fake_steady_frame",
+      "metrics": {
+        "case": "fake_steady_frame",
+        "samples": 40,
+        "total_blocks": 133,
+        "bootstrap_heights": 0,
+        "lane_count": 16,
+        "device_index": 6,
+        "device_name": "NVIDIA GeForce RTX 3070 Ti",
+        "device_type": "discrete",
+        "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
+        "headless": false,
+        "confidence": 0.25,
+        "scores": {
+          "frame": 0.0,
+          "cpu": 0.0,
+          "gpu": 1.0
+        },
+        "budgets_ms": {
+          "frame": 8.0,
+          "cpu": 4.0,
+          "gpu": 5.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 34.5039,
+          "p95": 35.365
+        },
+        "cpu_ms": {
+          "median": 34.4613,
+          "p95": 37.0539
+        },
+        "gpu_ms": {
+          "median": 0.4484,
+          "p95": 0.4504
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0082,
+            "gpu_p95": 0.0082
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.002,
+            "gpu_p95": 0.002
+          },
+          "EdgeOverlay": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0072,
+            "gpu_p95": 0.0072
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0077,
+            "gpu_p95": 0.0328
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0557,
+            "cpu_p95": 0.9847,
+            "gpu_median": 0.4484,
+            "gpu_p95": 0.4504
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0003,
+            "cpu_p95": 0.0005,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0112,
+            "cpu_p95": 0.0188,
+            "gpu_median": 0.0031,
+            "gpu_p95": 0.0036
+          },
+          "Prepare": {
+            "cpu_median": 0.8765,
+            "cpu_p95": 1.3443,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0025,
+            "cpu_p95": 0.0028,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0819,
+            "cpu_p95": 1.024,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SelectionDepth": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0149,
+            "gpu_p95": 0.0149
+          },
+          "SobelAsyncCMP": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0236,
+            "gpu_p95": 0.0236
+          },
+          "SubmitPresent": {
+            "cpu_median": 33.42,
+            "cpu_p95": 34.1528,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
+          "nvidia_index": 6,
+          "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+          "nvidia_uuid": "GPU-b791d7c3-3275-4b96-74d4-1cc606ee0cc4",
+          "exit_code": 3
+        }
+      },
+      "device_name": "NVIDIA GeForce RTX 3070 Ti",
+      "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
+      "device_index": 6
+    },
+    {
+      "id": "lavapipe/fake_mass_2k",
+      "status": "pass",
+      "suite": "bench_matrix",
+      "kind": "perf_baseline",
+      "message": "blocks=2061 conf=0.75 device=llvmpipe (LLVM 20.1.2, 128 bits)",
+      "actual": "vnv/bench/tests/out/matrix/lavapipe/fake_mass_2k/actual.json",
+      "matrix_tag": "lavapipe",
+      "case": "fake_mass_2k",
+      "metrics": {
+        "case": "fake_mass_2k",
+        "samples": 40,
+        "total_blocks": 2061,
+        "bootstrap_heights": 128,
+        "lane_count": 16,
+        "device_index": 0,
+        "device_name": "llvmpipe (LLVM 20.1.2, 128 bits)",
+        "device_type": "cpu",
+        "device_uuid": "6d65736132352e322e382d3075627500",
+        "headless": false,
+        "confidence": 0.75,
+        "scores": {
+          "frame": 1.0,
+          "cpu": 1.0,
+          "gpu": 0.0
+        },
+        "budgets_ms": {
+          "frame": 50.0,
+          "cpu": 48.0,
+          "gpu": 4.0,
+          "soft_tol": 0.4
+        },
+        "frame_ms": {
+          "median": 42.1961,
+          "p95": 49.8574
+        },
+        "cpu_ms": {
+          "median": 42.0085,
+          "p95": 49.6746
+        },
+        "gpu_ms": {
+          "median": 31.571,
+          "p95": 31.8703
+        },
+        "scopes": {
+          "CubesTaskMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0482,
+            "gpu_p95": 0.0627
+          },
+          "DebugMesh": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 0.0763,
+            "gpu_p95": 0.1253
+          },
+          "ImGui": {
+            "cpu_median": 0.0,
+            "cpu_p95": 0.0,
+            "gpu_median": 2.2725,
+            "gpu_p95": 2.8251
+          },
+          "MainColorDepth": {
+            "cpu_median": 0.0169,
+            "cpu_p95": 0.0177,
+            "gpu_median": 31.571,
+            "gpu_p95": 31.8703
+          },
+          "MeshArenaUpload": {
+            "cpu_median": 0.0009,
+            "cpu_p95": 0.0011,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "Picker": {
+            "cpu_median": 0.0027,
+            "cpu_p95": 0.0029,
+            "gpu_median": 0.8159,
+            "gpu_p95": 0.8773
+          },
+          "Prepare": {
+            "cpu_median": 9.2983,
+            "cpu_p95": 16.9891,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "PublishUpload": {
+            "cpu_median": 0.0035,
+            "cpu_p95": 0.0038,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "RecordMain": {
+            "cpu_median": 0.0252,
+            "cpu_p95": 0.032,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          },
+          "SubmitPresent": {
+            "cpu_median": 32.6261,
+            "cpu_p95": 32.9262,
+            "gpu_median": 0.0,
+            "gpu_p95": 0.0
+          }
+        },
+        "matrix": {
+          "matrix_tag": "lavapipe",
+          "nvidia_index": -1,
+          "nvidia_name": "llvmpipe",
+          "nvidia_uuid": "lavapipe",
+          "exit_code": 0
+        }
+      },
+      "device_name": "llvmpipe (LLVM 20.1.2, 128 bits)",
+      "device_uuid": "6d65736132352e322e382d3075627500",
+      "device_index": 0
+    },
+    {
       "id": "lavapipe/fake_steady_frame",
       "status": "fail",
       "suite": "bench_matrix",
       "kind": "perf_baseline",
-      "message": "blocks=131 conf=0.0 device=llvmpipe (LLVM 20.1.2, 128 bits) (confidence soft-fail)",
-      "expected": null,
+      "message": "blocks=133 conf=0.0 device=llvmpipe (LLVM 20.1.2, 128 bits) (confidence soft-fail)",
       "actual": "vnv/bench/tests/out/matrix/lavapipe/fake_steady_frame/actual.json",
       "matrix_tag": "lavapipe",
       "case": "fake_steady_frame",
       "metrics": {
         "case": "fake_steady_frame",
-        "samples": 15,
-        "total_blocks": 131,
+        "samples": 40,
+        "total_blocks": 133,
         "bootstrap_heights": 0,
         "lane_count": 16,
         "device_index": 0,
         "device_name": "llvmpipe (LLVM 20.1.2, 128 bits)",
         "device_type": "cpu",
         "device_uuid": "6d65736132352e322e382d3075627500",
-        "headless": true,
+        "headless": false,
         "confidence": 0.0,
         "scores": {
           "frame": 0.0,
@@ -350,47 +1938,47 @@
           "soft_tol": 0.4
         },
         "frame_ms": {
-          "median": 19.7154,
-          "p95": 19.9337
+          "median": 20.6457,
+          "p95": 20.9537
         },
         "cpu_ms": {
-          "median": 19.6034,
-          "p95": 19.8183
+          "median": 20.5257,
+          "p95": 20.8398
         },
         "gpu_ms": {
-          "median": 18.5134,
-          "p95": 18.5713
+          "median": 18.5855,
+          "p95": 18.855
         },
         "scopes": {
           "CubesTaskMesh": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 0.0446,
-            "gpu_p95": 0.05
+            "gpu_median": 0.0435,
+            "gpu_p95": 0.0494
           },
           "DebugMesh": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 0.04,
-            "gpu_p95": 0.0451
+            "gpu_median": 0.0548,
+            "gpu_p95": 0.0593
           },
           "EdgeOverlay": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 18.9064,
-            "gpu_p95": 18.9064
+            "gpu_median": 19.3957,
+            "gpu_p95": 19.3957
           },
           "ImGui": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 2.5565,
-            "gpu_p95": 2.7118
+            "gpu_median": 2.6715,
+            "gpu_p95": 2.849
           },
           "MainColorDepth": {
-            "cpu_median": 0.0147,
-            "cpu_p95": 0.0152,
-            "gpu_median": 18.5134,
-            "gpu_p95": 18.5713
+            "cpu_median": 0.0158,
+            "cpu_p95": 0.0735,
+            "gpu_median": 18.5855,
+            "gpu_p95": 18.855
           },
           "MeshArenaUpload": {
             "cpu_median": 0.0003,
@@ -398,39 +1986,45 @@
             "gpu_median": 0.0,
             "gpu_p95": 0.0
           },
+          "Picker": {
+            "cpu_median": 0.0029,
+            "cpu_p95": 0.0031,
+            "gpu_median": 0.805,
+            "gpu_p95": 0.8663
+          },
           "Prepare": {
-            "cpu_median": 0.872,
-            "cpu_p95": 1.0256,
+            "cpu_median": 0.8972,
+            "cpu_p95": 0.9485,
             "gpu_median": 0.0,
             "gpu_p95": 0.0
           },
           "PublishUpload": {
             "cpu_median": 0.0025,
-            "cpu_p95": 0.0029,
+            "cpu_p95": 0.0028,
             "gpu_median": 0.0,
             "gpu_p95": 0.0
           },
           "RecordMain": {
-            "cpu_median": 0.0187,
-            "cpu_p95": 0.0191,
+            "cpu_median": 0.0235,
+            "cpu_p95": 0.0822,
             "gpu_median": 0.0,
             "gpu_p95": 0.0
           },
           "SelectionDepth": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 10.1378,
-            "gpu_p95": 10.1378
+            "gpu_median": 10.2846,
+            "gpu_p95": 10.2846
           },
           "SobelAsyncCMP": {
             "cpu_median": 0.0,
             "cpu_p95": 0.0,
-            "gpu_median": 32.8764,
-            "gpu_p95": 32.8764
+            "gpu_median": 34.2575,
+            "gpu_p95": 34.2575
           },
           "SubmitPresent": {
-            "cpu_median": 18.685,
-            "cpu_p95": 18.7737,
+            "cpu_median": 19.5783,
+            "cpu_p95": 19.8606,
             "gpu_median": 0.0,
             "gpu_p95": 0.0
           }
@@ -449,8 +2043,9 @@
     }
   ],
   "matrix_summary": {
-    "jobs": 8,
+    "jobs": 16,
     "failed_cases": 1,
-    "script_failures": 1
+    "warn_cases": 7,
+    "script_failures": 0
   }
 }

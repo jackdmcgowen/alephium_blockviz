@@ -1,30 +1,123 @@
 {
   "case": "fake_steady_frame",
-  "status_note": "skipped_nvidia_headless",
+  "samples": 40,
+  "total_blocks": 133,
+  "bootstrap_heights": 0,
+  "lane_count": 16,
+  "device_index": 6,
+  "device_name": "NVIDIA GeForce RTX 3070 Ti",
+  "device_type": "discrete",
+  "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
+  "headless": false,
+  "confidence": 0.25,
+  "scores": {
+    "frame": 0.0,
+    "cpu": 0.0,
+    "gpu": 1.0
+  },
+  "budgets_ms": {
+    "frame": 8.0,
+    "cpu": 4.0,
+    "gpu": 5.0,
+    "soft_tol": 0.4
+  },
+  "frame_ms": {
+    "median": 34.5039,
+    "p95": 35.365
+  },
+  "cpu_ms": {
+    "median": 34.4613,
+    "p95": 37.0539
+  },
+  "gpu_ms": {
+    "median": 0.4484,
+    "p95": 0.4504
+  },
+  "scopes": {
+    "CubesTaskMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0082,
+      "gpu_p95": 0.0082
+    },
+    "DebugMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.002,
+      "gpu_p95": 0.002
+    },
+    "EdgeOverlay": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0072,
+      "gpu_p95": 0.0072
+    },
+    "ImGui": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0077,
+      "gpu_p95": 0.0328
+    },
+    "MainColorDepth": {
+      "cpu_median": 0.0557,
+      "cpu_p95": 0.9847,
+      "gpu_median": 0.4484,
+      "gpu_p95": 0.4504
+    },
+    "MeshArenaUpload": {
+      "cpu_median": 0.0003,
+      "cpu_p95": 0.0005,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "Picker": {
+      "cpu_median": 0.0112,
+      "cpu_p95": 0.0188,
+      "gpu_median": 0.0031,
+      "gpu_p95": 0.0036
+    },
+    "Prepare": {
+      "cpu_median": 0.8765,
+      "cpu_p95": 1.3443,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "PublishUpload": {
+      "cpu_median": 0.0025,
+      "cpu_p95": 0.0028,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "RecordMain": {
+      "cpu_median": 0.0819,
+      "cpu_p95": 1.024,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "SelectionDepth": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0149,
+      "gpu_p95": 0.0149
+    },
+    "SobelAsyncCMP": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0236,
+      "gpu_p95": 0.0236
+    },
+    "SubmitPresent": {
+      "cpu_median": 33.42,
+      "cpu_p95": 34.1528,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    }
+  },
   "matrix": {
     "matrix_tag": "gpu6_NVIDIA_GeForce_RTX_3070_Ti",
     "nvidia_index": 6,
     "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
     "nvidia_uuid": "GPU-b791d7c3-3275-4b96-74d4-1cc606ee0cc4",
-    "exit_code": 0,
-    "skipped": true,
-    "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-  },
-  "confidence": 1.0,
-  "device_name": "NVIDIA GeForce RTX 3070 Ti",
-  "device_index": 6,
-  "device_uuid": "b791d7c332754b9674d41cc606ee0cc4",
-  "frame_ms": {
-    "median": null,
-    "p95": null
-  },
-  "cpu_ms": {
-    "median": null,
-    "p95": null
-  },
-  "gpu_ms": {
-    "median": null,
-    "p95": null
-  },
-  "total_blocks": null
+    "exit_code": 3
+  }
 }

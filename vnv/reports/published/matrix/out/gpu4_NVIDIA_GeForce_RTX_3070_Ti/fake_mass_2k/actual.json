@@ -1,0 +1,105 @@
+{
+  "case": "fake_mass_2k",
+  "samples": 40,
+  "total_blocks": 2061,
+  "bootstrap_heights": 128,
+  "lane_count": 16,
+  "device_index": 4,
+  "device_name": "NVIDIA GeForce RTX 3070 Ti",
+  "device_type": "discrete",
+  "device_uuid": "132b1ee0dd123098dd6f97cdf7531b5e",
+  "headless": false,
+  "confidence": 1.0,
+  "scores": {
+    "frame": 1.0,
+    "cpu": 1.0,
+    "gpu": 1.0
+  },
+  "budgets_ms": {
+    "frame": 50.0,
+    "cpu": 48.0,
+    "gpu": 4.0,
+    "soft_tol": 0.4
+  },
+  "frame_ms": {
+    "median": 42.9294,
+    "p95": 50.7589
+  },
+  "cpu_ms": {
+    "median": 42.8254,
+    "p95": 50.6319
+  },
+  "gpu_ms": {
+    "median": 0.4042,
+    "p95": 0.4051
+  },
+  "scopes": {
+    "CubesTaskMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0072,
+      "gpu_p95": 0.0082
+    },
+    "DebugMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0051,
+      "gpu_p95": 0.0051
+    },
+    "ImGui": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0061,
+      "gpu_p95": 0.0102
+    },
+    "MainColorDepth": {
+      "cpu_median": 0.0564,
+      "cpu_p95": 0.058,
+      "gpu_median": 0.4042,
+      "gpu_p95": 0.4051
+    },
+    "MeshArenaUpload": {
+      "cpu_median": 0.001,
+      "cpu_p95": 0.0013,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "Picker": {
+      "cpu_median": 0.0107,
+      "cpu_p95": 0.0112,
+      "gpu_median": 0.0031,
+      "gpu_p95": 0.0036
+    },
+    "Prepare": {
+      "cpu_median": 9.2566,
+      "cpu_p95": 16.9349,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "PublishUpload": {
+      "cpu_median": 0.0036,
+      "cpu_p95": 0.0041,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "RecordMain": {
+      "cpu_median": 0.0825,
+      "cpu_p95": 0.0853,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "SubmitPresent": {
+      "cpu_median": 33.3911,
+      "cpu_p95": 33.7428,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    }
+  },
+  "matrix": {
+    "matrix_tag": "gpu4_NVIDIA_GeForce_RTX_3070_Ti",
+    "nvidia_index": 4,
+    "nvidia_name": "NVIDIA GeForce RTX 3070 Ti",
+    "nvidia_uuid": "GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e",
+    "exit_code": 0
+  }
+}

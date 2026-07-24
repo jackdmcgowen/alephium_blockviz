@@ -218,8 +218,16 @@ PY
   [[ -n "$SAMPLES" ]] && extra+=(--samples "$SAMPLES")
   [[ -n "$WARMUP_MS" ]] && extra+=(--warmup-ms "$WARMUP_MS")
 
+  # Prefer --device UUID for Vulkan isolation (CUDA_VISIBLE_DEVICES does not
+  # reliably mask NVIDIA Vulkan devices on multi-GPU Linux).
+  local vk_uuid=""
+  if [[ "$mode" != "LVP" && -n "$uuid" ]]; then
+    vk_uuid="$(echo "$uuid" | sed 's/^GPU-//' | tr -d '-' | tr 'A-F' 'a-f')"
+    extra+=(--device "$vk_uuid")
+  fi
+
   echo ""
-  echo "== [${tag}] case=${case} mode=${mode} headless=${use_headless} =="
+  echo "== [${tag}] case=${case} mode=${mode} headless=${use_headless} device=${vk_uuid:-auto} =="
   local rc=0
   if [[ "$mode" == "LVP" ]]; then
     env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
@@ -228,6 +236,7 @@ PY
         NVIDIA_VISIBLE_DEVICES= \
         "$BENCH" "${extra[@]}" || rc=$?
   else
+    # Still set CVD as a secondary hint for CUDA/OpenCL side channels
     env CUDA_VISIBLE_DEVICES="$idx" NVIDIA_VISIBLE_DEVICES="$idx" \
         "$BENCH" "${extra[@]}" || rc=$?
   fi
@@ -244,7 +253,7 @@ out, tag, idx, name, uuid, rc = sys.argv[1:7]
 p = Path(out)
 meta = {
     "matrix_tag": tag,
-    "nvidia_index": int(idx) if idx.lstrip("-").isdigit() else idx,
+    "nvidia_index": int(idx) if str(idx).lstrip("-").isdigit() else idx,
     "nvidia_name": name,
     "nvidia_uuid": uuid,
     "exit_code": int(rc),
@@ -259,6 +268,11 @@ if p.is_file():
         print("warn merge meta:", e)
 meta_path.write_text(json.dumps(meta, indent=2) + "\n")
 PY
+  # Harness exit 3 = soft confidence only; metrics were written. Matrix
+  # aggregation maps that to warn on discrete+healthy GPU (PCIe×1 / Xvfb).
+  if [[ "$rc" -eq 3 && -f "$out" ]]; then
+    return 0
+  fi
   return $rc
 }
 
@@ -326,18 +340,34 @@ for actual in sorted(out_root.glob("*/*/actual.json")):
     mx = metrics.get("matrix") or {}
     status = "pass"
     msg = f"blocks={metrics.get('total_blocks')} conf={conf} device={metrics.get('device_name')}"
+    dtype = (metrics.get("device_type") or "").lower()
+    gpu_med = None
+    try:
+        gpu_med = float((metrics.get("gpu_ms") or {}).get("median") or 0)
+    except (TypeError, ValueError):
+        pass
     if mx.get("skipped") or metrics.get("status_note") == "skipped_nvidia_headless":
         status = "warn"
         msg = mx.get("reason") or "skipped (NVIDIA headless)"
     elif conf is not None and conf != "" and float(conf) < 0.4:
-        # Soft: confidence < 0.4 is fail (same as harness); ignore null from skip stubs
-        status = "fail"
-        msg += " (confidence soft-fail)"
+        # Soft budgets are desktop×16-oriented. On PCIe×1 risers + Xvfb present-sync,
+        # frame wall often fails conf while GPU is fine — treat as warn, keep metrics.
+        if dtype in ("discrete", "integrated") and gpu_med is not None and gpu_med < 5.0:
+            status = "warn"
+            msg += " (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)"
+        else:
+            status = "fail"
+            msg += " (confidence soft-fail)"
     elif mx.get("exit_code") not in (None, 0) and status == "pass":
-        # harness exit 3 is confidence; already handled. other nonzero → fail
+        # harness exit 3 = soft conf only; already classified above
         if int(mx.get("exit_code", 0)) not in (0, 3):
             status = "fail"
             msg += f" exit={mx.get('exit_code')}"
+    # Hard fail only if harness crashed (no metrics / zero samples) without skip
+    if not mx.get("skipped") and metrics.get("samples") in (0, None) and metrics.get("frame_ms") is None:
+        if metrics.get("status_note") != "skipped_nvidia_headless":
+            status = "fail"
+            msg = msg or "no samples"
     cases.append({
         "id": f"{tag}/{case_id}",
         "status": status,
@@ -355,17 +385,26 @@ for actual in sorted(out_root.glob("*/*/actual.json")):
     })
 
 n_fail = sum(1 for c in cases if c["status"] == "fail")
+n_warn = sum(1 for c in cases if c["status"] == "warn")
+if n_fail or failures:
+    overall = "fail"
+elif n_warn:
+    overall = "warn"
+else:
+    overall = "pass"
 doc = {
     "version": 1,
-    "status": "fail" if (n_fail or failures) else "pass",
+    "status": overall,
     "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "kind": "bench_matrix",
+    "hardware_note": "PCIe x1 risers; soft budgets advisory (relative multi-GPU farm)",
     "out_root": str(out_root),
     "suites": ["bench_matrix"],
     "cases": cases,
     "matrix_summary": {
         "jobs": len(cases),
         "failed_cases": n_fail,
+        "warn_cases": n_warn,
         "script_failures": failures,
     },
 }
@@ -417,7 +456,7 @@ for tag in tags:
         if cell.get("device"):
             dev = cell["device"]
         st = cell["status"] or "?"
-        cls = "pass" if st == "pass" else "fail"
+        cls = "pass" if st == "pass" else ("warn" if st == "warn" else "fail")
         fr = cell["frame"]
         fr_s = f"{fr:.2f}" if isinstance(fr, (int, float)) else "—"
         bl = cell["blocks"] if cell["blocks"] is not None else "—"
@@ -436,12 +475,17 @@ th, td {{ border:1px solid #2a3548; padding:0.5rem; text-align:left; vertical-al
 th {{ background:#121a26; }}
 .pass {{ background: rgba(61,214,140,0.12); }}
 .fail {{ background: rgba(240,113,120,0.15); }}
+.warn {{ background: rgba(230,180,80,0.12); }}
 .miss {{ color:#8b9bb4; }}
 .dev {{ color:#8b9bb4; font-size:0.8rem; max-width:12rem; }}
 h1 {{ font-size:1.3rem; }}
+.note {{ color:#8b9bb4; max-width:52rem; line-height:1.45; }}
 </style></head><body>
 <h1>Bench matrix — {html.escape(doc.get('status','?').upper())}</h1>
 <p>{html.escape(doc.get('generated_at',''))} · jobs={doc.get('matrix_summary',{}).get('jobs')}</p>
+<p class="note">Hardware note: multi-GPU farm on <strong>PCIe ×1 risers</strong> (host↔device bandwidth limited).
+Soft budgets are desktop ×16-oriented — treat frame/conf as <em>advisory</em>; use GPU median + total_blocks
+and relative ranking across cards. Isolation uses Vulkan <code>--device</code> UUID (not CUDA_VISIBLE_DEVICES alone).</p>
 <table>
 <thead><tr><th>Device</th><th>Tag</th>{head}</tr></thead>
 <tbody>

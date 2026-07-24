@@ -117,7 +117,7 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
 <header>
   <h1>VnV Report <span class="badge fail">FAIL</span></h1>
   <p class="sub">
-    Generated 2026-07-24T03:28:07Z
+    Generated 2026-07-24T03:40:47Z
     
     
     
@@ -127,382 +127,2017 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
 </header>
 
 <div class="summary">
-  <div class="card pass"><div class="n">0</div><div class="l">Passed</div></div>
+  <div class="card pass"><div class="n">8</div><div class="l">Passed</div></div>
   <div class="card fail"><div class="n">1</div><div class="l">Failed</div></div>
   <div class="card warn"><div class="n">7</div><div class="l">Warn / skip</div></div>
-  <div class="card"><div class="n">8</div><div class="l">Total cases</div></div>
+  <div class="card"><div class="n">16</div><div class="l">Total cases</div></div>
   
 </div>
 
 <h2>Case index</h2>
 <ul class="toc">
+<li><a href='#case-gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'><span class='badge pass'>pass</span> gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</a></li>
 <li><a href='#case-gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'><span class='badge warn'>warn</span> gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</a></li>
+<li><a href='#case-gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k'><span class='badge pass'>pass</span> gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k</a></li>
 <li><a href='#case-gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame'><span class='badge warn'>warn</span> gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame</a></li>
+<li><a href='#case-gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k'><span class='badge pass'>pass</span> gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k</a></li>
 <li><a href='#case-gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame'><span class='badge warn'>warn</span> gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame</a></li>
+<li><a href='#case-gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'><span class='badge pass'>pass</span> gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</a></li>
 <li><a href='#case-gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'><span class='badge warn'>warn</span> gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</a></li>
+<li><a href='#case-gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'><span class='badge pass'>pass</span> gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</a></li>
 <li><a href='#case-gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'><span class='badge warn'>warn</span> gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</a></li>
+<li><a href='#case-gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'><span class='badge pass'>pass</span> gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</a></li>
 <li><a href='#case-gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'><span class='badge warn'>warn</span> gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</a></li>
+<li><a href='#case-gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'><span class='badge pass'>pass</span> gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</a></li>
 <li><a href='#case-gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'><span class='badge warn'>warn</span> gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</a></li>
+<li><a href='#case-lavapipe/fake_mass_2k'><span class='badge pass'>pass</span> lavapipe/fake_mass_2k</a></li>
 <li><a href='#case-lavapipe/fake_steady_frame'><span class='badge fail'>fail</span> lavapipe/fake_steady_frame</a></li>
 </ul>
 
 <h2>Results</h2>
-<section class='case warn' id='case-gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<section class='case pass' id='case-gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (746 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json</code></td><td class='present'>present (2178 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.973</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.3483</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.9018</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4081</td><td class='num'>—</td></tr>
 <tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
-  &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 0,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;85315f57303502ee90b8f3e478e5546e&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.973,
+    &quot;p95&quot;: 50.3483
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.9018,
+    &quot;p95&quot;: 50.2777
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4081,
+    &quot;p95&quot;: 0.4098
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0092
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0572,
+      &quot;cpu_p95&quot;: 0.0612,
+      &quot;gpu_median&quot;: 0.4081,
+      &quot;gpu_p95&quot;: 0.4098
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0013,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.011,
+      &quot;cpu_p95&quot;: 0.0115,
+      &quot;gpu_median&quot;: 0.0034,
+      &quot;gpu_p95&quot;: 0.0036
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2953,
+      &quot;cpu_p95&quot;: 16.7696,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0035,
+      &quot;cpu_p95&quot;: 0.0041,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0841,
+      &quot;cpu_p95&quot;: 0.0903,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.4192,
+      &quot;cpu_p95&quot;: 34.2023,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu0_NVIDIA_GeForce_RTX_3070_Ti&quot;,
     &quot;nvidia_index&quot;: 0,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-85315f57-3035-02ee-90b8-f3e478e5546e&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
-  &quot;device_index&quot;: 0,
-  &quot;device_uuid&quot;: &quot;85315f57303502ee90b8f3e478e5546e&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame/actual.json</code></td><td class='present'>present (737 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu0_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (2561 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.591</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.3393</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.5358</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4539</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 0,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;85315f57303502ee90b8f3e478e5546e&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.591,
+    &quot;p95&quot;: 35.3393
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.5358,
+    &quot;p95&quot;: 37.3603
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4539,
+    &quot;p95&quot;: 0.4559
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0015,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0174,
+      &quot;gpu_p95&quot;: 0.0248
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0528,
+      &quot;cpu_p95&quot;: 1.0502,
+      &quot;gpu_median&quot;: 0.4539,
+      &quot;gpu_p95&quot;: 0.4559
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0004,
+      &quot;cpu_p95&quot;: 0.0006,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0106,
+      &quot;cpu_p95&quot;: 0.0189,
+      &quot;gpu_median&quot;: 0.003,
+      &quot;gpu_p95&quot;: 0.0037
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.891,
+      &quot;cpu_p95&quot;: 0.9974,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0026,
+      &quot;cpu_p95&quot;: 0.0028,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.078,
+      &quot;cpu_p95&quot;: 1.0914,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0117,
+      &quot;gpu_p95&quot;: 0.0117
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0225,
+      &quot;gpu_p95&quot;: 0.0225
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.5098,
+      &quot;cpu_p95&quot;: 34.2727,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu0_NVIDIA_GeForce_RTX_3070_Ti&quot;,
+    &quot;nvidia_index&quot;: 0,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-85315f57-3035-02ee-90b8-f3e478e5546e&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3080</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_mass_2k/actual.json</code></td><td class='present'>present (2171 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.8876</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.2631</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.8142</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4033</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 1,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3080&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;a014772cd1769e44ca9358d80b375cf9&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.8876,
+    &quot;p95&quot;: 50.2631
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.8142,
+    &quot;p95&quot;: 50.1727
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4033,
+    &quot;p95&quot;: 0.4062
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0143
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0565,
+      &quot;cpu_p95&quot;: 0.0651,
+      &quot;gpu_median&quot;: 0.4033,
+      &quot;gpu_p95&quot;: 0.4062
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0013,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0107,
+      &quot;cpu_p95&quot;: 0.0118,
+      &quot;gpu_median&quot;: 0.0033,
+      &quot;gpu_p95&quot;: 0.0037
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2397,
+      &quot;cpu_p95&quot;: 16.7205,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0034,
+      &quot;cpu_p95&quot;: 0.0039,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0832,
+      &quot;cpu_p95&quot;: 0.0921,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3232,
+      &quot;cpu_p95&quot;: 34.2261,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu1_NVIDIA_GeForce_RTX_3080&quot;,
     &quot;nvidia_index&quot;: 1,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3080&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-a014772c-d176-9e44-ca93-58d80b375cf9&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3080&quot;,
-  &quot;device_index&quot;: 1,
-  &quot;device_uuid&quot;: &quot;a014772cd1769e44ca9358d80b375cf9&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3080 (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame/actual.json</code></td><td class='present'>present (737 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu1_NVIDIA_GeForce_RTX_3080/fake_steady_frame/actual.json</code></td><td class='present'>present (2554 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.5478</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.4851</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.5067</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4508</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 1,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3080&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;a014772cd1769e44ca9358d80b375cf9&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.5478,
+    &quot;p95&quot;: 35.4851
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.5067,
+    &quot;p95&quot;: 37.3507
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4508,
+    &quot;p95&quot;: 0.4526
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.001,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0205,
+      &quot;gpu_p95&quot;: 0.0329
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0541,
+      &quot;cpu_p95&quot;: 1.0162,
+      &quot;gpu_median&quot;: 0.4508,
+      &quot;gpu_p95&quot;: 0.4526
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0005,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0113,
+      &quot;cpu_p95&quot;: 0.0191,
+      &quot;gpu_median&quot;: 0.003,
+      &quot;gpu_p95&quot;: 0.0034
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8826,
+      &quot;cpu_p95&quot;: 1.3422,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0024,
+      &quot;cpu_p95&quot;: 0.0027,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0805,
+      &quot;cpu_p95&quot;: 1.0583,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0121,
+      &quot;gpu_p95&quot;: 0.0121
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0184,
+      &quot;gpu_p95&quot;: 0.0184
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.4521,
+      &quot;cpu_p95&quot;: 34.3611,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu1_NVIDIA_GeForce_RTX_3080&quot;,
+    &quot;nvidia_index&quot;: 1,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3080&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-a014772c-d176-9e44-ca93-58d80b375cf9&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3090</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_mass_2k/actual.json</code></td><td class='present'>present (2167 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.8037</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.344</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.7296</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4012</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 2,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3090&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;7fb5d8ed75295bce4fc6f518af1cc447&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.8037,
+    &quot;p95&quot;: 50.344
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.7296,
+    &quot;p95&quot;: 50.2648
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4012,
+    &quot;p95&quot;: 0.403
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0041,
+      &quot;gpu_p95&quot;: 0.0041
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0128,
+      &quot;gpu_p95&quot;: 0.0563
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0584,
+      &quot;cpu_p95&quot;: 0.0614,
+      &quot;gpu_median&quot;: 0.4012,
+      &quot;gpu_p95&quot;: 0.403
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0013,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0114,
+      &quot;cpu_p95&quot;: 0.0121,
+      &quot;gpu_median&quot;: 0.0033,
+      &quot;gpu_p95&quot;: 0.0037
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2093,
+      &quot;cpu_p95&quot;: 16.7566,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0038,
+      &quot;cpu_p95&quot;: 0.0046,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0872,
+      &quot;cpu_p95&quot;: 0.096,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3121,
+      &quot;cpu_p95&quot;: 33.6047,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu2_NVIDIA_GeForce_RTX_3090&quot;,
     &quot;nvidia_index&quot;: 2,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3090&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-7fb5d8ed-7529-5bce-4fc6-f518af1cc447&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3090&quot;,
-  &quot;device_index&quot;: 2,
-  &quot;device_uuid&quot;: &quot;7fb5d8ed75295bce4fc6f518af1cc447&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3090 (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (746 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu2_NVIDIA_GeForce_RTX_3090/fake_steady_frame/actual.json</code></td><td class='present'>present (2551 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.4792</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.4345</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.4426</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4496</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 2,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3090&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;7fb5d8ed75295bce4fc6f518af1cc447&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.4792,
+    &quot;p95&quot;: 35.4345
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.4426,
+    &quot;p95&quot;: 37.3452
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4496,
+    &quot;p95&quot;: 0.451
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.002,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0061
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0102,
+      &quot;gpu_p95&quot;: 0.0513
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0521,
+      &quot;cpu_p95&quot;: 1.0172,
+      &quot;gpu_median&quot;: 0.4496,
+      &quot;gpu_p95&quot;: 0.451
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0005,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0107,
+      &quot;cpu_p95&quot;: 0.0169,
+      &quot;gpu_median&quot;: 0.0031,
+      &quot;gpu_p95&quot;: 0.0035
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8759,
+      &quot;cpu_p95&quot;: 1.3444,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0025,
+      &quot;cpu_p95&quot;: 0.0028,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0786,
+      &quot;cpu_p95&quot;: 1.0688,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.013,
+      &quot;gpu_p95&quot;: 0.013
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0174,
+      &quot;gpu_p95&quot;: 0.0174
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3875,
+      &quot;cpu_p95&quot;: 34.3444,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu2_NVIDIA_GeForce_RTX_3090&quot;,
+    &quot;nvidia_index&quot;: 2,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3090&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-7fb5d8ed-7529-5bce-4fc6-f518af1cc447&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json</code></td><td class='present'>present (2177 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.9571</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.4417</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.8714</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4008</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 3,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;5ea4ce5001d4e21dc2af27784b1151d2&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.9571,
+    &quot;p95&quot;: 50.4417
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.8714,
+    &quot;p95&quot;: 50.366
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4008,
+    &quot;p95&quot;: 0.4022
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0092
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0077,
+      &quot;gpu_p95&quot;: 0.0092
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0571,
+      &quot;cpu_p95&quot;: 0.0585,
+      &quot;gpu_median&quot;: 0.4008,
+      &quot;gpu_p95&quot;: 0.4022
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.001,
+      &quot;cpu_p95&quot;: 0.0012,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0108,
+      &quot;cpu_p95&quot;: 0.0114,
+      &quot;gpu_median&quot;: 0.0032,
+      &quot;gpu_p95&quot;: 0.0035
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.3072,
+      &quot;cpu_p95&quot;: 16.772,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0037,
+      &quot;cpu_p95&quot;: 0.0041,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0837,
+      &quot;cpu_p95&quot;: 0.0854,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.4115,
+      &quot;cpu_p95&quot;: 33.6712,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu3_NVIDIA_GeForce_RTX_3070_Ti&quot;,
     &quot;nvidia_index&quot;: 3,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-5ea4ce50-01d4-e21d-c2af-27784b1151d2&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
-  &quot;device_index&quot;: 3,
-  &quot;device_uuid&quot;: &quot;5ea4ce5001d4e21dc2af27784b1151d2&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (746 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu3_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (2562 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.4692</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.4613</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.4304</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4476</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 3,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;5ea4ce5001d4e21dc2af27784b1151d2&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.4692,
+    &quot;p95&quot;: 35.4613
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.4304,
+    &quot;p95&quot;: 37.2769
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4476,
+    &quot;p95&quot;: 0.4521
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.002,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0092
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0545,
+      &quot;cpu_p95&quot;: 0.9955,
+      &quot;gpu_median&quot;: 0.4476,
+      &quot;gpu_p95&quot;: 0.4521
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0004,
+      &quot;cpu_p95&quot;: 0.0006,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0114,
+      &quot;cpu_p95&quot;: 0.019,
+      &quot;gpu_median&quot;: 0.0029,
+      &quot;gpu_p95&quot;: 0.0038
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8826,
+      &quot;cpu_p95&quot;: 1.3374,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0025,
+      &quot;cpu_p95&quot;: 0.0028,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0815,
+      &quot;cpu_p95&quot;: 1.0359,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0141,
+      &quot;gpu_p95&quot;: 0.0141
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0225,
+      &quot;gpu_p95&quot;: 0.0225
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.378,
+      &quot;cpu_p95&quot;: 34.3389,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu3_NVIDIA_GeForce_RTX_3070_Ti&quot;,
+    &quot;nvidia_index&quot;: 3,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-5ea4ce50-01d4-e21d-c2af-27784b1151d2&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json</code></td><td class='present'>present (2178 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.9294</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.7589</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.8254</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4042</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 4,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;132b1ee0dd123098dd6f97cdf7531b5e&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.9294,
+    &quot;p95&quot;: 50.7589
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.8254,
+    &quot;p95&quot;: 50.6319
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4042,
+    &quot;p95&quot;: 0.4051
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0102
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0564,
+      &quot;cpu_p95&quot;: 0.058,
+      &quot;gpu_median&quot;: 0.4042,
+      &quot;gpu_p95&quot;: 0.4051
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.001,
+      &quot;cpu_p95&quot;: 0.0013,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0107,
+      &quot;cpu_p95&quot;: 0.0112,
+      &quot;gpu_median&quot;: 0.0031,
+      &quot;gpu_p95&quot;: 0.0036
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2566,
+      &quot;cpu_p95&quot;: 16.9349,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0036,
+      &quot;cpu_p95&quot;: 0.0041,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0825,
+      &quot;cpu_p95&quot;: 0.0853,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3911,
+      &quot;cpu_p95&quot;: 33.7428,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu4_NVIDIA_GeForce_RTX_3070_Ti&quot;,
     &quot;nvidia_index&quot;: 4,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
-  &quot;device_index&quot;: 4,
-  &quot;device_uuid&quot;: &quot;132b1ee0dd123098dd6f97cdf7531b5e&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (746 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu4_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (2561 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.5138</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.4383</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.498</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4496</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 4,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;132b1ee0dd123098dd6f97cdf7531b5e&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.5138,
+    &quot;p95&quot;: 35.4383
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.498,
+    &quot;p95&quot;: 37.4666
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4496,
+    &quot;p95&quot;: 0.4512
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.001,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0061
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0056,
+      &quot;gpu_p95&quot;: 0.0164
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0535,
+      &quot;cpu_p95&quot;: 1.0434,
+      &quot;gpu_median&quot;: 0.4496,
+      &quot;gpu_p95&quot;: 0.4512
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0005,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0109,
+      &quot;cpu_p95&quot;: 0.02,
+      &quot;gpu_median&quot;: 0.0031,
+      &quot;gpu_p95&quot;: 0.0035
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8831,
+      &quot;cpu_p95&quot;: 1.3665,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0026,
+      &quot;cpu_p95&quot;: 0.0028,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0795,
+      &quot;cpu_p95&quot;: 1.0948,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0136,
+      &quot;gpu_p95&quot;: 0.0136
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0215,
+      &quot;gpu_p95&quot;: 0.0215
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.4219,
+      &quot;cpu_p95&quot;: 34.3941,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu4_NVIDIA_GeForce_RTX_3070_Ti&quot;,
+    &quot;nvidia_index&quot;: 4,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-132b1ee0-dd12-3098-dd6f-97cdf7531b5e&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json</code></td><td class='present'>present (2179 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.8957</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.2371</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.8008</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4046</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 5,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;998d3512c0380dd2fb44906110eb10d1&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.8957,
+    &quot;p95&quot;: 50.2371
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.8008,
+    &quot;p95&quot;: 50.1688
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4046,
+    &quot;p95&quot;: 0.4054
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0164,
+      &quot;gpu_p95&quot;: 0.0184
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0581,
+      &quot;cpu_p95&quot;: 0.0637,
+      &quot;gpu_median&quot;: 0.4046,
+      &quot;gpu_p95&quot;: 0.4054
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.001,
+      &quot;cpu_p95&quot;: 0.0012,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0112,
+      &quot;cpu_p95&quot;: 0.0122,
+      &quot;gpu_median&quot;: 0.0032,
+      &quot;gpu_p95&quot;: 0.0036
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2532,
+      &quot;cpu_p95&quot;: 16.7858,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0036,
+      &quot;cpu_p95&quot;: 0.0042,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0845,
+      &quot;cpu_p95&quot;: 0.0922,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3277,
+      &quot;cpu_p95&quot;: 33.4909,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu5_NVIDIA_GeForce_RTX_3070_Ti&quot;,
     &quot;nvidia_index&quot;: 5,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-998d3512-c038-0dd2-fb44-906110eb10d1&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
-  &quot;device_index&quot;: 5,
-  &quot;device_uuid&quot;: &quot;998d3512c0380dd2fb44906110eb10d1&quot;,
-  &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
-  },
-  &quot;total_blocks&quot;: null
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
-<section class='case warn' id='case-gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
-<h3><span class='badge warn'>WARN</span> gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<section class='case warn' id='case-gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (746 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu5_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (2561 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>—</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.4753</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.4279</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.4281</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4495</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;status_note&quot;: &quot;skipped_nvidia_headless&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 5,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;998d3512c0380dd2fb44906110eb10d1&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 34.4753,
+    &quot;p95&quot;: 35.4279
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 34.4281,
+    &quot;p95&quot;: 37.3523
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4495,
+    &quot;p95&quot;: 0.4523
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0067,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.002,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0061,
+      &quot;gpu_p95&quot;: 0.0061
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0093
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0563,
+      &quot;cpu_p95&quot;: 1.022,
+      &quot;gpu_median&quot;: 0.4495,
+      &quot;gpu_p95&quot;: 0.4523
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0005,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0107,
+      &quot;cpu_p95&quot;: 0.0175,
+      &quot;gpu_median&quot;: 0.003,
+      &quot;gpu_p95&quot;: 0.0039
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8825,
+      &quot;cpu_p95&quot;: 1.3461,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0027,
+      &quot;cpu_p95&quot;: 0.003,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0834,
+      &quot;cpu_p95&quot;: 1.0671,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0153,
+      &quot;gpu_p95&quot;: 0.0153
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0236,
+      &quot;gpu_p95&quot;: 0.0236
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3802,
+      &quot;cpu_p95&quot;: 34.3526,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu5_NVIDIA_GeForce_RTX_3070_Ti&quot;,
+    &quot;nvidia_index&quot;: 5,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-998d3512-c038-0dd2-fb44-906110eb10d1&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=1.0 device=NVIDIA GeForce RTX 3070 Ti</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_mass_2k/actual.json</code></td><td class='present'>present (2171 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.828</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>50.3272</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.7299</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>1.0</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 6,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
+  &quot;device_uuid&quot;: &quot;b791d7c332754b9674d41cc606ee0cc4&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 1.0,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.828,
+    &quot;p95&quot;: 50.3272
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.7299,
+    &quot;p95&quot;: 50.2488
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 0.4,
+    &quot;p95&quot;: 0.4021
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0092
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0051,
+      &quot;gpu_p95&quot;: 0.0051
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0549,
+      &quot;cpu_p95&quot;: 0.056,
+      &quot;gpu_median&quot;: 0.4,
+      &quot;gpu_p95&quot;: 0.4021
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0011,
+      &quot;cpu_p95&quot;: 0.0013,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0105,
+      &quot;cpu_p95&quot;: 0.0109,
+      &quot;gpu_median&quot;: 0.003,
+      &quot;gpu_p95&quot;: 0.0034
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2433,
+      &quot;cpu_p95&quot;: 16.7893,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0033,
+      &quot;cpu_p95&quot;: 0.0038,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0829,
+      &quot;cpu_p95&quot;: 0.0855,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.3058,
+      &quot;cpu_p95&quot;: 33.5746,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
   &quot;matrix&quot;: {
     &quot;matrix_tag&quot;: &quot;gpu6_NVIDIA_GeForce_RTX_3070_Ti&quot;,
     &quot;nvidia_index&quot;: 6,
     &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
     &quot;nvidia_uuid&quot;: &quot;GPU-b791d7c3-3275-4b96-74d4-1cc606ee0cc4&quot;,
-    &quot;exit_code&quot;: 0,
-    &quot;skipped&quot;: true,
-    &quot;reason&quot;: &quot;NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless&quot;
-  },
-  &quot;confidence&quot;: 1.0,
-  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;exit_code&quot;: 0
+  }
+}</pre></details>
+</section>
+<section class='case warn' id='case-gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame'>
+<h3><span class='badge warn'>WARN</span> gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=133 conf=0.25 device=NVIDIA GeForce RTX 3070 Ti (soft conf low; PCIe×1/Xvfb advisory — GPU median healthy)</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/gpu6_NVIDIA_GeForce_RTX_3070_Ti/fake_steady_frame/actual.json</code></td><td class='present'>present (2560 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>34.5039</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>35.365</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>34.4613</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>0.4484</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.25</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_steady_frame&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
+  &quot;bootstrap_heights&quot;: 0,
+  &quot;lane_count&quot;: 16,
   &quot;device_index&quot;: 6,
+  &quot;device_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+  &quot;device_type&quot;: &quot;discrete&quot;,
   &quot;device_uuid&quot;: &quot;b791d7c332754b9674d41cc606ee0cc4&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.25,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 0.0,
+    &quot;cpu&quot;: 0.0,
+    &quot;gpu&quot;: 1.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 8.0,
+    &quot;cpu&quot;: 4.0,
+    &quot;gpu&quot;: 5.0,
+    &quot;soft_tol&quot;: 0.4
+  },
   &quot;frame_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
+    &quot;median&quot;: 34.5039,
+    &quot;p95&quot;: 35.365
   },
   &quot;cpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
+    &quot;median&quot;: 34.4613,
+    &quot;p95&quot;: 37.0539
   },
   &quot;gpu_ms&quot;: {
-    &quot;median&quot;: null,
-    &quot;p95&quot;: null
+    &quot;median&quot;: 0.4484,
+    &quot;p95&quot;: 0.4504
   },
-  &quot;total_blocks&quot;: null
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0082,
+      &quot;gpu_p95&quot;: 0.0082
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.002,
+      &quot;gpu_p95&quot;: 0.002
+    },
+    &quot;EdgeOverlay&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0072,
+      &quot;gpu_p95&quot;: 0.0072
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0077,
+      &quot;gpu_p95&quot;: 0.0328
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0557,
+      &quot;cpu_p95&quot;: 0.9847,
+      &quot;gpu_median&quot;: 0.4484,
+      &quot;gpu_p95&quot;: 0.4504
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0003,
+      &quot;cpu_p95&quot;: 0.0005,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0112,
+      &quot;cpu_p95&quot;: 0.0188,
+      &quot;gpu_median&quot;: 0.0031,
+      &quot;gpu_p95&quot;: 0.0036
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 0.8765,
+      &quot;cpu_p95&quot;: 1.3443,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0025,
+      &quot;cpu_p95&quot;: 0.0028,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0819,
+      &quot;cpu_p95&quot;: 1.024,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SelectionDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0149,
+      &quot;gpu_p95&quot;: 0.0149
+    },
+    &quot;SobelAsyncCMP&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0236,
+      &quot;gpu_p95&quot;: 0.0236
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 33.42,
+      &quot;cpu_p95&quot;: 34.1528,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;gpu6_NVIDIA_GeForce_RTX_3070_Ti&quot;,
+    &quot;nvidia_index&quot;: 6,
+    &quot;nvidia_name&quot;: &quot;NVIDIA GeForce RTX 3070 Ti&quot;,
+    &quot;nvidia_uuid&quot;: &quot;GPU-b791d7c3-3275-4b96-74d4-1cc606ee0cc4&quot;,
+    &quot;exit_code&quot;: 3
+  }
+}</pre></details>
+</section>
+<section class='case pass' id='case-lavapipe/fake_mass_2k'>
+<h3><span class='badge pass'>PASS</span> lavapipe/fake_mass_2k</h3>
+<p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
+<p class='msg'><code>blocks=2061 conf=0.75 device=llvmpipe (LLVM 20.1.2, 128 bits)</code></p>
+<table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/lavapipe/fake_mass_2k/actual.json</code></td><td class='present'>present (2111 bytes)</td></tr>
+</tbody></table>
+<table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>42.1961</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>49.8574</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>42.0085</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>31.571</td><td class='num'>—</td></tr>
+<tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.75</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>2061</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
+</tbody></table>
+<details><summary>Actual JSON</summary><pre>{
+  &quot;case&quot;: &quot;fake_mass_2k&quot;,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 2061,
+  &quot;bootstrap_heights&quot;: 128,
+  &quot;lane_count&quot;: 16,
+  &quot;device_index&quot;: 0,
+  &quot;device_name&quot;: &quot;llvmpipe (LLVM 20.1.2, 128 bits)&quot;,
+  &quot;device_type&quot;: &quot;cpu&quot;,
+  &quot;device_uuid&quot;: &quot;6d65736132352e322e382d3075627500&quot;,
+  &quot;headless&quot;: false,
+  &quot;confidence&quot;: 0.75,
+  &quot;scores&quot;: {
+    &quot;frame&quot;: 1.0,
+    &quot;cpu&quot;: 1.0,
+    &quot;gpu&quot;: 0.0
+  },
+  &quot;budgets_ms&quot;: {
+    &quot;frame&quot;: 50.0,
+    &quot;cpu&quot;: 48.0,
+    &quot;gpu&quot;: 4.0,
+    &quot;soft_tol&quot;: 0.4
+  },
+  &quot;frame_ms&quot;: {
+    &quot;median&quot;: 42.1961,
+    &quot;p95&quot;: 49.8574
+  },
+  &quot;cpu_ms&quot;: {
+    &quot;median&quot;: 42.0085,
+    &quot;p95&quot;: 49.6746
+  },
+  &quot;gpu_ms&quot;: {
+    &quot;median&quot;: 31.571,
+    &quot;p95&quot;: 31.8703
+  },
+  &quot;scopes&quot;: {
+    &quot;CubesTaskMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0482,
+      &quot;gpu_p95&quot;: 0.0627
+    },
+    &quot;DebugMesh&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 0.0763,
+      &quot;gpu_p95&quot;: 0.1253
+    },
+    &quot;ImGui&quot;: {
+      &quot;cpu_median&quot;: 0.0,
+      &quot;cpu_p95&quot;: 0.0,
+      &quot;gpu_median&quot;: 2.2725,
+      &quot;gpu_p95&quot;: 2.8251
+    },
+    &quot;MainColorDepth&quot;: {
+      &quot;cpu_median&quot;: 0.0169,
+      &quot;cpu_p95&quot;: 0.0177,
+      &quot;gpu_median&quot;: 31.571,
+      &quot;gpu_p95&quot;: 31.8703
+    },
+    &quot;MeshArenaUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0009,
+      &quot;cpu_p95&quot;: 0.0011,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0027,
+      &quot;cpu_p95&quot;: 0.0029,
+      &quot;gpu_median&quot;: 0.8159,
+      &quot;gpu_p95&quot;: 0.8773
+    },
+    &quot;Prepare&quot;: {
+      &quot;cpu_median&quot;: 9.2983,
+      &quot;cpu_p95&quot;: 16.9891,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;PublishUpload&quot;: {
+      &quot;cpu_median&quot;: 0.0035,
+      &quot;cpu_p95&quot;: 0.0038,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;RecordMain&quot;: {
+      &quot;cpu_median&quot;: 0.0252,
+      &quot;cpu_p95&quot;: 0.032,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    },
+    &quot;SubmitPresent&quot;: {
+      &quot;cpu_median&quot;: 32.6261,
+      &quot;cpu_p95&quot;: 32.9262,
+      &quot;gpu_median&quot;: 0.0,
+      &quot;gpu_p95&quot;: 0.0
+    }
+  },
+  &quot;matrix&quot;: {
+    &quot;matrix_tag&quot;: &quot;lavapipe&quot;,
+    &quot;nvidia_index&quot;: -1,
+    &quot;nvidia_name&quot;: &quot;llvmpipe&quot;,
+    &quot;nvidia_uuid&quot;: &quot;lavapipe&quot;,
+    &quot;exit_code&quot;: 0
+  }
 }</pre></details>
 </section>
 <section class='case fail' id='case-lavapipe/fake_steady_frame'>
 <h3><span class='badge fail'>FAIL</span> lavapipe/fake_steady_frame</h3>
 <p class='meta'>suite=<code>bench_matrix</code> kind=<code>perf_baseline</code></p>
-<p class='msg'><code>blocks=131 conf=0.0 device=llvmpipe (LLVM 20.1.2, 128 bits) (confidence soft-fail)</code></p>
+<p class='msg'><code>blocks=133 conf=0.0 device=llvmpipe (LLVM 20.1.2, 128 bits) (confidence soft-fail)</code></p>
 <table class='paths'><thead><tr><th>Role</th><th>Path</th><th>Status</th></tr></thead><tbody>
-<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/lavapipe/fake_steady_frame/actual.json</code></td><td class='present'>present (2369 bytes)</td></tr>
+<tr><td>actual</td><td><code>vnv/bench/tests/out/matrix/lavapipe/fake_steady_frame/actual.json</code></td><td class='present'>present (2500 bytes)</td></tr>
 </tbody></table>
 <table class='metrics'><thead><tr><th>Metric</th><th>Expected (baseline)</th><th>Actual</th><th>Δ</th></tr></thead><tbody>
-<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>19.7154</td><td class='num'>—</td></tr>
-<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>19.9337</td><td class='num'>—</td></tr>
-<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>19.6034</td><td class='num'>—</td></tr>
-<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>18.5134</td><td class='num'>—</td></tr>
+<tr class=''><td>frame median (ms)</td><td class='num'>—</td><td class='num'>20.6457</td><td class='num'>—</td></tr>
+<tr class=''><td>frame p95 (ms)</td><td class='num'>—</td><td class='num'>20.9537</td><td class='num'>—</td></tr>
+<tr class=''><td>cpu median (ms)</td><td class='num'>—</td><td class='num'>20.5257</td><td class='num'>—</td></tr>
+<tr class=''><td>gpu median (ms)</td><td class='num'>—</td><td class='num'>18.5855</td><td class='num'>—</td></tr>
 <tr class=''><td>confidence</td><td class='num'>—</td><td class='num'>0.0</td><td class='num'>—</td></tr>
-<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>131</td><td class='num'>—</td></tr>
-<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>15</td><td class='num'>—</td></tr>
+<tr class=''><td>total blocks</td><td class='num'>—</td><td class='num'>133</td><td class='num'>—</td></tr>
+<tr class=''><td>samples</td><td class='num'>—</td><td class='num'>40</td><td class='num'>—</td></tr>
 </tbody></table>
 <details><summary>Actual JSON</summary><pre>{
   &quot;case&quot;: &quot;fake_steady_frame&quot;,
-  &quot;samples&quot;: 15,
-  &quot;total_blocks&quot;: 131,
+  &quot;samples&quot;: 40,
+  &quot;total_blocks&quot;: 133,
   &quot;bootstrap_heights&quot;: 0,
   &quot;lane_count&quot;: 16,
   &quot;device_index&quot;: 0,
   &quot;device_name&quot;: &quot;llvmpipe (LLVM 20.1.2, 128 bits)&quot;,
   &quot;device_type&quot;: &quot;cpu&quot;,
   &quot;device_uuid&quot;: &quot;6d65736132352e322e382d3075627500&quot;,
-  &quot;headless&quot;: true,
+  &quot;headless&quot;: false,
   &quot;confidence&quot;: 0.0,
   &quot;scores&quot;: {
     &quot;frame&quot;: 0.0,
@@ -516,47 +2151,47 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
     &quot;soft_tol&quot;: 0.4
   },
   &quot;frame_ms&quot;: {
-    &quot;median&quot;: 19.7154,
-    &quot;p95&quot;: 19.9337
+    &quot;median&quot;: 20.6457,
+    &quot;p95&quot;: 20.9537
   },
   &quot;cpu_ms&quot;: {
-    &quot;median&quot;: 19.6034,
-    &quot;p95&quot;: 19.8183
+    &quot;median&quot;: 20.5257,
+    &quot;p95&quot;: 20.8398
   },
   &quot;gpu_ms&quot;: {
-    &quot;median&quot;: 18.5134,
-    &quot;p95&quot;: 18.5713
+    &quot;median&quot;: 18.5855,
+    &quot;p95&quot;: 18.855
   },
   &quot;scopes&quot;: {
     &quot;CubesTaskMesh&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 0.0446,
-      &quot;gpu_p95&quot;: 0.05
+      &quot;gpu_median&quot;: 0.0435,
+      &quot;gpu_p95&quot;: 0.0494
     },
     &quot;DebugMesh&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 0.04,
-      &quot;gpu_p95&quot;: 0.0451
+      &quot;gpu_median&quot;: 0.0548,
+      &quot;gpu_p95&quot;: 0.0593
     },
     &quot;EdgeOverlay&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 18.9064,
-      &quot;gpu_p95&quot;: 18.9064
+      &quot;gpu_median&quot;: 19.3957,
+      &quot;gpu_p95&quot;: 19.3957
     },
     &quot;ImGui&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 2.5565,
-      &quot;gpu_p95&quot;: 2.7118
+      &quot;gpu_median&quot;: 2.6715,
+      &quot;gpu_p95&quot;: 2.849
     },
     &quot;MainColorDepth&quot;: {
-      &quot;cpu_median&quot;: 0.0147,
-      &quot;cpu_p95&quot;: 0.0152,
-      &quot;gpu_median&quot;: 18.5134,
-      &quot;gpu_p95&quot;: 18.5713
+      &quot;cpu_median&quot;: 0.0158,
+      &quot;cpu_p95&quot;: 0.0735,
+      &quot;gpu_median&quot;: 18.5855,
+      &quot;gpu_p95&quot;: 18.855
     },
     &quot;MeshArenaUpload&quot;: {
       &quot;cpu_median&quot;: 0.0003,
@@ -564,39 +2199,45 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8rem; }
       &quot;gpu_median&quot;: 0.0,
       &quot;gpu_p95&quot;: 0.0
     },
+    &quot;Picker&quot;: {
+      &quot;cpu_median&quot;: 0.0029,
+      &quot;cpu_p95&quot;: 0.0031,
+      &quot;gpu_median&quot;: 0.805,
+      &quot;gpu_p95&quot;: 0.8663
+    },
     &quot;Prepare&quot;: {
-      &quot;cpu_median&quot;: 0.872,
-      &quot;cpu_p95&quot;: 1.0256,
+      &quot;cpu_median&quot;: 0.8972,
+      &quot;cpu_p95&quot;: 0.9485,
       &quot;gpu_median&quot;: 0.0,
       &quot;gpu_p95&quot;: 0.0
     },
     &quot;PublishUpload&quot;: {
       &quot;cpu_median&quot;: 0.0025,
-      &quot;cpu_p95&quot;: 0.0029,
+      &quot;cpu_p95&quot;: 0.0028,
       &quot;gpu_median&quot;: 0.0,
       &quot;gpu_p95&quot;: 0.0
     },
     &quot;RecordMain&quot;: {
-      &quot;cpu_median&quot;: 0.0187,
-      &quot;cpu_p95&quot;: 0.0191,
+      &quot;cpu_median&quot;: 0.0235,
+      &quot;cpu_p95&quot;: 0.0822,
       &quot;gpu_median&quot;: 0.0,
       &quot;gpu_p95&quot;: 0.0
     },
     &quot;SelectionDepth&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 10.1378,
-      &quot;gpu_p95&quot;: 10.1378
+      &quot;gpu_median&quot;: 10.2846,
+      &quot;gpu_p95&quot;: 10.2846
     },
     &quot;SobelAsyncCMP&quot;: {
       &quot;cpu_median&quot;: 0.0,
       &quot;cpu_p95&quot;: 0.0,
-      &quot;gpu_median&quot;: 32.8764,
-      &quot;gpu_p95&quot;: 32.8764
+      &quot;gpu_median&quot;: 34.2575,
+      &quot;gpu_p95&quot;: 34.2575
     },
     &quot;SubmitPresent&quot;: {
-      &quot;cpu_median&quot;: 18.685,
-      &quot;cpu_p95&quot;: 18.7737,
+      &quot;cpu_median&quot;: 19.5783,
+      &quot;cpu_p95&quot;: 19.8606,
       &quot;gpu_median&quot;: 0.0,
       &quot;gpu_p95&quot;: 0.0
     }

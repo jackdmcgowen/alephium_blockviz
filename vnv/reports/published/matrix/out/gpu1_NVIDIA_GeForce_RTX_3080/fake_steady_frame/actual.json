@@ -1,30 +1,123 @@
 {
   "case": "fake_steady_frame",
-  "status_note": "skipped_nvidia_headless",
+  "samples": 40,
+  "total_blocks": 133,
+  "bootstrap_heights": 0,
+  "lane_count": 16,
+  "device_index": 1,
+  "device_name": "NVIDIA GeForce RTX 3080",
+  "device_type": "discrete",
+  "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
+  "headless": false,
+  "confidence": 0.25,
+  "scores": {
+    "frame": 0.0,
+    "cpu": 0.0,
+    "gpu": 1.0
+  },
+  "budgets_ms": {
+    "frame": 8.0,
+    "cpu": 4.0,
+    "gpu": 5.0,
+    "soft_tol": 0.4
+  },
+  "frame_ms": {
+    "median": 34.5478,
+    "p95": 35.4851
+  },
+  "cpu_ms": {
+    "median": 34.5067,
+    "p95": 37.3507
+  },
+  "gpu_ms": {
+    "median": 0.4508,
+    "p95": 0.4526
+  },
+  "scopes": {
+    "CubesTaskMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0072,
+      "gpu_p95": 0.0072
+    },
+    "DebugMesh": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.001,
+      "gpu_p95": 0.002
+    },
+    "EdgeOverlay": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0072,
+      "gpu_p95": 0.0072
+    },
+    "ImGui": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0205,
+      "gpu_p95": 0.0329
+    },
+    "MainColorDepth": {
+      "cpu_median": 0.0541,
+      "cpu_p95": 1.0162,
+      "gpu_median": 0.4508,
+      "gpu_p95": 0.4526
+    },
+    "MeshArenaUpload": {
+      "cpu_median": 0.0003,
+      "cpu_p95": 0.0005,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "Picker": {
+      "cpu_median": 0.0113,
+      "cpu_p95": 0.0191,
+      "gpu_median": 0.003,
+      "gpu_p95": 0.0034
+    },
+    "Prepare": {
+      "cpu_median": 0.8826,
+      "cpu_p95": 1.3422,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "PublishUpload": {
+      "cpu_median": 0.0024,
+      "cpu_p95": 0.0027,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "RecordMain": {
+      "cpu_median": 0.0805,
+      "cpu_p95": 1.0583,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    },
+    "SelectionDepth": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0121,
+      "gpu_p95": 0.0121
+    },
+    "SobelAsyncCMP": {
+      "cpu_median": 0.0,
+      "cpu_p95": 0.0,
+      "gpu_median": 0.0184,
+      "gpu_p95": 0.0184
+    },
+    "SubmitPresent": {
+      "cpu_median": 33.4521,
+      "cpu_p95": 34.3611,
+      "gpu_median": 0.0,
+      "gpu_p95": 0.0
+    }
+  },
   "matrix": {
     "matrix_tag": "gpu1_NVIDIA_GeForce_RTX_3080",
     "nvidia_index": 1,
     "nvidia_name": "NVIDIA GeForce RTX 3080",
     "nvidia_uuid": "GPU-a014772c-d176-9e44-ca93-58d80b375cf9",
-    "exit_code": 0,
-    "skipped": true,
-    "reason": "NVIDIA has no VK_EXT_headless_surface; need DISPLAY/xvfb --no-headless"
-  },
-  "confidence": 1.0,
-  "device_name": "NVIDIA GeForce RTX 3080",
-  "device_index": 1,
-  "device_uuid": "a014772cd1769e44ca9358d80b375cf9",
-  "frame_ms": {
-    "median": null,
-    "p95": null
-  },
-  "cpu_ms": {
-    "median": null,
-    "p95": null
-  },
-  "gpu_ms": {
-    "median": null,
-    "p95": null
-  },
-  "total_blocks": null
+    "exit_code": 3
+  }
 }

@@ -93,22 +93,23 @@ Commit baselines from a representative GPU machine with `--update-baselines`.
 
 ### Multi-GPU matrix (this workstation has many cards)
 
+This farm’s discrete GPUs sit on **PCIe ×1 risers** (bandwidth-limited host↔device). Soft budgets
+(8 ms-class frame) are for desktop ×16; on this box use the matrix for **functional coverage +
+relative** timings (GPU median, Prepare, PublishUpload, `total_blocks`), not as a ship gate on soft confidence.
+
 ```bash
 # List Vulkan devices (and nvidia-smi indices)
 ./build/bin/bench_frame_profiler --list-devices --headless
 ./scripts/run_bench_matrix.sh --list-only
 
-# Pick one GPU (needs DISPLAY/xvfb on NVIDIA — not headless)
-CUDA_VISIBLE_DEVICES=2 NVIDIA_VISIBLE_DEVICES=2 \
-  xvfb-run -a ./build/bin/bench_frame_profiler --case fake_steady_frame
-./build/bin/bench_frame_profiler --device 2 --case fake_steady_frame   # with DISPLAY
-./build/bin/bench_frame_profiler --device 3090 --case fake_mass_2k
+# Pick one GPU (NVIDIA needs DISPLAY/xvfb — not headless)
+xvfb-run -a ./build/bin/bench_frame_profiler --device 3090 --case fake_steady_frame
+xvfb-run -a ./build/bin/bench_frame_profiler --device 2 --case fake_mass_2k
 
-# Full matrix: one process per GPU (+ optional lavapipe row)
-./scripts/run_bench_matrix.sh --include-lavapipe --report --samples 40
-# With real NVIDIA + virtual display:
-xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless \
-  --cases fake_steady_frame,fake_mass_2k --parallel 4 --report
+# Full matrix: one process per GPU via --device UUID (+ optional lavapipe)
+# Prefer --parallel 1 on a single Xvfb; CUDA_VISIBLE_DEVICES alone does not isolate Vulkan.
+xvfb-run -a ./scripts/run_bench_matrix.sh --no-headless --include-lavapipe \
+  --cases fake_steady_frame,fake_mass_2k --parallel 1 --report --samples 40
 
 # Outputs: vnv/bench/tests/out/matrix/<tag>/<case>/actual.json
 #          vnv/reports/matrix_run.json + matrix_run.html + matrix_table.html

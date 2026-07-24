@@ -7,16 +7,20 @@ th, td { border:1px solid #2a3548; padding:0.5rem; text-align:left; vertical-ali
 th { background:#121a26; }
 .pass { background: rgba(61,214,140,0.12); }
 .fail { background: rgba(240,113,120,0.15); }
+.warn { background: rgba(230,180,80,0.12); }
 .miss { color:#8b9bb4; }
-.dev { color:#8b9bb4; font-size:0.8rem; max-width:12rem; }
-h1 { font-size:1.3rem; }
+.dev { color:#8b9bb4; font-size:0.8rem; max-width:14rem; }
+.note { color:#8b9bb4; max-width:56rem; line-height:1.45; }
 </style></head><body>
 <h1>Bench matrix — FAIL</h1>
-<p>2026-07-24T03:28:07Z · jobs=8</p>
+<p>2026-07-24T03:40:47Z · jobs=16 · warn=7 · fail=1</p>
+<p class="note">Hardware: multi-GPU farm on <strong>PCIe ×1 risers</strong> (host↔device bandwidth limited).
+Soft budgets are desktop ×16-oriented — frame/conf are <em>advisory</em>. Prefer GPU median + total_blocks and relative ranking.
+Isolation: Vulkan <code>--device</code> UUID under <code>xvfb-run</code>.</p>
 <table>
-<thead><tr><th>Device</th><th>Tag</th><th>fake_steady_frame</th></tr></thead>
+<thead><tr><th>Device</th><th>Tag</th><th>fake_mass_2k</th><th>fake_steady_frame</th></tr></thead>
 <tbody>
-<tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu0_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3080</td><td><code>gpu1_NVIDIA_GeForce_RTX_3080</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3090</td><td><code>gpu2_NVIDIA_GeForce_RTX_3090</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu3_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu4_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu5_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu6_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='fail'><b>warn</b><br/>frame — ms<br/>blocks —</td></tr><tr><td class='dev'>llvmpipe (LLVM 20.1.2, 128 bits)</td><td><code>lavapipe</code></td><td class='fail'><b>fail</b><br/>frame 19.72 ms<br/>blocks 131</td></tr>
+<tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu0_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='pass'><b>pass</b><br/>frame 42.97 ms<br/>gpu 0.408 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.59 ms<br/>gpu 0.454 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3080</td><td><code>gpu1_NVIDIA_GeForce_RTX_3080</code></td><td class='pass'><b>pass</b><br/>frame 42.89 ms<br/>gpu 0.403 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.55 ms<br/>gpu 0.451 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3090</td><td><code>gpu2_NVIDIA_GeForce_RTX_3090</code></td><td class='pass'><b>pass</b><br/>frame 42.80 ms<br/>gpu 0.401 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.48 ms<br/>gpu 0.450 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu3_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='pass'><b>pass</b><br/>frame 42.96 ms<br/>gpu 0.401 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.47 ms<br/>gpu 0.448 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu4_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='pass'><b>pass</b><br/>frame 42.93 ms<br/>gpu 0.404 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.51 ms<br/>gpu 0.450 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu5_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='pass'><b>pass</b><br/>frame 42.90 ms<br/>gpu 0.405 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.48 ms<br/>gpu 0.450 ms<br/>blocks 133</td></tr><tr><td class='dev'>NVIDIA GeForce RTX 3070 Ti</td><td><code>gpu6_NVIDIA_GeForce_RTX_3070_Ti</code></td><td class='pass'><b>pass</b><br/>frame 42.83 ms<br/>gpu 0.400 ms<br/>blocks 2061</td><td class='warn'><b>warn</b><br/>frame 34.50 ms<br/>gpu 0.448 ms<br/>blocks 133</td></tr><tr><td class='dev'>llvmpipe (LLVM 20.1.2, 128 bits)</td><td><code>lavapipe</code></td><td class='pass'><b>pass</b><br/>frame 42.20 ms<br/>gpu 31.571 ms<br/>blocks 2061</td><td class='fail'><b>fail</b><br/>frame 20.65 ms<br/>gpu 18.585 ms<br/>blocks 133</td></tr>
 </tbody></table>
 <p><a href="matrix_run.html" style="color:#7eb8ff">Full report</a></p>
 </body></html>
