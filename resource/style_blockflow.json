@@ -23,5 +23,12 @@
   "bfs_alpha_scale": 0.55,
   "block_pop_sec": 0.28,
   "block_pop_overshoot": 1.08,
-  "block_pop_max_concurrent": 48
+  "block_pop_max_concurrent": 48,
+  "wave_duration_sec": 0.65,
+  "wave_pulse_sec": 0.28,
+  "wave_amplitude": 0.10,
+  "wave_lift": 0.40,
+  "wave_cooldown_sec": 10.0,
+  "wave_min_admits": 12,
+  "wave_max_admits": 96
 }

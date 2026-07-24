@@ -168,6 +168,18 @@ private:
     // Finished entries kept while live so cold re-draws do not re-pop.
     std::unordered_map<std::string, float>        block_pop_birth_sec_;
 
+    // Rare network wave: Z-staggered scale/radial bump on drawn ring only.
+    struct RingWave
+    {
+        float start_sec = -1.f; // <0 idle
+        float z_lo      = 0.f;
+        float z_hi      = 0.f;
+    };
+    RingWave ring_wave_;
+    float    last_wave_end_sec_ = -1.e9f;
+    bool     wave_request_      = false; // history fill fulfilled this frame
+    std::unordered_set<std::string> prev_drawn_hashes_;
+
     std::unordered_set<std::string> prev_live_nodes_;
     std::unordered_map<std::string, glm::vec3> prev_positions_;
     std::vector<DyingBlock> dying_blocks_;

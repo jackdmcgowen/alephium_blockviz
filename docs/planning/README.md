@@ -87,7 +87,7 @@ Scripts (on motion branch):
 |----|-------------|
 | **PR1** | HTML parity + hub + check script ✅ |
 | **PR2** | `motion_easing.hpp` + block pop-in overshoot ✅ |
-| **PR3** | Wave / shuffle bump + style tokens |
+| **PR3** | Wave / shuffle bump + style tokens ✅ |
 | **PR4** | Arrow ease-out + death scale; legend docs |
 
 Then squash/merge to `main` when ready; tag per AGENTS.md.

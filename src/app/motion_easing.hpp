@@ -64,4 +64,32 @@ inline float ease_out_back_overshoot(float t, float overshoot = 1.08f) noexcept
     return ease_out_back(t, s);
 }
 
+// 0 → 1 → 0 over t∈[0,1]; peak at 0.5. For wave / tip pulses (ease-in-out).
+inline float bump_in_out(float t) noexcept
+{
+    t = clamp01(t);
+    if (t <= 0.5f)
+        return ease_in_out_cubic(t * 2.f);
+    return ease_in_out_cubic(2.f - t * 2.f);
+}
+
+// Z-staggered wave envelope at block_z.
+// elapsed = now - wave_start; local_u 0 at z_hi (older) → 1 at z_lo (newer).
+// Returns 0..1 amplitude; 0 outside the traveling pulse.
+inline float wave_envelope(float elapsed, float block_z, float z_lo, float z_hi,
+                           float duration_sec, float pulse_sec) noexcept
+{
+    if (elapsed < 0.f || duration_sec < 1e-4f || pulse_sec < 1e-4f)
+        return 0.f;
+    const float zspan = z_hi - z_lo;
+    const float local =
+        zspan > 1e-3f ? clamp01((z_hi - block_z) / zspan) : 0.f;
+    const float travel = std::max(0.f, duration_sec - pulse_sec);
+    const float delay  = local * travel;
+    const float age    = elapsed - delay;
+    if (age < 0.f || age > pulse_sec)
+        return 0.f;
+    return bump_in_out(age / pulse_sec);
+}
+
 } // namespace motion

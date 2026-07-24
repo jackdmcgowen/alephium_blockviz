@@ -47,8 +47,8 @@
 <tr><td>Timeline minimap (overlay)</td><td><strong>High-level multi-segment overview</strong> (~24 newest <code>#G_seg</code>, <strong>640s</strong> G); <strong>Z-proportional</strong> bins (match cubes/planes); optional <strong>64s</strong> ticks on hover/camera cell; <strong>click</strong> bin → teleport; Live / key <strong>3</strong> → tip. <strong>Must update whenever timeline constants change</strong> (see <code>Agents.md</code>)</td></tr>
 <tr><td>Camera view presets</td><td><strong>End</strong> (1) / <strong>Side</strong> (2) / <strong>V</strong> toggle with pose memory. <strong>3</strong> = live tip. <strong>L/R</strong> = Z. Short <strong>RMB</strong> = deselect only (no reattach); RMB drag = pan</td></tr>
 <tr><td>Selection + deps</td><td><strong>First-order (1-hop) only</strong> from selected root. Gold arrows <strong>instant on click</strong> (no grow). <strong>R</strong> / Replay deps re-grows hop-1 only. 1-hop ghosts for missing direct deps.</td></tr>
-<tr><td>Style tokens</td><td><code>style_blockflow.hpp</code> + JSON — <code>walk_trace</code> ≠ gold; hop/sobel fade; <code>block_pop_*</code> admit scale</td></tr>
-<tr><td>Motion easing</td><td><code>motion_easing.hpp</code> — ease-out-back pop-in on first visible-ring admit (N-cap)</td></tr>
+<tr><td>Style tokens</td><td><code>style_blockflow.hpp</code> + JSON — <code>walk_trace</code> ≠ gold; hop/sobel fade; <code>block_pop_<em></code> / <code>wave_</em></code></td></tr>
+<tr><td>Motion easing</td><td><code>motion_easing.hpp</code> — admit pop-in (ease-out-back, N-cap); rare Z-wave (ease-in-out bump)</td></tr>
 <tr><td><code>src/app/ui_snapshot.hpp</code></td><td>Render-thread-safe UI bag (no live scene reads in overlay)</td></tr>
 <tr><td><code>src/app/config.c</code> / <code>config.h</code></td><td>Load URL array from <code>config.json</code></td></tr>
 <tr><td><code>src/app/app_identity.hpp</code></td><td>App name + semver → <code>EngineCreateInfo.application</code></td></tr>

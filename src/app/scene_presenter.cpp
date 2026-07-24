@@ -1390,6 +1390,30 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         return s > 0.f ? s : 0.f;
     };
 
+    // Active ring wave (PR3): Z-staggered ease-in-out bump; rare, drawn ring only.
+    const float wave_dur =
+        sty().wave_duration_sec > 1e-3f ? sty().wave_duration_sec : 0.65f;
+    const float wave_pulse =
+        sty().wave_pulse_sec > 1e-3f ? sty().wave_pulse_sec : 0.28f;
+    const float wave_amp =
+        sty().wave_amplitude > 0.f ? sty().wave_amplitude : 0.f;
+    const float wave_lift =
+        sty().wave_lift > 0.f ? sty().wave_lift : 0.f;
+    if (ring_wave_.start_sec >= 0.f && (now - ring_wave_.start_sec) > wave_dur)
+    {
+        last_wave_end_sec_ = now;
+        ring_wave_.start_sec = -1.f;
+    }
+    const bool wave_live = ring_wave_.start_sec >= 0.f;
+    const float wave_elapsed = wave_live ? (now - ring_wave_.start_sec) : 0.f;
+
+    auto wave_env_for_z_ = [&](float z) -> float {
+        if (!wave_live || (wave_amp <= 0.f && wave_lift <= 0.f))
+            return 0.f;
+        return motion::wave_envelope(wave_elapsed, z, ring_wave_.z_lo, ring_wave_.z_hi,
+                                     wave_dur, wave_pulse);
+    };
+
     auto push_instance = [&](const PlacedBlock& placed, bool force) {
         if (out.instances.size() >= kMaxInstances)
             return false;
@@ -1430,8 +1454,25 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         alpha *= seg_a;
         if (alpha < 0.02f)
             return false;
-        const float inst_scale = pop_scale_for_(placed.hash);
-        out.instances.push_back(GpuInstance{ placed.pos, inst_scale, color, alpha });
+
+        const float env = wave_env_for_z_(placed.pos.z);
+        glm::vec3 pos = placed.pos;
+        if (env > 1e-4f && wave_lift > 0.f)
+        {
+            // Radial outward "shuffle" bump in the polar plane (XY).
+            const float lat2 = pos.x * pos.x + pos.y * pos.y;
+            if (lat2 > 1e-6f)
+            {
+                const float inv_r = 1.f / std::sqrt(lat2);
+                const float lift  = wave_lift * env;
+                pos.x += pos.x * inv_r * lift;
+                pos.y += pos.y * inv_r * lift;
+            }
+        }
+        float inst_scale = pop_scale_for_(placed.hash);
+        if (env > 1e-4f && wave_amp > 0.f)
+            inst_scale *= (1.f + wave_amp * env);
+        out.instances.push_back(GpuInstance{ pos, inst_scale, color, alpha });
         out.pick_map.push_back(placed.hash);
         return true;
     };
@@ -1521,6 +1562,37 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
         try_force_hash(h, /*always=*/false);
     for (const std::string& h : incomplete_pool)
         try_force_hash(h, /*always=*/false);
+
+    // PR3: start a rare ring wave after this frame's drawn set is known.
+    // Triggers: history-fill fulfill request, or bounded batch of new ring admits.
+    // Cooldown + max_admits skip cold start / continuous thrash.
+    {
+        int new_admits = 0;
+        for (const std::string& h : drawn)
+        {
+            if (prev_drawn_hashes_.count(h) == 0)
+                ++new_admits;
+        }
+        const float cooldown =
+            sty().wave_cooldown_sec > 0.f ? sty().wave_cooldown_sec : 10.f;
+        const int min_admits =
+            std::max(1, static_cast<int>(sty().wave_min_admits + 0.5f));
+        const int max_admits =
+            std::max(min_admits, static_cast<int>(sty().wave_max_admits + 0.5f));
+        const bool batch_ok =
+            new_admits >= min_admits && new_admits <= max_admits;
+        const bool fill_ok = wave_request_;
+        wave_request_ = false;
+        const bool cooled = (now - last_wave_end_sec_) >= cooldown;
+        if (!wave_live && cooled && have_vis_z && (fill_ok || batch_ok) &&
+            !drawn.empty())
+        {
+            ring_wave_.start_sec = now;
+            ring_wave_.z_lo      = vis_z_lo;
+            ring_wave_.z_hi      = vis_z_hi;
+        }
+        prev_drawn_hashes_ = drawn;
+    }
 
     // Dynamic near/far from visible segment Z span (+ lateral pad).
     {
@@ -2026,13 +2098,19 @@ void ScenePresenter::prepare(const FrameSourceInput& in, FrameSourceOutput& out,
                     // First sight at full α. If already fulfilled, start fade immediately.
                     a.fade_start_sec = (s.fulfilled != 0) ? now : -1.f;
                     fill_slab_anims_[s.from_ms] = a;
+                    // History land → rare ring wave (cooldown-gated in instance path).
+                    if (s.fulfilled != 0)
+                        wave_request_ = true;
                 }
                 else
                 {
                     it->second.to_ms = s.to_ms;
                     // Only start fade when first told fulfilled; never un-fade while alive.
                     if (s.fulfilled != 0 && it->second.fade_start_sec < 0.f)
+                    {
                         it->second.fade_start_sec = now;
+                        wave_request_ = true;
+                    }
                 }
             }
             // Left HUD entirely: begin fade if still solid.
