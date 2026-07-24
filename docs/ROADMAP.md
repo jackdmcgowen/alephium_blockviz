@@ -3,8 +3,8 @@
 Single ordered backlog for **alephium_blockviz**.  
 **Code map:** [layers/](layers/README.md) · **Platform:** [platform.md](platform.md) · [linux.md](linux.md) · **Product notes:** [planning/](planning/README.md)
 
-**Last updated:** 2026-07-23  
-**Versions on `main`:** app / engine **1.4.x** (see identity headers / tags). Integration tip may be ahead (motion + docs on `integration/planning/01`).
+**Last updated:** 2026-07-24  
+**Versions on `main`:** app / engine **1.5.0** (see identity headers / tags).
 
 | Status | Meaning |
 |--------|---------|
